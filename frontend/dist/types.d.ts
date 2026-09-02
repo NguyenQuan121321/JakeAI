@@ -35,6 +35,8 @@ export interface JakeProps {
     persistPosition?: boolean;
     quickChips?: string[];
     enableSound?: boolean;
+    dogHouseImage?: string;
+    showDogHouse?: boolean;
     className?: string;
     style?: React.CSSProperties;
 }

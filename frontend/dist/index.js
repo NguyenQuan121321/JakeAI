@@ -519,39 +519,74 @@ function injectStyles(_theme = 'auto') {
       fill: currentColor;
     }
 
-    /* Floating Reopen Badge */
-    #jake-ai-badge, .jake-reopen-badge {
+    /* Dog House (Jake's Home) */
+    #jake-ai-doghouse, .jake-doghouse {
       position: fixed;
-      z-index: 2147483639;
+      z-index: 2147483638;
       bottom: 20px;
       right: 20px;
-      background: var(--jake-primary);
-      color: #ffffff;
-      border-radius: 28px;
-      padding: 8px 14px;
-      box-shadow: 0 8px 24px rgba(255, 159, 67, 0.4);
+      width: 48px;
+      height: 48px;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 0;
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 12px;
+      justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.2s ease;
+      touch-action: none;
+    }
+
+    #jake-ai-doghouse:hover, .jake-doghouse:hover {
+      transform: scale(1.15) translateY(-3px);
+      filter: drop-shadow(0 6px 14px rgba(255, 159, 67, 0.5));
+    }
+
+    #jake-ai-doghouse:active, .jake-doghouse:active {
+      transform: scale(0.95);
+    }
+
+    .jake-doghouse-svg {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    .jake-doghouse-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    .jake-doghouse-tooltip {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      right: 0;
+      background: var(--jake-bg, #1e222d);
+      color: var(--jake-text, #f5f6fa);
+      font-size: 11px;
       font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      opacity: 0;
+      padding: 3px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
       pointer-events: none;
-      transform: translateY(10px) scale(0.9);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--jake-card-border, rgba(255, 255, 255, 0.1));
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
     }
 
-    #jake-ai-badge.jake-badge-visible, .jake-reopen-badge.jake-badge-visible {
+    #jake-ai-doghouse:hover .jake-doghouse-tooltip,
+    .jake-doghouse:hover .jake-doghouse-tooltip {
       opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0) scale(1);
-    }
-
-    #jake-ai-badge:hover, .jake-reopen-badge:hover {
-      background: var(--jake-primary-hover);
-      transform: translateY(-2px) scale(1.03);
+      transform: translateY(0);
     }
 
     @media (max-width: 480px) {
@@ -814,6 +849,8 @@ class MovementEngine {
             persistPosition: props.persistPosition ?? true,
             quickChips: props.quickChips || [],
             enableSound: props.enableSound ?? true,
+            dogHouseImage: props.dogHouseImage || '',
+            showDogHouse: props.showDogHouse ?? true,
             className: props.className || '',
             style: props.style || {}
         };
@@ -1339,40 +1376,31 @@ const ChatModal = ({ isOpen, onClose, aiService, corgiPos, greeting = "Hi! I'm J
                         }, children: [jsx("input", { ref: inputRef, type: "text", id: "jake-ai-input", className: "jake-chat-input", placeholder: `Ask ${name} about projects or test APIs...`, value: inputVal, onChange: (e) => setInputVal(e.target.value), disabled: isWaiting }), jsx("button", { type: "submit", id: "jake-ai-send", className: "jake-chat-send", disabled: isWaiting || !inputVal.trim(), title: "Send message", children: jsx("svg", { viewBox: "0 0 24 24", children: jsx("path", { d: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" }) }) })] })] }))] }));
 };
 
+const DogHouseIcon = ({ className }) => (jsxs("svg", { viewBox: "0 0 48 48", className: className, fill: "none", xmlns: "http://www.w3.org/2000/svg", children: [jsx("rect", { x: "4", y: "42", width: "40", height: "4", rx: "2", fill: "#2ed573" }), jsx("rect", { x: "8", y: "18", width: "32", height: "24", rx: "2", fill: "#d35400" }), jsx("rect", { x: "10", y: "20", width: "28", height: "22", fill: "#e67e22" }), jsx("line", { x1: "10", y1: "27", x2: "38", y2: "27", stroke: "#d35400", strokeWidth: "1.5" }), jsx("line", { x1: "10", y1: "34", x2: "38", y2: "34", stroke: "#d35400", strokeWidth: "1.5" }), jsx("polygon", { points: "24,2 2,19 7,20 24,6 41,20 46,19", fill: "#c0392b" }), jsx("polygon", { points: "24,5 5,20 9,20 24,8 39,20 43,20", fill: "#e74c3c" }), jsx("path", { d: "M18 42 V28 A6 6 0 0 1 30 28 V42 Z", fill: "#2c3e50" }), jsx("path", { d: "M19 42 V29 A5 5 0 0 1 29 29 V42 Z", fill: "#1a252f" }), jsx("rect", { x: "20", y: "22", width: "8", height: "3", rx: "1.5", fill: "#f5f6fa" }), jsx("circle", { cx: "20", cy: "23.5", r: "1.5", fill: "#f5f6fa" }), jsx("circle", { cx: "28", cy: "23.5", r: "1.5", fill: "#f5f6fa" })] }));
 const JakeAI = (props) => {
-    const { backendUrl = '', theme = 'auto', name = 'Jake', className = '', style = {} } = props;
+    const { backendUrl = '', theme = 'auto', name = 'Jake', dogHouseImage, showDogHouse = true, className = '', style = {} } = props;
     const corgiRef = useRef(null);
     const movementEngineRef = useRef(null);
     const [isChatOpen, setIsChatOpen] = useState(false);
-    const [badgeVisible, setBadgeVisible] = useState(false);
     const [corgiCoord, setCorgiCoord] = useState({ x: 100, y: 100 });
     const aiService = useMemo(() => new AIService(backendUrl), [backendUrl]);
     useEffect(() => {
         aiService.setBackendUrl(backendUrl);
     }, [backendUrl, aiService]);
     useEffect(() => {
-        // 1. Inject Styles
         injectStyles(theme);
-        // 2. Initialize Movement Engine
         if (corgiRef.current) {
             const engine = new MovementEngine(corgiRef.current, props, (x, y) => {
                 setCorgiCoord({ x, y });
-                setIsChatOpen((prev) => {
-                    const next = !prev;
-                    if (next)
-                        setBadgeVisible(false);
-                    return next;
-                });
+                setIsChatOpen((prev) => !prev);
             });
             movementEngineRef.current = engine;
-            // 3. Animation Loop (60-120 FPS decoupled GPU loop)
             let animId;
             const onFrame = (time) => {
                 engine.step(time);
                 animId = requestAnimationFrame(onFrame);
             };
             animId = requestAnimationFrame(onFrame);
-            // 4. Global window.JakeAI API
             if (typeof window !== 'undefined') {
                 window.JakeAI = {
                     openChat: (x, y) => {
@@ -1380,18 +1408,15 @@ const JakeAI = (props) => {
                             engine.teleportTo(x, y);
                         setCorgiCoord({ x: engine.corgiX, y: engine.corgiY });
                         setIsChatOpen(true);
-                        setBadgeVisible(false);
                     },
                     closeChat: () => {
                         setIsChatOpen(false);
-                        setBadgeVisible(true);
                     },
                     toggleChat: () => {
                         setCorgiCoord({ x: engine.corgiX, y: engine.corgiY });
                         setIsChatOpen((prev) => !prev);
                     },
                     say: (text) => {
-                        // Can be extended to add directly to state
                         console.log(`[JakeAI] say: ${text}`);
                     },
                     showHint: (text, duration) => {
@@ -1413,19 +1438,20 @@ const JakeAI = (props) => {
     }, [theme]);
     const handleCloseChat = () => {
         setIsChatOpen(false);
-        setBadgeVisible(true);
     };
-    const handleOpenFromBadge = () => {
+    const handleDogHouseClick = () => {
         if (movementEngineRef.current) {
+            // Call Jake back to the dog house
+            movementEngineRef.current.teleportTo(window.innerWidth - 85, window.innerHeight - 50);
             setCorgiCoord({
-                x: movementEngineRef.current.corgiX,
-                y: movementEngineRef.current.corgiY
+                x: window.innerWidth - 85,
+                y: window.innerHeight - 50
             });
+            movementEngineRef.current.showHint(`Woof! Welcome to ${name}'s house 🐾`, 3000);
         }
-        setIsChatOpen(true);
-        setBadgeVisible(false);
+        setIsChatOpen((prev) => !prev);
     };
-    return (jsxs("div", { id: "jake-ai-container", className: `jake-ai-root jake-theme-${theme} ${className}`, style: style, children: [jsx("div", { ref: corgiRef, id: "jake-ai-corgi", className: "jake-corgi-sprite", role: "button", tabIndex: 0, "aria-label": `${name} the Corgi companion` }), jsx("button", { type: "button", id: "jake-ai-badge", className: `jake-reopen-badge ${badgeVisible && !isChatOpen ? 'jake-badge-visible' : ''}`, onClick: handleOpenFromBadge, children: jsxs("span", { children: ["\uD83D\uDC15 Chat with ", name] }) }), jsx(ChatModal, { ...props, isOpen: isChatOpen, onClose: handleCloseChat, aiService: aiService, corgiPos: corgiCoord })] }));
+    return (jsxs("div", { id: "jake-ai-container", className: `jake-ai-root jake-theme-${theme} ${className}`, style: style, children: [jsx("div", { ref: corgiRef, id: "jake-ai-corgi", className: "jake-corgi-sprite", role: "button", tabIndex: 0, "aria-label": `${name} the Corgi companion` }), showDogHouse && (jsxs("button", { type: "button", id: "jake-ai-doghouse", className: "jake-doghouse", onClick: handleDogHouseClick, "aria-label": `${name}'s Doghouse`, children: [dogHouseImage ? (jsx("img", { src: dogHouseImage, alt: `${name}'s Doghouse`, className: "jake-doghouse-img" })) : (jsx(DogHouseIcon, { className: "jake-doghouse-svg" })), jsxs("span", { className: "jake-doghouse-tooltip", children: [name, "'s Home \uD83D\uDC3E"] })] })), jsx(ChatModal, { ...props, isOpen: isChatOpen, onClose: handleCloseChat, aiService: aiService, corgiPos: corgiCoord })] }));
 };
 
 export { AIService, ChatModal, DIRECTIONS, JakeAI, MovementEngine, SpriteEngine };

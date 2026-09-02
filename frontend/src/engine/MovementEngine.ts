@@ -40,6 +40,8 @@ export class MovementEngine {
       persistPosition: props.persistPosition ?? true,
       quickChips: props.quickChips || [],
       enableSound: props.enableSound ?? true,
+      dogHouseImage: props.dogHouseImage || '',
+      showDogHouse: props.showDogHouse ?? true,
       className: props.className || '',
       style: props.style || {}
     };

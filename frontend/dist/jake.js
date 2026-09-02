@@ -519,39 +519,74 @@
       fill: currentColor;
     }
 
-    /* Floating Reopen Badge */
-    #jake-ai-badge, .jake-reopen-badge {
+    /* Dog House (Jake's Home) */
+    #jake-ai-doghouse, .jake-doghouse {
       position: fixed;
-      z-index: 2147483639;
+      z-index: 2147483638;
       bottom: 20px;
       right: 20px;
-      background: var(--jake-primary);
-      color: #ffffff;
-      border-radius: 28px;
-      padding: 8px 14px;
-      box-shadow: 0 8px 24px rgba(255, 159, 67, 0.4);
+      width: 48px;
+      height: 48px;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 0;
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 12px;
+      justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.2s ease;
+      touch-action: none;
+    }
+
+    #jake-ai-doghouse:hover, .jake-doghouse:hover {
+      transform: scale(1.15) translateY(-3px);
+      filter: drop-shadow(0 6px 14px rgba(255, 159, 67, 0.5));
+    }
+
+    #jake-ai-doghouse:active, .jake-doghouse:active {
+      transform: scale(0.95);
+    }
+
+    .jake-doghouse-svg {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    .jake-doghouse-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    .jake-doghouse-tooltip {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      right: 0;
+      background: var(--jake-bg, #1e222d);
+      color: var(--jake-text, #f5f6fa);
+      font-size: 11px;
       font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      opacity: 0;
+      padding: 3px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
       pointer-events: none;
-      transform: translateY(10px) scale(0.9);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--jake-card-border, rgba(255, 255, 255, 0.1));
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
     }
 
-    #jake-ai-badge.jake-badge-visible, .jake-reopen-badge.jake-badge-visible {
+    #jake-ai-doghouse:hover .jake-doghouse-tooltip,
+    .jake-doghouse:hover .jake-doghouse-tooltip {
       opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0) scale(1);
-    }
-
-    #jake-ai-badge:hover, .jake-reopen-badge:hover {
-      background: var(--jake-primary-hover);
-      transform: translateY(-2px) scale(1.03);
+      transform: translateY(0);
     }
 
     @media (max-width: 480px) {
@@ -814,6 +849,8 @@
               persistPosition: props.persistPosition ?? true,
               quickChips: props.quickChips || [],
               enableSound: props.enableSound ?? true,
+              dogHouseImage: props.dogHouseImage || '',
+              showDogHouse: props.showDogHouse ?? true,
               className: props.className || '',
               style: props.style || {}
           };
