@@ -173,8 +173,8 @@ export class MovementEngine {
     const posX = Math.round(this.corgiX - half);
     const posY = Math.round(this.corgiY - half);
 
-    // Hardware accelerated translation (GPU layer)
-    this.element.style.transform = `translate3d(${posX}px, ${posY}px, 0)`;
+    this.element.style.left = `${posX}px`;
+    this.element.style.top = `${posY}px`;
   }
 
   public step(timestamp: number): void {

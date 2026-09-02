@@ -86,10 +86,12 @@ function injectStyles(_theme = 'auto') {
       padding: 0;
     }
 
-    /* Hardware-Accelerated Corgi Sprite (GPU Layer) */
+    /* Corgi Sprite Element */
     #jake-ai-corgi, .jake-corgi-sprite {
       position: fixed;
-      z-index: 2147483640;
+      top: 0;
+      left: 0;
+      z-index: 2147483647;
       width: 32px;
       height: 32px;
       cursor: pointer;
@@ -98,8 +100,10 @@ function injectStyles(_theme = 'auto') {
       user-select: none;
       -webkit-user-select: none;
       -webkit-user-drag: none;
-      will-change: transform;
-      transform: translate3d(0, 0, 0);
+      background-repeat: no-repeat;
+      display: block;
+      pointer-events: auto;
+      will-change: left, top;
       transition: filter 0.15s ease;
       touch-action: none;
     }
@@ -642,6 +646,8 @@ class SpriteEngine {
         this.element = element;
         this.idleSrc = customSprites.idle || SPRITE_IDLE_BASE64;
         this.runSrc = customSprites.run || SPRITE_RUN_BASE64;
+        this.element.style.backgroundRepeat = 'no-repeat';
+        this.element.style.imageRendering = 'pixelated';
         this.setSprite('idle', 'S', 0);
     }
     /**
@@ -931,8 +937,8 @@ class MovementEngine {
         const half = size / 2;
         const posX = Math.round(this.corgiX - half);
         const posY = Math.round(this.corgiY - half);
-        // Hardware accelerated translation (GPU layer)
-        this.element.style.transform = `translate3d(${posX}px, ${posY}px, 0)`;
+        this.element.style.left = `${posX}px`;
+        this.element.style.top = `${posY}px`;
     }
     step(timestamp) {
         if (!this.element.isConnected)

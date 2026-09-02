@@ -85,10 +85,12 @@ export function injectStyles(_theme: JakeTheme = 'auto'): void {
       padding: 0;
     }
 
-    /* Hardware-Accelerated Corgi Sprite (GPU Layer) */
+    /* Corgi Sprite Element */
     #jake-ai-corgi, .jake-corgi-sprite {
       position: fixed;
-      z-index: 2147483640;
+      top: 0;
+      left: 0;
+      z-index: 2147483647;
       width: 32px;
       height: 32px;
       cursor: pointer;
@@ -97,8 +99,10 @@ export function injectStyles(_theme: JakeTheme = 'auto'): void {
       user-select: none;
       -webkit-user-select: none;
       -webkit-user-drag: none;
-      will-change: transform;
-      transform: translate3d(0, 0, 0);
+      background-repeat: no-repeat;
+      display: block;
+      pointer-events: auto;
+      will-change: left, top;
       transition: filter 0.15s ease;
       touch-action: none;
     }

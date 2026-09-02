@@ -33,6 +33,8 @@ export class SpriteEngine {
     this.idleSrc = customSprites.idle || SPRITE_IDLE_BASE64;
     this.runSrc = customSprites.run || SPRITE_RUN_BASE64;
 
+    this.element.style.backgroundRepeat = 'no-repeat';
+    this.element.style.imageRendering = 'pixelated';
     this.setSprite('idle', 'S', 0);
   }
 
