@@ -103,13 +103,16 @@
       background-repeat: no-repeat;
       display: block;
       pointer-events: auto;
+      transform-origin: center center;
+      transform: scale(1.3);
       will-change: left, top;
-      transition: filter 0.15s ease;
+      transition: filter 0.15s ease, transform 0.15s ease;
       touch-action: none;
     }
 
     #jake-ai-corgi:hover, .jake-corgi-sprite:hover {
       filter: drop-shadow(0 4px 10px rgba(255, 159, 67, 0.6));
+      transform: scale(1.45);
     }
 
     /* Speech Hint Bubble above Corgi */
@@ -805,7 +808,7 @@
               backendUrl: props.backendUrl || '',
               greeting: props.greeting || "Hi! I'm Jake, your portfolio guide 🐕",
               position: props.position || 'bottom-right',
-              speed: props.speed ?? 10,
+              speed: props.speed ?? 4,
               theme: props.theme || 'auto',
               name: props.name || 'Jake',
               persistPosition: props.persistPosition ?? true,
@@ -946,8 +949,8 @@
           if (!this.lastTimestamp)
               this.lastTimestamp = timestamp;
           const elapsed = timestamp - this.lastTimestamp;
-          // 80ms cadence for sprite frame steps (~12.5 FPS sprite walk cycle)
-          if (elapsed >= 80) {
+          // 110ms smooth cadence for natural walking steps
+          if (elapsed >= 110) {
               this.lastTimestamp = timestamp;
               this.tick();
           }

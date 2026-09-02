@@ -34,7 +34,7 @@ export class MovementEngine {
       backendUrl: props.backendUrl || '',
       greeting: props.greeting || "Hi! I'm Jake, your portfolio guide 🐕",
       position: props.position || 'bottom-right',
-      speed: props.speed ?? 10,
+      speed: props.speed ?? 4,
       theme: props.theme || 'auto',
       name: props.name || 'Jake',
       persistPosition: props.persistPosition ?? true,
@@ -183,8 +183,8 @@ export class MovementEngine {
     if (!this.lastTimestamp) this.lastTimestamp = timestamp;
     const elapsed = timestamp - this.lastTimestamp;
 
-    // 80ms cadence for sprite frame steps (~12.5 FPS sprite walk cycle)
-    if (elapsed >= 80) {
+    // 110ms smooth cadence for natural walking steps
+    if (elapsed >= 110) {
       this.lastTimestamp = timestamp;
       this.tick();
     }

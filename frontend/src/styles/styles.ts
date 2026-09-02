@@ -102,13 +102,16 @@ export function injectStyles(_theme: JakeTheme = 'auto'): void {
       background-repeat: no-repeat;
       display: block;
       pointer-events: auto;
+      transform-origin: center center;
+      transform: scale(1.3);
       will-change: left, top;
-      transition: filter 0.15s ease;
+      transition: filter 0.15s ease, transform 0.15s ease;
       touch-action: none;
     }
 
     #jake-ai-corgi:hover, .jake-corgi-sprite:hover {
       filter: drop-shadow(0 4px 10px rgba(255, 159, 67, 0.6));
+      transform: scale(1.45);
     }
 
     /* Speech Hint Bubble above Corgi */
