@@ -1,0 +1,65 @@
+{
+  "name": "jakeai",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Interactive Corgi pet sprite with integrated AI chat for React portfolios and embeddable websites",
+  "main": "dist/jake.min.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./standalone": "./dist/jake.min.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build:assets": "node scripts/gen_assets.js",
+    "build:bundle": "rollup -c",
+    "build:types": "tsc --emitDeclarationOnly",
+    "build": "npm run build:assets && npm run build:bundle && npm run build:types",
+    "dev": "rollup -c -w",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "corgi",
+    "pet",
+    "oneko",
+    "ai-chat",
+    "react",
+    "portfolio-agent",
+    "typescript",
+    "golang-backend"
+  ],
+  "author": "Nguyen Quan",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "rollup": "^4.34.8",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.3"
+  }
+}

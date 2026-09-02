@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+package-lock.json
+frontend/package-lock.json
+
+# Reference projects (do not push to repo)
+oneko.js-main/
+spritesheet/
+
+# Logs & temp
+*.log
+npm-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Gemini/Antigravity workspace artifacts
+.gemini/
