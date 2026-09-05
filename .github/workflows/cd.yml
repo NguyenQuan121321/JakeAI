@@ -177,15 +177,16 @@ jobs:
             exit 0
           fi
 
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "Dispatching deployment webhook with SemVer release $SEMVER_TAG..."
           STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$DEPLOY_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d '{
-              "repository": "${{ github.repository }}",
-              "tag": "'"$SEMVER_TAG"'",
-              "commit": "${{ github.sha }}",
-              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }')
+            -d "{
+              \"repository\": \"${GITHUB_REPOSITORY}\",
+              \"tag\": \"${SEMVER_TAG}\",
+              \"commit\": \"${GITHUB_SHA}\",
+              \"timestamp\": \"${NOW}\"
+            }")
 
           echo "Webhook response status code: ${STATUS_CODE}"
           if [ "${STATUS_CODE}" -ge 200 ] && [ "${STATUS_CODE}" -lt 400 ]; then

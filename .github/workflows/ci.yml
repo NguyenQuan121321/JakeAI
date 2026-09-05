@@ -230,28 +230,7 @@ jobs:
         if: always()
         run: |
           cd backend
-          python -c "
-          import xml.etree.ElementTree as ET
-          import os
-          try:
-              if os.path.exists('coverage.xml'):
-                  tree = ET.parse('coverage.xml')
-                  root = tree.getroot()
-                  rate = float(root.attrib.get('line-rate', 0)) * 100
-                  summary = f'### 📊 Backend Test Coverage: **{rate:.2f}%** (Quality Gate: ≥85%)\n\n'
-                  summary += '| Component / Package | Coverage |\n| :--- | :--- |\n'
-                  for pkg in root.findall('.//package'):
-                      pname = pkg.attrib.get('name')
-                      prate = float(pkg.attrib.get('line-rate', 0)) * 100
-                      summary += f'| `{pname}` | {prate:.2f}% |\n'
-                  summary += '\n*Quality Gate: ≥85% strictly enforced.*\n'
-                  step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
-                  if step_summary:
-                      with open(step_summary, 'a', encoding='utf-8') as f:
-                          f.write(summary)
-          except Exception as e:
-              print(f'Error writing summary: {e}')
-          "
+          python scripts/generate_coverage_summary.py
 
       - name: RAG Quality Gate & Anti-Hallucination Regression (Block 5)
         run: |
