@@ -40,6 +40,8 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.8.4",
     "mypy>=1.14.0",
+    "bandit>=1.8.2",
+    "pip-audit>=2.8.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -61,3 +63,8 @@ omit = ["tests/*", "app/main.py"]
 [tool.coverage.report]
 show_missing = true
 fail_under = 80
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = ["B101", "B104"]
+

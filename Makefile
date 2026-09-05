@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov openapi docker-up docker-down clean
+.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean
 
 PYTHON ?= python
 UV ?= uv
@@ -6,6 +6,8 @@ UVICORN ?= uvicorn
 PYTEST ?= pytest
 RUFF ?= ruff
 MYPY ?= mypy
+BANDIT ?= bandit
+PIP_AUDIT ?= pip-audit
 
 help:
 	@echo "JakeAI Platform Management Commands:"
@@ -16,6 +18,9 @@ help:
 	@echo "  make typecheck    Run static type analysis with Mypy"
 	@echo "  make test         Execute pytest test suite"
 	@echo "  make test-cov     Execute pytest with coverage report"
+	@echo "  make eval         Run AI RAG regression tests against golden dataset"
+	@echo "  make audit        Scan dependencies for CVEs using pip-audit"
+	@echo "  make sast         Run static application security testing using Bandit"
 	@echo "  make openapi      Export static OpenAPI specification JSON"
 	@echo "  make docker-up    Start backend, Redis, and Qdrant via Docker Compose"
 	@echo "  make docker-down  Stop all running Docker Compose services"
@@ -41,6 +46,15 @@ test:
 
 test-cov:
 	cd backend && $(PYTEST) --cov=app tests/ -v --cov-report=term-missing --cov-report=html
+
+eval:
+	cd backend && $(PYTEST) tests/evals/ -v
+
+audit:
+	cd backend && $(PIP_AUDIT) -r requirements.txt
+
+sast:
+	cd backend && $(BANDIT) -c pyproject.toml -r app/
 
 openapi:
 	cd backend && $(PYTHON) -m app.main --export-openapi openapi.json

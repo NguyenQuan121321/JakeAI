@@ -1,0 +1,161 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "chore/**"
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scanning:
+    name: DevSecOps - Secret & Key Leak Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Complete Repository History
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-and-sast:
+    name: DevSecOps - Vulnerability Audit & SAST
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Audit Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Pip-Audit Dependency Vulnerability Scan
+        run: |
+          cd backend
+          pip-audit -r requirements.txt
+
+      - name: Bandit Static Application Security Testing (SAST)
+        run: |
+          cd backend
+          bandit -c pyproject.toml -r app/
+
+  lint-and-typecheck:
+    name: Code Quality & Type Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Ruff Linter Check
+        run: |
+          ruff check backend/
+
+      - name: Ruff Formatter Check
+        run: |
+          ruff format --check backend/
+
+      - name: Mypy Static Type Checking
+        run: |
+          mypy --config-file backend/mypy.ini backend/app
+
+  unit-and-ai-tests:
+    name: Automated Tests & AI RAG Regression
+    runs-on: ubuntu-latest
+    needs: [dependency-and-sast, lint-and-typecheck]
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Pytest Unit & AI RAG Regression Tests
+        run: |
+          cd backend
+          pytest --cov=app tests/ -v --cov-report=xml --cov-report=term-missing
+
+      - name: Verify OpenAPI Schema Export & Drift Prevention
+        run: |
+          cd backend
+          python -m app.main --export-openapi openapi.json
+          test -s openapi.json
+
+  container-build-and-scan:
+    name: Container Packaging & Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: [secret-scanning, unit-and-ai-tests]
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test Dockerfile Build Integrity
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          load: true
+          tags: jakeai-backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy Container Image Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: jakeai-backend:test
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
