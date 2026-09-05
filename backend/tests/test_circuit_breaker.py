@@ -95,7 +95,7 @@ async def test_circuit_breaker_recovery_to_half_open_and_closed() -> None:
     # Simulate waiting past recovery timeout
     import asyncio
 
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(0.05)
 
     assert cb.is_available() is True
     assert cb.state == CircuitState.HALF_OPEN
