@@ -138,8 +138,7 @@ def test_citation_generator(sample_chunks: list[DocumentChunk]) -> None:
     """Verify CitationGenerator inserts footnotes and generates markdown cards."""
     generator = CitationGenerator()
     text = (
-        "ACME Corp reported Q3 gross revenue of $5,000,000. "
-        "Operating margin is 36.0%."
+        "ACME Corp reported Q3 gross revenue of $5,000,000. Operating margin is 36.0%."
     )
 
     annotated_text, citations = generator.generate_citations(text, sample_chunks)

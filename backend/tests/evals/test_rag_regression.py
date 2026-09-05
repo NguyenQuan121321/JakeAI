@@ -38,25 +38,25 @@ def test_rag_quality_gate(case: dict[str, Any]) -> None:
     result = evaluate_rag_case(case)
 
     if expected_pass:
-        assert (
-            result.passed
-        ), f"Quality Gate failed for case '{case_id}': {result.model_dump()}"
-        assert (
-            result.faithfulness_score >= 0.80
-        ), f"Faithfulness below threshold (0.80): {result.faithfulness_score}"
-        assert (
-            result.context_relevancy_score >= 0.70
-        ), f"Relevancy below threshold (0.70): {result.context_relevancy_score}"
-        assert (
-            result.anti_hallucination_passed
-        ), f"Numerical hallucination detected in case '{case_id}'"
-        assert (
-            not result.data_leakage_detected
-        ), f"Data leakage detected in case '{case_id}'"
+        assert result.passed, (
+            f"Quality Gate failed for case '{case_id}': {result.model_dump()}"
+        )
+        assert result.faithfulness_score >= 0.80, (
+            f"Faithfulness below threshold (0.80): {result.faithfulness_score}"
+        )
+        assert result.context_relevancy_score >= 0.70, (
+            f"Relevancy below threshold (0.70): {result.context_relevancy_score}"
+        )
+        assert result.anti_hallucination_passed, (
+            f"Numerical hallucination detected in case '{case_id}'"
+        )
+        assert not result.data_leakage_detected, (
+            f"Data leakage detected in case '{case_id}'"
+        )
     else:
-        assert (
-            not result.passed
-        ), f"Adversarial case '{case_id}' was expected to fail but passed quality gate"
-        assert (
-            not result.anti_hallucination_passed or result.data_leakage_detected
-        ), f"Case '{case_id}' should have triggered hallucination or data leakage flag"
+        assert not result.passed, (
+            f"Adversarial case '{case_id}' was expected to fail but passed quality gate"
+        )
+        assert not result.anti_hallucination_passed or result.data_leakage_detected, (
+            f"Case '{case_id}' should have triggered hallucination or data leakage flag"
+        )
