@@ -278,6 +278,12 @@ async def generate_chat_stream(
     summary="Real-time Chat SSE Stream",
     description="Stream real-time multi-agent responses via Server-Sent Events (SSE).",
     tags=["Chat"],
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "Real-time Server-Sent Events (SSE) stream",
+        }
+    },
 )
 async def chat_stream_endpoint(
     payload: ChatStreamRequest,

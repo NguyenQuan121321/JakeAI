@@ -97,4 +97,58 @@ describe("JakeAI Embedded Widget & Host Token Bridge", () => {
     expect(messages[0].role).toBe("assistant");
     expect(messages[0].content).toContain("FinnApiGo");
   });
+
+  it("should handle trigger button and close button DOM events", () => {
+    const widget = document.createElement("jake-ai-widget") as JakeAIWidget;
+    document.body.appendChild(widget);
+
+    const shadow = widget.getShadowRoot();
+    const trigger = shadow.querySelector(".jake-trigger-btn") as HTMLButtonElement;
+    const closeBtn = shadow.querySelector(".jake-close-btn") as HTMLButtonElement;
+    const chatWindow = shadow.querySelector(".jake-chat-window");
+
+    // Click trigger to open
+    trigger.click();
+    expect(chatWindow?.classList.contains("hidden")).toBe(false);
+
+    // Click close to hide
+    closeBtn.click();
+    expect(chatWindow?.classList.contains("hidden")).toBe(true);
+  });
+
+  it("should handle form submission and message dispatch", () => {
+    const widget = document.createElement("jake-ai-widget") as JakeAIWidget;
+    document.body.appendChild(widget);
+
+    const shadow = widget.getShadowRoot();
+    const input = shadow.querySelector(".jake-input-field") as HTMLInputElement;
+    const form = shadow.querySelector(".jake-input-form") as HTMLFormElement;
+
+    expect(input).not.toBeNull();
+    expect(form).not.toBeNull();
+
+    let dispatched = "";
+    widget.sendMessage = async (msg: string) => {
+      dispatched = msg;
+    };
+
+    input.value = "Show my portfolio breakdown";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(dispatched).toBe("Show my portfolio breakdown");
+  });
+
+  it("should configure theme, token, and mascot states", () => {
+    const widget = document.createElement("jake-ai-widget") as JakeAIWidget;
+    document.body.appendChild(widget);
+
+    widget.configure({ theme: "light", token: "bearer-token-999" });
+    expect(widget.getToken()).toBe("bearer-token-999");
+
+    widget.setMascotState("thinking");
+    expect(widget.getMascotState()).toBe("thinking");
+
+    widget.setMascotState("idle");
+    expect(widget.getMascotState()).toBe("idle");
+  });
 });
+

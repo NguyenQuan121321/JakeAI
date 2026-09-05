@@ -29,7 +29,7 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
 
   dependency-and-sast:
-    name: DevSecOps - Vulnerability Audit & SAST
+    name: DevSecOps - Vulnerability Audit, SAST & License Compliance
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
@@ -56,6 +56,43 @@ jobs:
         run: |
           cd backend
           bandit -c pyproject.toml -r app/
+
+      - name: Pip-Licenses License Compliance Gate (Reject Copyleft)
+        run: |
+          cd backend
+          pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
+
+      - name: Generate CycloneDX SBOM (Backend)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./backend
+          format: "cyclonedx-json"
+          output-file: "sbom-backend.cyclonedx.json"
+
+      - name: Upload SBOM Compliance Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-backend
+          path: sbom-backend.cyclonedx.json
+          retention-days: 30
+
+  infra-lint:
+    name: Infrastructure & Workflow Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Hadolint Dockerfile Linter
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: backend/Dockerfile
+          config: .hadolint.yaml
+
+      - name: Actionlint GitHub Workflows Linter
+        uses: reviewdog/action-actionlint@v1
+        with:
+          fail_level: error
 
   lint-and-typecheck:
     name: Code Quality & Type Analysis
@@ -116,10 +153,10 @@ jobs:
           cd frontend
           npm run typecheck
 
-      - name: Run Vitest Unit Tests
+      - name: Run Vitest Unit Tests & Coverage Gate
         run: |
           cd frontend
-          npm test
+          npm run test:coverage
 
       - name: Build Production Widget Bundles
         run: |
@@ -136,7 +173,7 @@ jobs:
   unit-and-ai-tests:
     name: Automated Tests & AI RAG Regression
     runs-on: ubuntu-latest
-    needs: [dependency-and-sast, lint-and-typecheck]
+    needs: [dependency-and-sast, infra-lint, lint-and-typecheck]
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
@@ -184,15 +221,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Pytest Unit & Integration Tests with Raised Coverage Floor (85%)
+      - name: Run Pytest Unit & Integration Tests with Strict Coverage Floor (85%)
         run: |
           cd backend
-          pytest --cov=app tests/ -v --cov-report=xml --cov-report=term-missing --cov-fail-under=85
+          pytest --cov=app tests/ -v --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=85
+
+      - name: Generate Coverage Report into GitHub Step Summary
+        if: always()
+        run: |
+          cd backend
+          python -c "
+          import xml.etree.ElementTree as ET
+          import os
+          try:
+              if os.path.exists('coverage.xml'):
+                  tree = ET.parse('coverage.xml')
+                  root = tree.getroot()
+                  rate = float(root.attrib.get('line-rate', 0)) * 100
+                  summary = f'### 📊 Backend Test Coverage: **{rate:.2f}%** (Quality Gate: ≥85%)\n\n'
+                  summary += '| Component / Package | Coverage |\n| :--- | :--- |\n'
+                  for pkg in root.findall('.//package'):
+                      pname = pkg.attrib.get('name')
+                      prate = float(pkg.attrib.get('line-rate', 0)) * 100
+                      summary += f'| `{pname}` | {prate:.2f}% |\n'
+                  summary += '\n*Quality Gate: ≥85% strictly enforced.*\n'
+                  step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
+                  if step_summary:
+                      with open(step_summary, 'a', encoding='utf-8') as f:
+                          f.write(summary)
+          except Exception as e:
+              print(f'Error writing summary: {e}')
+          "
 
       - name: RAG Quality Gate & Anti-Hallucination Regression (Block 5)
         run: |
           cd backend
           pytest tests/evals/test_rag_regression.py -v
+
+      - name: API Contract & Backward Compatibility Verification
+        run: |
+          cd backend
+          pytest tests/contract/test_api_contract.py -v
 
       - name: Verify OpenAPI Schema Export & Drift Prevention
         run: |
@@ -211,7 +280,7 @@ jobs:
   container-build-and-scan:
     name: Container Packaging & Vulnerability Scan
     runs-on: ubuntu-latest
-    needs: [secret-scanning, unit-and-ai-tests, frontend-build-and-test]
+    needs: [secret-scanning, dependency-and-sast, infra-lint, unit-and-ai-tests, frontend-build-and-test]
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4

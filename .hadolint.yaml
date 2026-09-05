@@ -1,0 +1,8 @@
+# Hadolint Dockerfile Linter Configuration
+failure-threshold: error
+ignored:
+  # Ignore apt-get version pinning since requirements.txt handles Python pinning
+  # and Debian security repositories frequently rotate package patch versions.
+  - DL3008
+  # Ignore pip version pinning inside Dockerfile since requirements.txt pins all versions
+  - DL3013

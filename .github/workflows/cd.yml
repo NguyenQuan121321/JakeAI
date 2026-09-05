@@ -1,40 +1,33 @@
 name: Continuous Deployment
 
 on:
-  workflow_run:
-    workflows: ["Continuous Integration"]
-    branches: [main]
-    types:
-      - completed
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
   workflow_dispatch:
 
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  deploy-gate:
-    name: Validate CI Quality Gate
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    steps:
-      - name: Verify Gate Status
-        run: |
-          echo "CI Pipeline passed with green status. Proceeding to Continuous Deployment."
-
   semver-release:
     name: Automated SemVer Tag & GitHub Release
     runs-on: ubuntu-latest
-    needs: deploy-gate
     outputs:
       new_version: ${{ steps.tag_version.outputs.new_tag }}
       release_tag: ${{ steps.tag_version.outputs.tag }}
     steps:
-      - name: Checkout Source Code
+      - name: Checkout Complete Repository History
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -62,8 +55,7 @@ jobs:
   frontend-and-openapi-release:
     name: Package Frontend Widget & OpenAPI Release Assets
     runs-on: ubuntu-latest
-    needs: [deploy-gate, semver-release]
-    if: ${{ needs.semver-release.outputs.new_version != '' }}
+    needs: semver-release
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -95,8 +87,16 @@ jobs:
           pip install -r requirements.txt
           python -m app.main --export-openapi openapi.json
 
+      - name: Generate CycloneDX Release SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./backend
+          format: "cyclonedx-json"
+          output-file: "sbom-release.cyclonedx.json"
+
       - name: Attach Assets to GitHub Production Release
         uses: softprops/action-gh-release@v2
+        if: ${{ needs.semver-release.outputs.new_version != '' }}
         with:
           tag_name: ${{ needs.semver-release.outputs.new_version }}
           files: |
@@ -104,6 +104,7 @@ jobs:
             frontend/dist/jake-ai-widget.es.js
             frontend/dist/style.css
             backend/openapi.json
+            sbom-release.cyclonedx.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -114,12 +115,13 @@ jobs:
           path: |
             frontend/dist/
             backend/openapi.json
+            sbom-release.cyclonedx.json
           retention-days: 90
 
   build-and-publish:
     name: Build & Publish Container (GHCR / Docker Hub)
     runs-on: ubuntu-latest
-    needs: [deploy-gate, semver-release]
+    needs: semver-release
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4

@@ -72,7 +72,10 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response"
+            "description": "Real-time Server-Sent Events (SSE) stream",
+            "content": {
+              "text/event-stream": {}
+            }
           },
           "422": {
             "description": "Validation Error",
