@@ -70,7 +70,9 @@ def test_verify_expired_jwt() -> None:
 
 def test_verify_invalid_signature() -> None:
     """Verify forged signature raises HTTP 401 Unauthorized."""
-    token = create_test_jwt(secret_key="wrong-forged-secret-key-at-least-32-chars-long")
+    token = create_test_jwt(
+        secret_key="wrong-forged-secret-key-at-least-32-chars-long",  # gitleaks:allow
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         verify_finnapigo_jwt(token, algorithm="HS256")
