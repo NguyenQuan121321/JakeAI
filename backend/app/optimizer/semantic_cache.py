@@ -271,3 +271,14 @@ class SemanticCacheManager:
                     self._redis_available = False
 
         return cleared_count
+
+
+_semantic_cache_manager: SemanticCacheManager | None = None
+
+
+def get_semantic_cache_manager() -> SemanticCacheManager:
+    """Singleton getter for SemanticCacheManager."""
+    global _semantic_cache_manager
+    if _semantic_cache_manager is None:
+        _semantic_cache_manager = SemanticCacheManager()
+    return _semantic_cache_manager

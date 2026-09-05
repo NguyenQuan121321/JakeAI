@@ -32,6 +32,12 @@ def verify_finnapigo_jwt(
     key = secret_key or settings.JWT_SECRET_KEY
     algo = algorithm or settings.JWT_ALGORITHM
 
+    # If algorithm is RSA but key is a symmetric secret string, fall back to HS256
+    if algo.startswith("RS") and not (
+        isinstance(key, str) and key.strip().startswith("-----BEGIN")
+    ):
+        algo = "HS256"
+
     try:
         payload: dict[str, Any] = jwt.decode(
             token,
@@ -40,6 +46,7 @@ def verify_finnapigo_jwt(
             options={
                 "verify_signature": True,
                 "verify_exp": True,
+                "verify_aud": False,
                 "require": ["sub", "tenant_id"],
             },
         )

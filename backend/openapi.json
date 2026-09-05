@@ -138,10 +138,704 @@
           }
         ]
       }
+    },
+    "/api/v1/byok/keys": {
+      "get": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "List Provider Keys",
+        "description": "List all supported providers and their configuration status with masked previews.",
+        "operationId": "list_provider_keys_api_v1_byok_keys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BYOKListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "Store Provider Key",
+        "description": "Store and encrypt a tenant-supplied LLM provider key.",
+        "operationId": "store_provider_key_api_v1_byok_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BYOKStoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BYOKKeyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/byok/keys/{provider}": {
+      "delete": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "Delete Provider Key",
+        "description": "Revoke and delete an encrypted provider key.",
+        "operationId": "delete_provider_key_api_v1_byok_keys__provider__delete",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Provider Key Api V1 Byok Keys  Provider  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devops/audit-pr": {
+      "post": {
+        "tags": [
+          "DevOps Bot"
+        ],
+        "summary": "Audit Pull Request",
+        "description": "Analyze a pull request diff with zero-cost pruning, security scan, and test scaffolding.",
+        "operationId": "audit_pull_request_api_v1_devops_audit_pr_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PRAuditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PRAuditResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/devops/changelog": {
+      "post": {
+        "tags": [
+          "DevOps Bot"
+        ],
+        "summary": "Generate Changelog",
+        "description": "Generate structured markdown release notes and optionally broadcast to Slack/Discord.",
+        "operationId": "generate_changelog_api_v1_devops_changelog_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangelogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangelogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/gateway/chat/completions": {
+      "post": {
+        "tags": [
+          "AI Gateway"
+        ],
+        "summary": "Proxy Chat Completions",
+        "description": "OpenAI-compatible inference proxy with Tier 1 Redis exact caching and quota deduction.",
+        "operationId": "proxy_chat_completions_api_v1_gateway_chat_completions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/gateway/quotas": {
+      "get": {
+        "tags": [
+          "AI Gateway"
+        ],
+        "summary": "Get Tenant Quota",
+        "description": "Retrieve active period token usage, limits, and budget health.",
+        "operationId": "get_tenant_quota_api_v1_gateway_quotas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "AI Gateway"
+        ],
+        "summary": "Update Tenant Quota",
+        "description": "Configure monthly token quota limit for a tenant.",
+        "operationId": "update_tenant_quota_api_v1_gateway_quotas_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateQuotaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/billing/webhook": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "summary": "Handle Payment Webhook",
+        "description": "Process VietQR / PayOS payment webhook with HMAC-SHA256 verification and tier provisioning.",
+        "operationId": "handle_payment_webhook_api_v1_billing_webhook_post",
+        "parameters": [
+          {
+            "name": "x-webhook-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Webhook-Signature"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayOSWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Handle Payment Webhook Api V1 Billing Webhook Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/billing/subscription": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "summary": "Get Current Subscription",
+        "description": "Retrieve active subscription tier, monthly token quota, and enabled features.",
+        "operationId": "get_current_subscription_api_v1_billing_subscription_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/analytics/dashboard": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Analytics Dashboard",
+        "description": "Retrieve operational telemetry: tokens saved via caching, TTFT, PRs audited, and cost metrics.",
+        "operationId": "get_analytics_dashboard_api_v1_analytics_dashboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsDashboard"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "AnalyticsDashboard": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "tokens_processed": {
+            "type": "integer",
+            "title": "Tokens Processed"
+          },
+          "tokens_saved_cache": {
+            "type": "integer",
+            "title": "Tokens Saved Cache"
+          },
+          "cost_savings_usd": {
+            "type": "number",
+            "title": "Cost Savings Usd"
+          },
+          "savings_percentage": {
+            "type": "number",
+            "title": "Savings Percentage"
+          },
+          "prs_audited": {
+            "type": "integer",
+            "title": "Prs Audited"
+          },
+          "avg_ttft_ms": {
+            "type": "number",
+            "title": "Avg Ttft Ms"
+          },
+          "model_distribution": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Model Distribution"
+          },
+          "subscription_tier": {
+            "type": "string",
+            "title": "Subscription Tier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "tokens_processed",
+          "tokens_saved_cache",
+          "cost_savings_usd",
+          "savings_percentage",
+          "prs_audited",
+          "avg_ttft_ms",
+          "model_distribution",
+          "subscription_tier"
+        ],
+        "title": "AnalyticsDashboard",
+        "description": "Telemetry metrics dashboard visualizing token efficiency and performance."
+      },
+      "BYOKKeyResponse": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "masked_key": {
+            "type": "string",
+            "title": "Masked Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "provider",
+          "masked_key",
+          "status"
+        ],
+        "title": "BYOKKeyResponse",
+        "description": "Response returning masked key information."
+      },
+      "BYOKListResponse": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/BYOKProviderItem"
+            },
+            "type": "array",
+            "title": "Keys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "keys"
+        ],
+        "title": "BYOKListResponse",
+        "description": "List of configured provider keys for a tenant."
+      },
+      "BYOKProviderItem": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "masked_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Key"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "masked_key",
+          "configured"
+        ],
+        "title": "BYOKProviderItem",
+        "description": "Provider key status item."
+      },
+      "BYOKStoreRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "LLM provider: openai, gemini, anthropic, or openrouter"
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 8,
+            "title": "Api Key",
+            "description": "Raw provider API key to encrypt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "api_key"
+        ],
+        "title": "BYOKStoreRequest",
+        "description": "Request payload to register or update an LLM provider API key."
+      },
+      "ChangelogRequest": {
+        "properties": {
+          "pr_titles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pr Titles",
+            "description": "List of merged PR titles"
+          },
+          "commits": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commits",
+            "description": "List of commit messages"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url",
+            "description": "Optional Slack/Discord webhook to broadcast to"
+          }
+        },
+        "type": "object",
+        "title": "ChangelogRequest",
+        "description": "Request payload to synthesize release notes from PR titles and commits."
+      },
+      "ChangelogResponse": {
+        "properties": {
+          "changelog_markdown": {
+            "type": "string",
+            "title": "Changelog Markdown"
+          },
+          "broadcast_sent": {
+            "type": "boolean",
+            "title": "Broadcast Sent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changelog_markdown",
+          "broadcast_sent"
+        ],
+        "title": "ChangelogResponse",
+        "description": "Generated release notes and broadcast status."
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "role: system, user, assistant"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "message content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "description": "OpenAI-compatible message format."
+      },
       "ChatStreamRequest": {
         "properties": {
           "prompt": {
@@ -274,6 +968,100 @@
         "title": "DocumentIngestResponse",
         "description": "Outcome metadata of document ingestion pipeline execution."
       },
+      "GatewayChatRequest": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "Target model name",
+            "default": "gemini-1.5-flash"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Messages",
+            "description": "List of messages"
+          },
+          "temperature": {
+            "type": "number",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "default": 0.7
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "default": 1024
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "GatewayChatRequest",
+        "description": "OpenAI-compatible chat completions proxy request."
+      },
+      "GatewayChatResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "object": {
+            "type": "string",
+            "title": "Object",
+            "default": "chat.completion"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "choices": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Choices"
+          },
+          "usage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Usage"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached"
+          },
+          "tokens_saved": {
+            "type": "integer",
+            "title": "Tokens Saved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created",
+          "model",
+          "choices",
+          "usage",
+          "cached",
+          "tokens_saved"
+        ],
+        "title": "GatewayChatResponse",
+        "description": "OpenAI-compatible chat completion response with JakeAI caching metadata."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -326,6 +1114,322 @@
         ],
         "title": "HealthResponse",
         "description": "Health check status response model."
+      },
+      "PRAuditRequest": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "title": "Repo",
+            "description": "Repository full name, e.g. organization/repo"
+          },
+          "pr_number": {
+            "type": "integer",
+            "title": "Pr Number",
+            "description": "Pull request number"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Pull request title"
+          },
+          "raw_diff": {
+            "type": "string",
+            "title": "Raw Diff",
+            "description": "Raw git unified diff content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo",
+          "pr_number",
+          "title",
+          "raw_diff"
+        ],
+        "title": "PRAuditRequest",
+        "description": "Request payload to audit a Pull Request diff."
+      },
+      "PRAuditResult": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "pr_number": {
+            "type": "integer",
+            "title": "Pr Number"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "security_findings": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityFinding"
+            },
+            "type": "array",
+            "title": "Security Findings"
+          },
+          "test_coverage_advisory": {
+            "type": "string",
+            "title": "Test Coverage Advisory"
+          },
+          "suggested_tests": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestedTestScaffold"
+            },
+            "type": "array",
+            "title": "Suggested Tests"
+          },
+          "original_diff_bytes": {
+            "type": "integer",
+            "title": "Original Diff Bytes"
+          },
+          "pruned_diff_bytes": {
+            "type": "integer",
+            "title": "Pruned Diff Bytes"
+          },
+          "tokens_saved_estimate": {
+            "type": "integer",
+            "title": "Tokens Saved Estimate"
+          },
+          "reduction_percentage": {
+            "type": "number",
+            "title": "Reduction Percentage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo",
+          "pr_number",
+          "title",
+          "verdict",
+          "summary",
+          "security_findings",
+          "test_coverage_advisory",
+          "suggested_tests",
+          "original_diff_bytes",
+          "pruned_diff_bytes",
+          "tokens_saved_estimate",
+          "reduction_percentage"
+        ],
+        "title": "PRAuditResult",
+        "description": "Result of automated PR code audit."
+      },
+      "PayOSWebhookRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Result code (00 = success)",
+            "default": "00"
+          },
+          "desc": {
+            "type": "string",
+            "title": "Desc",
+            "description": "Result message",
+            "default": "success"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data",
+            "description": "Transaction details (orderCode, amount, description)"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature",
+            "description": "HMAC-SHA256 signature for data integrity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "signature"
+        ],
+        "title": "PayOSWebhookRequest",
+        "description": "Payload sent by PayOS / VietQR webhook."
+      },
+      "QuotaStatus": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "quota_limit": {
+            "type": "integer",
+            "title": "Quota Limit"
+          },
+          "tokens_used": {
+            "type": "integer",
+            "title": "Tokens Used"
+          },
+          "tokens_remaining": {
+            "type": "integer",
+            "title": "Tokens Remaining"
+          },
+          "percentage_used": {
+            "type": "number",
+            "title": "Percentage Used"
+          },
+          "is_suspended": {
+            "type": "boolean",
+            "title": "Is Suspended"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "quota_limit",
+          "tokens_used",
+          "tokens_remaining",
+          "percentage_used",
+          "is_suspended",
+          "warning"
+        ],
+        "title": "QuotaStatus",
+        "description": "Current tenant quota consumption and status."
+      },
+      "SecurityFinding": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "line_snippet": {
+            "type": "string",
+            "title": "Line Snippet"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "severity",
+          "message",
+          "line_snippet"
+        ],
+        "title": "SecurityFinding",
+        "description": "Identified security risk in PR diff."
+      },
+      "SubscriptionInfo": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "tier": {
+            "type": "string",
+            "title": "Tier"
+          },
+          "plan_name": {
+            "type": "string",
+            "title": "Plan Name"
+          },
+          "monthly_quota": {
+            "type": "integer",
+            "title": "Monthly Quota"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Features"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "tier",
+          "plan_name",
+          "monthly_quota",
+          "features",
+          "is_active",
+          "expires_at"
+        ],
+        "title": "SubscriptionInfo",
+        "description": "Active subscription status for a tenant."
+      },
+      "SuggestedTestScaffold": {
+        "properties": {
+          "target_file": {
+            "type": "string",
+            "title": "Target File"
+          },
+          "test_framework": {
+            "type": "string",
+            "title": "Test Framework"
+          },
+          "code_template": {
+            "type": "string",
+            "title": "Code Template"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_file",
+          "test_framework",
+          "code_template"
+        ],
+        "title": "SuggestedTestScaffold",
+        "description": "Automated test scaffold recommendation."
+      },
+      "UpdateQuotaRequest": {
+        "properties": {
+          "new_limit": {
+            "type": "integer",
+            "minimum": 10000.0,
+            "title": "New Limit",
+            "description": "New token limit (e.g. 5000000)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_limit"
+        ],
+        "title": "UpdateQuotaRequest",
+        "description": "Payload to update tenant monthly token quota."
       },
       "ValidationError": {
         "properties": {

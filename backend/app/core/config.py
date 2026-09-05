@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
 
+    # Commercial SaaS & Security Settings
+    BYOK_MASTER_KEY: str = "jakeai-enterprise-master-encryption-key-32b"
+    PAYOS_API_KEY: str | None = None
+    PAYOS_CHECKSUM_KEY: str = "dev-payos-checksum-secret-key-32b"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
