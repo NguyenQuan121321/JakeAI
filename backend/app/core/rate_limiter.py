@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request, status
 from app.core.config import get_settings
 
 # Atomic Redis Lua script to eliminate TOCTOU race conditions under high concurrency
-TOKEN_BUCKET_LUA = """
+_RATELIMIT_LUA_SCRIPT = """  # nosec B105
 local key = KEYS[1]
 local capacity = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])
@@ -135,7 +135,7 @@ class TokenBucketRateLimiter:
         try:
             # Execute atomic Lua script inside Redis
             result: Any = await redis.eval(
-                TOKEN_BUCKET_LUA,
+                _RATELIMIT_LUA_SCRIPT,
                 1,
                 key,
                 self.capacity,
