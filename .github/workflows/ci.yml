@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-      - "feat/**"
-      - "chore/**"
-      - "release/**"
   pull_request:
     branches:
       - main
@@ -95,6 +92,40 @@ jobs:
         run: |
           mypy --config-file backend/mypy.ini backend/app
 
+  frontend-build-and-test:
+    name: Frontend Widget Build & Quality Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: TypeScript Static Type Checking
+        run: |
+          cd frontend
+          npm run typecheck
+
+      - name: Run Vitest Unit Tests
+        run: |
+          cd frontend
+          npm test
+
+      - name: Build Production Widget Bundles
+        run: |
+          cd frontend
+          npm run build
+
   unit-and-ai-tests:
     name: Automated Tests & AI RAG Regression
     runs-on: ubuntu-latest
@@ -102,6 +133,28 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: test-key-for-ci-pipeline-min-32-chars-long
 
     steps:
       - name: Checkout Source Code
@@ -119,21 +172,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Pytest Unit & AI RAG Regression Tests
+      - name: Run Pytest Unit & AI RAG Regression Tests with Coverage Floor
         run: |
           cd backend
-          pytest --cov=app tests/ -v --cov-report=xml --cov-report=term-missing
+          pytest --cov=app tests/ -v --cov-report=xml --cov-report=term-missing --cov-fail-under=80
 
       - name: Verify OpenAPI Schema Export & Drift Prevention
         run: |
           cd backend
           python -m app.main --export-openapi openapi.json
-          test -s openapi.json
+          git diff --exit-code openapi.json
 
   container-build-and-scan:
     name: Container Packaging & Vulnerability Scan
     runs-on: ubuntu-latest
-    needs: [secret-scanning, unit-and-ai-tests]
+    needs: [secret-scanning, unit-and-ai-tests, frontend-build-and-test]
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
