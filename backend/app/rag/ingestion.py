@@ -32,6 +32,7 @@ class DocumentIngestRequest(BaseModel):
             elif not data.get("text") and data.get("content"):
                 data["text"] = data["content"]
         return data
+
     source: str = Field(
         default="Internal Document",
         description="Source document name, URL, or identifier",
