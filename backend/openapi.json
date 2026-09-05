@@ -886,9 +886,21 @@
         "properties": {
           "content": {
             "type": "string",
-            "minLength": 1,
             "title": "Content",
-            "description": "Raw document text to be chunked and indexed"
+            "description": "Raw document text to be chunked and indexed",
+            "default": ""
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Alias for content"
           },
           "source": {
             "type": "string",
@@ -920,9 +932,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "content"
-        ],
         "title": "DocumentIngestRequest",
         "description": "Payload for ingesting raw documents into tenant-isolated RAG indexes."
       },

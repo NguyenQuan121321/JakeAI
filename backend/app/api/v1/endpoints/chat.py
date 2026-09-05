@@ -115,8 +115,16 @@ async def generate_chat_stream(
         )
         await asyncio.sleep(0.01)
 
-        # 4. Check Semantic Cache (Tier 1 & Tier 2)
-        cached_entry = await _semantic_cache.get(sanitized_prompt, context.tenant_id)
+        # 4. Check Semantic Cache (Tier 1 & Tier 2) - bypassed if edge proxy already evaluated
+        is_edge_forwarded = bool(
+            request
+            and request.headers.get("x-forwarded-by", "").strip().lower() == "finnapigo"
+        )
+        cached_entry = (
+            None
+            if is_edge_forwarded
+            else await _semantic_cache.get(sanitized_prompt, context.tenant_id)
+        )
         if cached_entry:
             yield _format_sse_event(
                 "status",

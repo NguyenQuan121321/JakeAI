@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.rag.models import DocumentChunk
 from app.rag.retriever import HybridRetriever, default_hybrid_retriever
@@ -15,10 +15,23 @@ class DocumentIngestRequest(BaseModel):
     """Payload for ingesting raw documents into tenant-isolated RAG indexes."""
 
     content: str = Field(
-        ...,
-        min_length=1,
+        default="",
         description="Raw document text to be chunked and indexed",
     )
+    text: str | None = Field(
+        default=None,
+        description="Alias for content",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonize_content_and_text(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("content") and data.get("text"):
+                data["content"] = data["text"]
+            elif not data.get("text") and data.get("content"):
+                data["text"] = data["content"]
+        return data
     source: str = Field(
         default="Internal Document",
         description="Source document name, URL, or identifier",
