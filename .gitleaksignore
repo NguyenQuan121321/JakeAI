@@ -1,0 +1,2 @@
+# Gitleaks ignore file for historic test mock fingerprints
+f0978c2d77b07db8467fdeab51c148c9f6b2b032:backend/tests/test_gateway.py:generic-api-key:73
