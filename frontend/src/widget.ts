@@ -66,6 +66,28 @@ export class JakeAIWidget extends HTMLElement {
     if (config.token) {
       this.setToken(config.token);
     }
+    if (config.theme) {
+      this.setTheme(config.theme);
+    }
+  }
+
+  public setTheme(theme: "dark" | "light"): void {
+    this.config.theme = theme;
+    if (this.windowEl) {
+      this.windowEl.setAttribute("data-theme", theme);
+    }
+  }
+
+  public getTheme(): "dark" | "light" {
+    return this.config.theme || "dark";
+  }
+
+  public clearMessages(): void {
+    this.messages = [];
+    if (this.messagesEl) {
+      this.messagesEl.innerHTML = "";
+    }
+    this.mascot.setState("idle");
   }
 
   public setToken(token: string): void {
@@ -332,10 +354,34 @@ export class JakeAIWidget extends HTMLElement {
           const citationsContainer = document.createElement("div");
           citationsContainer.className = "jake-citations-container";
           for (const cite of parsed.citations) {
-            const chip = document.createElement("span");
+            const chipWrapper = document.createElement("div");
+            chipWrapper.className = "jake-citation-wrapper";
+
+            const chip = document.createElement("button");
+            chip.type = "button";
             chip.className = "jake-citation-chip";
-            chip.textContent = `📚 ${cite.source || "FinnApiGo"} (${Math.round((cite.confidence || 1.0) * 100)}%)`;
-            citationsContainer.appendChild(chip);
+            const confidencePct = Math.round((cite.confidence || 1.0) * 100);
+            chip.textContent = `📚 ${cite.source || "FinnApiGo"} (${confidencePct}%)`;
+            chip.setAttribute("aria-label", `View citation: ${cite.source || "FinnApiGo"}`);
+
+            const detail = document.createElement("div");
+            detail.className = "jake-citation-detail hidden";
+            detail.innerHTML = `
+              <div class="jake-citation-header">
+                <span class="jake-citation-title">${cite.source || "Source Passage"}</span>
+                <span class="jake-citation-badge">${confidencePct}% confidence</span>
+              </div>
+              <div class="jake-citation-snippet">${cite.snippet || "Verified tenant passage"}</div>
+            `;
+
+            chip.addEventListener("click", () => {
+              detail.classList.toggle("hidden");
+              this.scrollToBottom();
+            });
+
+            chipWrapper.appendChild(chip);
+            chipWrapper.appendChild(detail);
+            citationsContainer.appendChild(chipWrapper);
           }
           toolsContainer.appendChild(citationsContainer);
         }
@@ -479,6 +525,22 @@ export class JakeAIWidget extends HTMLElement {
           box-shadow: 0 0 8px var(--jake-success);
         }
         .jake-header-subtitle { font-size: 11px; color: var(--jake-text-secondary); }
+        .jake-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .jake-clear-btn {
+          background: transparent;
+          border: none;
+          color: var(--jake-text-secondary);
+          font-size: 14px;
+          cursor: pointer;
+          padding: 4px 6px;
+          border-radius: 6px;
+          transition: background 0.2s;
+        }
+        .jake-clear-btn:hover { color: #fff; background: var(--jake-surface-card); }
         .jake-close-btn {
           background: transparent;
           border: none;
@@ -489,6 +551,73 @@ export class JakeAIWidget extends HTMLElement {
           border-radius: 6px;
         }
         .jake-close-btn:hover { color: #fff; background: var(--jake-surface-card); }
+
+        .jake-citation-wrapper {
+          display: flex;
+          flex-direction: column;
+          margin-bottom: 6px;
+        }
+        .jake-citation-chip {
+          background: rgba(59, 130, 246, 0.15);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 12px;
+          color: #60a5fa;
+          font-size: 11px;
+          padding: 3px 8px;
+          cursor: pointer;
+          align-self: flex-start;
+          transition: all 0.2s;
+        }
+        .jake-citation-chip:hover {
+          background: rgba(59, 130, 246, 0.3);
+          border-color: #60a5fa;
+        }
+        .jake-citation-detail {
+          margin-top: 4px;
+          padding: 8px 10px;
+          background: rgba(30, 41, 59, 0.85);
+          border: 1px solid var(--jake-border);
+          border-radius: 8px;
+          font-size: 11px;
+          animation: jakeFadeIn 0.2s ease;
+        }
+        .jake-citation-detail.hidden { display: none; }
+        .jake-citation-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-weight: 600;
+          margin-bottom: 4px;
+        }
+        .jake-citation-badge {
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--jake-success);
+          padding: 1px 5px;
+          border-radius: 4px;
+          font-size: 10px;
+        }
+        .jake-citation-snippet {
+          color: var(--jake-text-secondary);
+          font-style: italic;
+          line-height: 1.4;
+        }
+        .jake-chat-window[data-theme="light"] {
+          background: rgba(248, 250, 252, 0.96);
+          color: #0f172a;
+          border-color: #cbd5e1;
+        }
+        .jake-chat-window[data-theme="light"] .jake-chat-header {
+          background: #ffffff;
+          border-bottom-color: #e2e8f0;
+        }
+        .jake-chat-window[data-theme="light"] .jake-header-title h3 {
+          color: #0f172a;
+        }
+        .jake-chat-window[data-theme="light"] .jake-message.assistant .jake-message-bubble {
+          background: #f1f5f9;
+          color: #0f172a;
+          border-color: #e2e8f0;
+        }
 
         .jake-messages-container {
           flex: 1;
@@ -614,7 +743,10 @@ export class JakeAIWidget extends HTMLElement {
                 <span class="jake-header-subtitle">Enterprise Embedded AI Companion</span>
               </div>
             </div>
-            <button class="jake-close-btn" aria-label="Close Chat">✕</button>
+            <div class="jake-header-actions">
+              <button class="jake-clear-btn" aria-label="Clear Conversation" title="Clear Conversation">🗑️</button>
+              <button class="jake-close-btn" aria-label="Close Chat">✕</button>
+            </div>
           </header>
 
           <div class="jake-messages-container">
@@ -665,6 +797,9 @@ export class JakeAIWidget extends HTMLElement {
 
     const closeBtn = this.shadow.querySelector(".jake-close-btn");
     closeBtn?.addEventListener("click", () => this.close());
+
+    const clearBtn = this.shadow.querySelector(".jake-clear-btn");
+    clearBtn?.addEventListener("click", () => this.clearMessages());
 
     const form = this.shadow.querySelector(".jake-input-form");
     form?.addEventListener("submit", (e) => {

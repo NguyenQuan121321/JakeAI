@@ -76,21 +76,39 @@ def create_application() -> FastAPI:
                     ),
                 },
                 {
-                    "name": "Gateway",
-                    "description": (
-                        "FinnApiGo perimeter security, policy enforcement and SSE"
-                    ),
-                },
-                {
-                    "name": "Multi-Agent",
-                    "description": (
-                        "LangGraph multi-agent financial reasoning and orchestration"
-                    ),
-                },
-                {
                     "name": "RAG",
                     "description": (
                         "Document ingestion, chunking, and tenant retrieval operations"
+                    ),
+                },
+                {
+                    "name": "BYOK",
+                    "description": (
+                        "Bring Your Own Key (BYOK) credential management and AES-256-GCM encryption"
+                    ),
+                },
+                {
+                    "name": "DevOps Bot",
+                    "description": (
+                        "Automated PR review, diff pruning, and changelog generation"
+                    ),
+                },
+                {
+                    "name": "AI Gateway",
+                    "description": (
+                        "OpenAI-compatible inference reverse proxy with caching and token quotas"
+                    ),
+                },
+                {
+                    "name": "Billing",
+                    "description": (
+                        "VietQR and PayOS webhook payment processing and subscription tier management"
+                    ),
+                },
+                {
+                    "name": "Analytics",
+                    "description": (
+                        "Real-time operational telemetry, cost savings, and token efficiency metrics"
                     ),
                 },
             ],
@@ -149,7 +167,7 @@ def main() -> None:
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
+        default="0.0.0.0",  # nosec B104
         help="Server host address (default: 0.0.0.0)",
     )
     parser.add_argument(

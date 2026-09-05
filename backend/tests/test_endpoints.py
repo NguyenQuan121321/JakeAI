@@ -332,3 +332,56 @@ async def test_rag_ingest_endpoint(
     assert data["tenant_id"] == "tenant-rag-endpoint"
     assert data["source"] == "Cloud Services Q3 2026"
     assert len(data["chunk_ids"]) == data["indexed_chunks"]
+
+
+@pytest.mark.asyncio
+async def test_api_v1_health_endpoint(async_client: AsyncClient) -> None:
+    """Verify GET /api/v1/health returns operational metrics matching root probe."""
+    response = await async_client.get("/api/v1/health")
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "version" in data
+    assert "uptime_seconds" in data
+
+
+@pytest.mark.asyncio
+async def test_rag_query_endpoint(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify POST /api/v1/rag/query retrieves indexed chunks for tenant."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
+    token = generate_endpoint_jwt(tenant_id="tenant-rag-query-test")
+
+    # Ingest document first
+    ingest_payload = {
+        "content": (
+            "Enterprise Financial Metrics Q2 2026: "
+            "EBITDA margins reached 28.5% with total net cashflow of $14.2M."
+        ),
+        "source": "financial_metrics_q2.pdf",
+    }
+    await async_client.post(
+        "/api/v1/rag/ingest",
+        headers={"Authorization": f"Bearer {token}"},
+        json=ingest_payload,
+    )
+
+    # Query the RAG endpoint
+    query_payload = {
+        "query": "What were EBITDA margins in Q2?",
+        "top_k": 3,
+    }
+    query_resp = await async_client.post(
+        "/api/v1/rag/query",
+        headers={"Authorization": f"Bearer {token}"},
+        json=query_payload,
+    )
+    assert query_resp.status_code == status.HTTP_200_OK
+    query_data = query_resp.json()
+    assert query_data["query"] == query_payload["query"]
+    assert query_data["tenant_id"] == "tenant-rag-query-test"
+    assert "latency_ms" in query_data
+    assert isinstance(query_data["chunks"], list)

@@ -47,8 +47,10 @@ def test_critical_endpoints_exist(runtime_openapi: dict[str, Any]) -> None:
 
     critical_routes: dict[str, list[str]] = {
         "/health": ["get"],
+        "/api/v1/health": ["get"],
         "/api/v1/chat/stream": ["post"],
         "/api/v1/rag/ingest": ["post"],
+        "/api/v1/rag/query": ["post"],
         "/api/v1/byok/keys": ["post", "get"],
         "/api/v1/gateway/chat/completions": ["post"],
         "/api/v1/billing/webhook": ["post"],

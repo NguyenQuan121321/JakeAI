@@ -142,6 +142,53 @@
         ]
       }
     },
+    "/api/v1/rag/query": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Query tenant-isolated RAG index",
+        "description": "Retrieve relevant document chunks using hybrid dense vector and sparse lexical search.",
+        "operationId": "query_documents_api_v1_rag_query_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RAGQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RAGQueryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/byok/keys": {
       "get": {
         "tags": [
@@ -885,6 +932,51 @@
         "title": "ChatStreamRequest",
         "description": "Payload model for chat streaming requests supporting both prompt and query aliases."
       },
+      "DocumentChunk": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id",
+            "description": "Unique chunk identifier"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Raw text content of the document passage"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Tenant identifier owning this document"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Document source or title",
+            "default": "Internal Document"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "description": "Arbitrary document metadata"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "Retrieval or relevance score",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "content",
+          "tenant_id"
+        ],
+        "title": "DocumentChunk",
+        "description": "Atomic text chunk stored in dense/sparse indexes with tenant scoping."
+      },
       "DocumentIngestRequest": {
         "properties": {
           "content": {
@@ -1320,6 +1412,68 @@
         "title": "QuotaStatus",
         "description": "Current tenant quota consumption and status."
       },
+      "RAGQueryRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query",
+            "description": "Query text to retrieve relevant chunks"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "description": "Maximum number of chunks to return",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "RAGQueryRequest",
+        "description": "Payload to search tenant RAG index."
+      },
+      "RAGQueryResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentChunk"
+            },
+            "type": "array",
+            "title": "Chunks"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          },
+          "total_candidates": {
+            "type": "integer",
+            "title": "Total Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "tenant_id",
+          "chunks",
+          "latency_ms",
+          "total_candidates"
+        ],
+        "title": "RAGQueryResponse",
+        "description": "Response returning retrieved document chunks and latency."
+      },
       "SecurityFinding": {
         "properties": {
           "rule_id": {
@@ -1503,16 +1657,28 @@
       "description": "Server-Sent Events (SSE) streaming chat endpoints powered by LangGraph"
     },
     {
-      "name": "Gateway",
-      "description": "FinnApiGo perimeter security, policy enforcement and SSE"
-    },
-    {
-      "name": "Multi-Agent",
-      "description": "LangGraph multi-agent financial reasoning and orchestration"
-    },
-    {
       "name": "RAG",
       "description": "Document ingestion, chunking, and tenant retrieval operations"
+    },
+    {
+      "name": "BYOK",
+      "description": "Bring Your Own Key (BYOK) credential management and AES-256-GCM encryption"
+    },
+    {
+      "name": "DevOps Bot",
+      "description": "Automated PR review, diff pruning, and changelog generation"
+    },
+    {
+      "name": "AI Gateway",
+      "description": "OpenAI-compatible inference reverse proxy with caching and token quotas"
+    },
+    {
+      "name": "Billing",
+      "description": "VietQR and PayOS webhook payment processing and subscription tier management"
+    },
+    {
+      "name": "Analytics",
+      "description": "Real-time operational telemetry, cost savings, and token efficiency metrics"
     }
   ],
   "security": [
