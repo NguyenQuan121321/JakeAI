@@ -1,5 +1,6 @@
 """Enterprise Guardrails Layer for JakeAI Platform."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from app.core.context import TenantContext
@@ -20,7 +21,7 @@ class GuardrailsEngine:
     @staticmethod
     def inspect_tool_execution(
         tool_name: str,
-        context: TenantContext | dict[str, Any],
+        context: TenantContext | Mapping[str, Any],
     ) -> GuardrailDecision:
         """Enforce RBAC policy before agent tool execution."""
         return check_tool_rbac_guardrail(tool_name, context)

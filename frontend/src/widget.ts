@@ -232,7 +232,7 @@ export class JakeAIWidget extends HTMLElement {
     if (event === "token") {
       try {
         const parsed = JSON.parse(dataStr);
-        const token = parsed.token || parsed.content || dataStr;
+        const token = parsed.delta || parsed.token || parsed.content || dataStr;
         assistantMsg.content += token;
         if (contentEl) contentEl.textContent = assistantMsg.content;
       } catch {
@@ -240,6 +240,15 @@ export class JakeAIWidget extends HTMLElement {
         if (contentEl) contentEl.textContent = assistantMsg.content;
       }
       this.scrollToBottom();
+    } else if (event === "status") {
+      try {
+        const parsed = JSON.parse(dataStr);
+        if (parsed.mascot_state) {
+          this.mascot.setState(parsed.mascot_state as MascotState);
+        }
+      } catch {
+        // Fallback
+      }
     } else if (event === "tool_call") {
       this.mascot.setState("running");
       try {
@@ -286,7 +295,14 @@ export class JakeAIWidget extends HTMLElement {
       }
       this.scrollToBottom();
     } else if (event === "done") {
-      // Completed
+      try {
+        const parsed = JSON.parse(dataStr);
+        if (parsed.mascot_state) {
+          this.mascot.setState(parsed.mascot_state as MascotState);
+        }
+      } catch {
+        // Fallback
+      }
     }
   }
 

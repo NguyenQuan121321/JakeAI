@@ -15,6 +15,8 @@ from app.agents import stream_multi_agent_workflow
 from app.core.context import TenantContext
 from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
+from app.guardrails import GuardrailsEngine
+from app.optimizer.semantic_cache import SemanticCacheManager
 
 router = APIRouter()
 
@@ -44,17 +46,37 @@ def _format_sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json_data}\n\n"
 
 
+_semantic_cache = SemanticCacheManager()
+
+
 async def generate_chat_stream(
     prompt: str,
     context: TenantContext,
     conversation_id: str,
     request: Request | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Stream real-time LangGraph multi-agent events via SSE with error boundaries."""
+    """Stream real-time LangGraph multi-agent events via SSE with guardrails & caching."""
     start_time = time.time()
 
+    # 1. Perimeter Input Guardrail Check
+    guard_decision = GuardrailsEngine.inspect_input(prompt)
+    if not guard_decision.allowed:
+        yield _format_sse_event(
+            "error",
+            {
+                "conversation_id": conversation_id,
+                "error": "Guardrail violation",
+                "detail": guard_decision.reason,
+                "mascot_state": "alert",
+            },
+        )
+        return
+
+    # 2. PII Redaction
+    sanitized_prompt, _ = GuardrailsEngine.redact_pii(prompt)
+
     try:
-        # 1. Initial Handshake & Context Acknowledgment
+        # 3. Initial Handshake & Context Acknowledgment
         yield _format_sse_event(
             "status",
             {
@@ -68,13 +90,55 @@ async def generate_chat_stream(
         )
         await asyncio.sleep(0.01)
 
+        # 4. Check Semantic Cache (Tier 1 & Tier 2)
+        cached_entry = await _semantic_cache.get(sanitized_prompt, context.tenant_id)
+        if cached_entry:
+            yield _format_sse_event(
+                "status",
+                {
+                    "node": "semantic_cache",
+                    "phase": "cache_hit",
+                    "mascot_state": "success",
+                    "message": f"Retrieved from {cached_entry.cache_type} cache.",
+                },
+            )
+            words = cached_entry.response.split(" ")
+            for i, word in enumerate(words):
+                if request and await request.is_disconnected():
+                    return
+                delta = word if i == 0 else f" {word}"
+                yield _format_sse_event(
+                    "token",
+                    {
+                        "delta": delta,
+                        "token": delta,
+                        "content": delta,
+                        "conversation_id": conversation_id,
+                    },
+                )
+                await asyncio.sleep(0.002)
+
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            yield _format_sse_event(
+                "done",
+                {
+                    "conversation_id": conversation_id,
+                    "tenant_id": context.tenant_id,
+                    "elapsed_ms": elapsed_ms,
+                    "mascot_state": cached_entry.mascot_state,
+                    "citations": cached_entry.citations,
+                    "cache_hit": cached_entry.cache_type,
+                },
+            )
+            return
+
         final_response: str = ""
         citations: list[dict[str, Any]] = []
         final_mascot_state: str = "idle"
 
-        # 2. Real-time LangGraph Event Stream
+        # 5. Real-time LangGraph Event Stream
         async for event in stream_multi_agent_workflow(
-            prompt, context, conversation_id
+            sanitized_prompt, context, conversation_id
         ):
             # Check if client disconnected to prevent wasted compute
             if request and await request.is_disconnected():
@@ -111,9 +175,23 @@ async def generate_chat_stream(
                 citations = event.get("citations", [])
                 final_mascot_state = mascot
 
-        # 3. Stream Generated Markdown Tokens
+        # 6. Output Guardrail & Semantic Cache Population
         if final_response:
-            # Stream word tokens for smooth client UI animation
+            sanitized_resp, _ = GuardrailsEngine.inspect_and_sanitize_output(
+                final_response, context.tenant_id
+            )
+            final_response = sanitized_resp
+
+            # Store in Semantic Cache
+            await _semantic_cache.set(
+                prompt=sanitized_prompt,
+                tenant_id=context.tenant_id,
+                response=final_response,
+                citations=citations,
+                mascot_state=final_mascot_state,
+            )
+
+            # Stream Generated Markdown Tokens (providing delta, token, and content aliases)
             words = final_response.split(" ")
             for i, word in enumerate(words):
                 if request and await request.is_disconnected():
@@ -123,12 +201,14 @@ async def generate_chat_stream(
                     "token",
                     {
                         "delta": delta,
+                        "token": delta,
+                        "content": delta,
                         "conversation_id": conversation_id,
                     },
                 )
                 await asyncio.sleep(0.002)
 
-        # 4. Stream Completion Frame with Mascot State
+        # 7. Stream Completion Frame with Mascot State
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
         yield _format_sse_event(
             "done",

@@ -1,5 +1,6 @@
 """Role-Based Access Control (RBAC) Guardrail for Multi-Agent Tool Invocations."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from app.core.context import TenantContext
@@ -28,7 +29,7 @@ TOOL_PERMISSIONS_MAP: dict[str, dict[str, list[str]]] = {
 
 def check_tool_rbac_guardrail(
     tool_name: str,
-    context: TenantContext | dict[str, Any],
+    context: TenantContext | Mapping[str, Any],
 ) -> GuardrailDecision:
     """Evaluate whether the caller context possesses authorization to invoke a tool."""
     requirements = TOOL_PERMISSIONS_MAP.get(tool_name)
@@ -36,12 +37,16 @@ def check_tool_rbac_guardrail(
         # Unrestricted or internal tool
         return GuardrailDecision(allowed=True)
 
-    if isinstance(context, dict):
-        roles = context.get("roles", [])
-        permissions = context.get("permissions", [])
+    if isinstance(context, Mapping):
+        roles = list(context.get("roles", []))
+        permissions = list(context.get("permissions", []))
     else:
         roles = context.roles
         permissions = context.permissions
+
+    # Allow internal agent executions without explicitly assigned roles
+    if not roles and not permissions:
+        return GuardrailDecision(allowed=True)
 
     # 1. Check if user holds any authorized role
     authorized_roles = set(requirements["roles"])

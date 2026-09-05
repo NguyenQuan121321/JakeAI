@@ -12,6 +12,7 @@ from app.agents.supervisor import supervisor_node
 from app.agents.synthesizer import synthesizer_node
 from app.agents.verifier import verifier_node
 from app.core.context import TenantContext
+from app.core.security import exchange_obo_token
 
 
 def route_from_supervisor(state: AgentState) -> str:
@@ -94,6 +95,7 @@ async def stream_multi_agent_workflow(
         "permissions": context.permissions,
         "conversation_id": conversation_id,
         "correlation_id": context.correlation_id,
+        "obo_token": exchange_obo_token(context),
         "messages": [f"User query received: '{prompt}'"],
         "tool_calls": [],
         "financial_analysis": {},

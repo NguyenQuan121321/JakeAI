@@ -6,6 +6,7 @@ from typing import Any
 from app.agents.state import AgentState
 from app.core.context import TenantContext
 from app.core.security import exchange_obo_token
+from app.guardrails.rbac_guard import check_tool_rbac_guardrail
 
 
 async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
@@ -42,6 +43,28 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
             "plan": "ENTERPRISE",
         }
 
+    # Enforce RBAC guardrail before invoking tool
+    rbac_decision = check_tool_rbac_guardrail(tool_name, state)
+    if not rbac_decision.allowed:
+        blocked_entry: dict[str, Any] = {
+            "tool_name": tool_name,
+            "status": "BLOCKED",
+            "reason": rbac_decision.reason,
+            "tenant_id": tenant_id,
+            "caller_user_id": user_id,
+        }
+        return {
+            "current_agent": "finnapigo_tool",
+            "workflow_phase": "tool_blocked",
+            "tool_calls": [*state.get("tool_calls", []), blocked_entry],
+            "mascot_state": "alert",
+            "next_agent": "verifier",
+            "messages": [
+                *state.get("messages", []),
+                f"FinnApiGo Tool: Execution of '{tool_name}' blocked by RBAC Guardrail.",
+            ],
+        }
+
     # Propagate On-Behalf-Of (OBO) token
     obo_token = state.get("obo_token")
     if not obo_token:
@@ -53,7 +76,7 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
         )
         obo_token = exchange_obo_token(ctx)
 
-    tool_call_entry = {
+    tool_call_entry: dict[str, Any] = {
         "tool_name": tool_name,
         "invoked_at": time.time(),
         "tenant_id": tenant_id,
