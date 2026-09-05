@@ -56,6 +56,23 @@ async def test_financial_specialist_node() -> None:
 
 
 @pytest.mark.asyncio
+async def test_financial_specialist_node_formatted_currencies() -> None:
+    """Verify Financial Specialist extracts comma-separated currency values."""
+    state: AgentState = {
+        "prompt": (
+            "Revenue is $1,500,000.50 and expenses are $950,000.25. Calculate margin."
+        ),
+        "tenant_id": "tenant-test-corp",
+        "user_id": "user-01",
+    }
+    result = await financial_specialist_node(state)
+    analysis = result["financial_analysis"]
+    assert analysis["revenue"] == 1500000.50
+    assert analysis["operating_expenses"] == 950000.25
+    assert round(analysis["operating_income"], 2) == 550000.25
+
+
+@pytest.mark.asyncio
 async def test_finnapigo_tool_node() -> None:
     """Verify FinnApiGo Tool Executor dispatches authenticated upstream calls."""
     state: AgentState = {

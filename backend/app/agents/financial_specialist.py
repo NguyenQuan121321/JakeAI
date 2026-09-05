@@ -7,9 +7,17 @@ from app.agents.state import AgentState
 
 
 def _extract_numbers(text: str) -> list[float]:
-    """Extract numeric values from text string."""
-    matches = re.findall(r"\$?\b(\d+(?:\.\d+)?)\b", text)
-    return [float(m) for m in matches]
+    """Extract numeric values from text string supporting commas and currency signs."""
+    matches = re.findall(r"\$?\b(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\b", text)
+    results: list[float] = []
+    for m in matches:
+        cleaned = m.replace(",", "").strip()
+        if cleaned:
+            try:
+                results.append(float(cleaned))
+            except ValueError:
+                continue
+    return results
 
 
 async def financial_specialist_node(state: AgentState) -> dict[str, Any]:

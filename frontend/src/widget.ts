@@ -244,10 +244,22 @@ export class JakeAIWidget extends HTMLElement {
       this.mascot.setState("running");
       try {
         const parsed = JSON.parse(dataStr);
-        const toolName = parsed.name || parsed.tool || "FinnApiGo";
+        const toolName = String(parsed.name || parsed.tool || "FinnApiGo");
         const card = document.createElement("div");
         card.className = "jake-tool-card executing";
-        card.innerHTML = `<span class="jake-spinner"></span> <span>Querying <strong>${toolName}</strong>...</span>`;
+
+        const spinner = document.createElement("span");
+        spinner.className = "jake-spinner";
+
+        const label = document.createElement("span");
+        label.textContent = "Querying ";
+        const strong = document.createElement("strong");
+        strong.textContent = toolName;
+        label.appendChild(strong);
+        label.appendChild(document.createTextNode("..."));
+
+        card.appendChild(spinner);
+        card.appendChild(label);
         toolsContainer.appendChild(card);
       } catch {
         // Fallback for non-json tool call
@@ -260,6 +272,18 @@ export class JakeAIWidget extends HTMLElement {
         executingCard.innerHTML = `<span>✓</span> <span>Operation verified</span>`;
       }
       this.mascot.setState("thinking");
+      this.scrollToBottom();
+    } else if (event === "error") {
+      this.mascot.setState("alert");
+      try {
+        const parsed = JSON.parse(dataStr);
+        const errDetail = parsed.error || parsed.detail || "An unexpected error occurred.";
+        if (contentEl) {
+          contentEl.textContent += `\n[Error: ${errDetail}]`;
+        }
+      } catch {
+        if (contentEl) contentEl.textContent += `\n[Error: ${dataStr}]`;
+      }
       this.scrollToBottom();
     } else if (event === "done") {
       // Completed

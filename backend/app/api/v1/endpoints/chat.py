@@ -22,9 +22,14 @@ router = APIRouter()
 class ChatStreamRequest(BaseModel):
     """Payload model for chat streaming requests."""
 
-    prompt: str = Field(min_length=1, description="User question or financial prompt")
+    prompt: str = Field(
+        min_length=1,
+        max_length=8000,
+        description="User question or financial prompt",
+    )
     conversation_id: str | None = Field(
         default=None,
+        max_length=128,
         description="Optional conversation thread ID",
     )
     parameters: dict[str, Any] = Field(
@@ -43,88 +48,111 @@ async def generate_chat_stream(
     prompt: str,
     context: TenantContext,
     conversation_id: str,
+    request: Request | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Stream real-time LangGraph multi-agent events via SSE."""
+    """Stream real-time LangGraph multi-agent events via SSE with error boundaries."""
     start_time = time.time()
 
-    # 1. Initial Handshake & Context Acknowledgment
-    yield _format_sse_event(
-        "status",
-        {
-            "phase": "initialized",
-            "conversation_id": conversation_id,
-            "tenant_id": context.tenant_id,
-            "user_id": context.user_id,
-            "mascot_state": "thinking",
-            "timestamp": time.time(),
-        },
-    )
-    await asyncio.sleep(0.01)
-
-    final_response: str = ""
-    citations: list[dict[str, Any]] = []
-    final_mascot_state: str = "idle"
-
-    # 2. Real-time LangGraph Event Stream
-    async for event in stream_multi_agent_workflow(prompt, context, conversation_id):
-        node = event.get("node")
-        phase = event.get("workflow_phase", "executing")
-        mascot = event.get("mascot_state", "thinking")
-        msg = event.get("message", "")
-
+    try:
+        # 1. Initial Handshake & Context Acknowledgment
         yield _format_sse_event(
             "status",
             {
-                "node": node,
-                "phase": phase,
-                "mascot_state": mascot,
-                "message": msg,
+                "phase": "initialized",
+                "conversation_id": conversation_id,
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "mascot_state": "thinking",
+                "timestamp": time.time(),
             },
         )
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.01)
 
-        # Emit tool telemetry if tools were executed
-        if event.get("tool_calls"):
+        final_response: str = ""
+        citations: list[dict[str, Any]] = []
+        final_mascot_state: str = "idle"
+
+        # 2. Real-time LangGraph Event Stream
+        async for event in stream_multi_agent_workflow(
+            prompt, context, conversation_id
+        ):
+            # Check if client disconnected to prevent wasted compute
+            if request and await request.is_disconnected():
+                return
+
+            node = event.get("node")
+            phase = event.get("workflow_phase", "executing")
+            mascot = event.get("mascot_state", "thinking")
+            msg = event.get("message", "")
+
             yield _format_sse_event(
-                "tool_call",
+                "status",
                 {
                     "node": node,
-                    "tool_calls": event.get("tool_calls"),
+                    "phase": phase,
+                    "mascot_state": mascot,
+                    "message": msg,
                 },
             )
+            await asyncio.sleep(0.005)
 
-        if event.get("final_response"):
-            final_response = event["final_response"]
-            citations = event.get("citations", [])
-            final_mascot_state = mascot
+            # Emit tool telemetry if tools were executed
+            if event.get("tool_calls"):
+                yield _format_sse_event(
+                    "tool_call",
+                    {
+                        "node": node,
+                        "tool_calls": event.get("tool_calls"),
+                    },
+                )
 
-    # 3. Stream Generated Markdown Tokens
-    if final_response:
-        # Stream word tokens for smooth client UI animation
-        words = final_response.split(" ")
-        for i, word in enumerate(words):
-            delta = word if i == 0 else f" {word}"
-            yield _format_sse_event(
-                "token",
-                {
-                    "delta": delta,
-                    "conversation_id": conversation_id,
-                },
-            )
-            await asyncio.sleep(0.002)
+            if event.get("final_response"):
+                final_response = event["final_response"]
+                citations = event.get("citations", [])
+                final_mascot_state = mascot
 
-    # 4. Stream Completion Frame with Mascot State
-    elapsed_ms = round((time.time() - start_time) * 1000, 2)
-    yield _format_sse_event(
-        "done",
-        {
-            "conversation_id": conversation_id,
-            "tenant_id": context.tenant_id,
-            "elapsed_ms": elapsed_ms,
-            "mascot_state": final_mascot_state,
-            "citations": citations,
-        },
-    )
+        # 3. Stream Generated Markdown Tokens
+        if final_response:
+            # Stream word tokens for smooth client UI animation
+            words = final_response.split(" ")
+            for i, word in enumerate(words):
+                if request and await request.is_disconnected():
+                    return
+                delta = word if i == 0 else f" {word}"
+                yield _format_sse_event(
+                    "token",
+                    {
+                        "delta": delta,
+                        "conversation_id": conversation_id,
+                    },
+                )
+                await asyncio.sleep(0.002)
+
+        # 4. Stream Completion Frame with Mascot State
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        yield _format_sse_event(
+            "done",
+            {
+                "conversation_id": conversation_id,
+                "tenant_id": context.tenant_id,
+                "elapsed_ms": elapsed_ms,
+                "mascot_state": final_mascot_state,
+                "citations": citations,
+            },
+        )
+    except asyncio.CancelledError:
+        # Client aborted connection
+        return
+    except Exception as exc:
+        yield _format_sse_event(
+            "error",
+            {
+                "conversation_id": conversation_id,
+                "error": "Error during multi-agent workflow execution",
+                "detail": str(exc),
+                "mascot_state": "alert",
+            },
+        )
 
 
 @router.post(
@@ -150,6 +178,7 @@ async def chat_stream_endpoint(
             prompt=payload.prompt,
             context=context,
             conversation_id=conv_id,
+            request=request,
         ),
         media_type="text/event-stream",
         headers={

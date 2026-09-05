@@ -69,6 +69,13 @@ def create_application() -> FastAPI:
                     "description": "Service health probes and uptime diagnostics",
                 },
                 {
+                    "name": "Chat",
+                    "description": (
+                        "Server-Sent Events (SSE) streaming chat endpoints "
+                        "powered by LangGraph"
+                    ),
+                },
+                {
                     "name": "Gateway",
                     "description": (
                         "FinnApiGo perimeter security, policy enforcement and SSE"

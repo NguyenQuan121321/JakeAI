@@ -99,6 +99,7 @@
         "properties": {
           "prompt": {
             "type": "string",
+            "maxLength": 8000,
             "minLength": 1,
             "title": "Prompt",
             "description": "User question or financial prompt"
@@ -106,7 +107,8 @@
           "conversation_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128
               },
               {
                 "type": "null"
@@ -236,6 +238,10 @@
     {
       "name": "Health",
       "description": "Service health probes and uptime diagnostics"
+    },
+    {
+      "name": "Chat",
+      "description": "Server-Sent Events (SSE) streaming chat endpoints powered by LangGraph"
     },
     {
       "name": "Gateway",
