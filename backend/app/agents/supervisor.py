@@ -12,13 +12,16 @@ FINANCIAL_PATTERNS = [
 ]
 
 TOOL_PATTERNS = [
-    r"(?i)\b(?:finnapi|accounts?|transactions?|profiles?|transfers?|invoices?|limits?)\b",
+    r"(?i)\b(?:finnapi|transactions?|profiles?|transfers?|invoices?|limits?)\b",
     r"(?i)\b(?:fetch|lookup|api\s*calls?|endpoints?|query\s*data)\b",
 ]
 
 
 def classify_intent(prompt: str) -> str:
     """Classify prompt into target agent destination."""
+    if re.search(r"(?i)\bfinnapi\b", prompt):
+        return "finnapigo_tool"
+
     for pattern in FINANCIAL_PATTERNS:
         if re.search(pattern, prompt):
             return "financial_specialist"

@@ -57,19 +57,25 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
         markdown_parts.append("\n#### 🛠️ Upstream FinnApiGo Integrations\n")
         for tc in tool_calls:
             tool_name = tc.get("tool_name", "unknown")
-            output = tc.get("output", {})
-            markdown_parts.append(
-                f"- **{tool_name}**: Successfully synchronized with FinnApiGo."
-            )
-            for k, v in output.items():
-                markdown_parts.append(f"  - `{k}`: {v}")
-            citations.append(
-                {
-                    "source": f"FinnApiGo API ({tool_name})",
-                    "confidence": 1.0,
-                    "tenant_id": tenant_id,
-                }
-            )
+            if tc.get("status") == "BLOCKED":
+                reason = tc.get("reason", "Unauthorized by policy")
+                markdown_parts.append(
+                    f"- ⚠️ **{tool_name}**: Access Denied (Blocked by Security Guardrail: {reason})."
+                )
+            else:
+                output = tc.get("output", {})
+                markdown_parts.append(
+                    f"- **{tool_name}**: Successfully synchronized with FinnApiGo."
+                )
+                for k, v in output.items():
+                    markdown_parts.append(f"  - `{k}`: {v}")
+                citations.append(
+                    {
+                        "source": f"FinnApiGo API ({tool_name})",
+                        "confidence": 1.0,
+                        "tenant_id": tenant_id,
+                    }
+                )
 
     # 3. Contextual RAG Passage Citations
     if raw_retrieved_chunks:

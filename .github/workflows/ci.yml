@@ -126,6 +126,13 @@ jobs:
           cd frontend
           npm run build
 
+      - name: Publish & Archive Frontend Widget Distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-widget-dist
+          path: frontend/dist/
+          retention-days: 14
+
   unit-and-ai-tests:
     name: Automated Tests & AI RAG Regression
     runs-on: ubuntu-latest
@@ -192,6 +199,14 @@ jobs:
           cd backend
           python -m app.main --export-openapi openapi.json
           git diff --exit-code openapi.json
+
+      - name: Publish OpenAPI Specification Artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-specification
+          path: backend/openapi.json
+          retention-days: 14
 
   container-build-and-scan:
     name: Container Packaging & Vulnerability Scan

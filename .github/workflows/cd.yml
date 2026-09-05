@@ -107,8 +107,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Archive Production Release Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist-bundle
+          path: |
+            frontend/dist/
+            backend/openapi.json
+          retention-days: 90
+
   build-and-publish:
-    name: Build & Publish Container to GHCR
+    name: Build & Publish Container (GHCR / Docker Hub)
     runs-on: ubuntu-latest
     needs: [deploy-gate, semver-release]
     steps:
@@ -128,11 +137,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub (Optional)
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Extract Docker Metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/backend
+          images: |
+            ghcr.io/${{ github.repository }}/backend
+            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/jakeai-backend', secrets.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=raw,value=${{ needs.semver-release.outputs.new_version }},enable=${{ needs.semver-release.outputs.new_version != '' }}
             type=sha,prefix=sha-

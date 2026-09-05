@@ -136,6 +136,7 @@ async def generate_chat_stream(
         citations: list[dict[str, Any]] = []
         final_mascot_state: str = "idle"
 
+        has_tool_execution = False
         # 5. Real-time LangGraph Event Stream
         async for event in stream_multi_agent_workflow(
             sanitized_prompt, context, conversation_id
@@ -162,6 +163,7 @@ async def generate_chat_stream(
 
             # Emit tool telemetry if tools were executed
             if event.get("tool_calls"):
+                has_tool_execution = True
                 yield _format_sse_event(
                     "tool_call",
                     {
@@ -182,14 +184,15 @@ async def generate_chat_stream(
             )
             final_response = sanitized_resp
 
-            # Store in Semantic Cache
-            await _semantic_cache.set(
-                prompt=sanitized_prompt,
-                tenant_id=context.tenant_id,
-                response=final_response,
-                citations=citations,
-                mascot_state=final_mascot_state,
-            )
+            # Store in Semantic Cache only for non-tool knowledge/RAG queries to prevent cross-user leak
+            if not has_tool_execution:
+                await _semantic_cache.set(
+                    prompt=sanitized_prompt,
+                    tenant_id=context.tenant_id,
+                    response=final_response,
+                    citations=citations,
+                    mascot_state=final_mascot_state,
+                )
 
             # Stream Generated Markdown Tokens (providing delta, token, and content aliases)
             words = final_response.split(" ")
