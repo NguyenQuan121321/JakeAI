@@ -46,12 +46,12 @@ class CircuitBreaker:
         self.state: CircuitState = CircuitState.CLOSED
         self.failure_count: int = 0
         self.success_count: int = 0
-        self.last_state_change: float = time.time()
+        self.last_state_change: float = time.monotonic()
         self.total_fallback_calls: int = 0
 
     def is_available(self) -> bool:
         """Check if primary provider can be called or if recovery probe should begin."""
-        now = time.time()
+        now = time.monotonic()
         if self.state == CircuitState.OPEN:
             if now - self.last_state_change >= self.recovery_timeout_seconds:
                 self.state = CircuitState.HALF_OPEN
@@ -69,14 +69,14 @@ class CircuitBreaker:
                 self.state = CircuitState.CLOSED
                 self.failure_count = 0
                 self.success_count = 0
-                self.last_state_change = time.time()
+                self.last_state_change = time.monotonic()
         elif self.state == CircuitState.CLOSED:
             self.failure_count = 0
 
     def record_failure(self) -> None:
         """Record failed upstream operation."""
         self.failure_count += 1
-        self.last_state_change = time.time()
+        self.last_state_change = time.monotonic()
         if (
             self.state == CircuitState.HALF_OPEN
             or self.failure_count >= self.failure_threshold

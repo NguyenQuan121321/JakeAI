@@ -15,6 +15,7 @@
     "declarationDir": "./dist",
     "outDir": "./dist",
     "strict": true,
+    "rootDir": "./src",
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
