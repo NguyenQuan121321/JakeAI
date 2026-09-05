@@ -10,11 +10,11 @@ States:
 import asyncio
 import time
 from collections.abc import Callable, Coroutine
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     """Lifecycle states of the Circuit Breaker."""
 
     CLOSED = "CLOSED"

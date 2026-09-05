@@ -56,7 +56,9 @@ def _generate_synthetic_embedding(text: str, dim: int = 128) -> list[float]:
 
     for word in words:
         # Hash each token across vector buckets
-        token_hash = int(hashlib.md5(word.encode()).hexdigest(), 16)  # nosec B324
+        token_hash = int(
+            hashlib.md5(word.encode(), usedforsecurity=False).hexdigest(), 16
+        )
         idx = token_hash % dim
         vec[idx] += 1.0
 

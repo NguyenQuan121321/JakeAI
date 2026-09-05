@@ -143,6 +143,10 @@ describe("JakeAI Embedded Widget & Host Token Bridge", () => {
 
     widget.configure({ theme: "light", token: "bearer-token-999" });
     expect(widget.getToken()).toBe("bearer-token-999");
+    expect(widget.getTheme()).toBe("light");
+
+    widget.setTheme("dark");
+    expect(widget.getTheme()).toBe("dark");
 
     widget.setMascotState("thinking");
     expect(widget.getMascotState()).toBe("thinking");
@@ -150,5 +154,22 @@ describe("JakeAI Embedded Widget & Host Token Bridge", () => {
     widget.setMascotState("idle");
     expect(widget.getMascotState()).toBe("idle");
   });
+
+  it("should clear messages and reset DOM via clearMessages and header clear button", () => {
+    const widget = document.createElement("jake-ai-widget") as JakeAIWidget;
+    document.body.appendChild(widget);
+
+    expect(widget.getMessages().length).toBeGreaterThan(0);
+
+    const shadow = widget.getShadowRoot();
+    const clearBtn = shadow.querySelector(".jake-clear-btn") as HTMLButtonElement;
+    expect(clearBtn).not.toBeNull();
+
+    clearBtn.click();
+    expect(widget.getMessages().length).toBe(0);
+    const messagesEl = shadow.querySelector(".jake-messages-container");
+    expect(messagesEl?.children.length).toBe(0);
+  });
 });
+
 
