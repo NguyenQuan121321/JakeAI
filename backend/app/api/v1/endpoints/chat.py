@@ -1,4 +1,4 @@
-"""Chat and Server-Sent Events (SSE) streaming endpoints."""
+"""Chat and Server-Sent Events (SSE) streaming endpoints with LangGraph integration."""
 
 import asyncio
 import json
@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.agents import stream_multi_agent_workflow
 from app.core.context import TenantContext
 from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
@@ -43,7 +44,7 @@ async def generate_chat_stream(
     context: TenantContext,
     conversation_id: str,
 ) -> AsyncGenerator[str, None]:
-    """Asynchronously generate streaming SSE frames for client consumption."""
+    """Stream real-time LangGraph multi-agent events via SSE."""
     start_time = time.time()
 
     # 1. Initial Handshake & Context Acknowledgment
@@ -54,42 +55,63 @@ async def generate_chat_stream(
             "conversation_id": conversation_id,
             "tenant_id": context.tenant_id,
             "user_id": context.user_id,
+            "mascot_state": "thinking",
             "timestamp": time.time(),
         },
     )
     await asyncio.sleep(0.01)
 
-    # 2. Simulated Multi-Agent Pipeline Handshake
-    yield _format_sse_event(
-        "status",
-        {
-            "phase": "routing",
-            "agent": "supervisor",
-            "message": "Analyzing prompt and dispatching specialist agents...",
-        },
-    )
-    await asyncio.sleep(0.01)
+    final_response: str = ""
+    citations: list[dict[str, Any]] = []
+    final_mascot_state: str = "idle"
 
-    # 3. Streamed Token Chunks
-    tokens = [
-        "Received ",
-        "query: ",
-        f"'{prompt}'. ",
-        "Processing ",
-        "financial ",
-        "context ",
-        f"for tenant '{context.tenant_id}'.",
-    ]
+    # 2. Real-time LangGraph Event Stream
+    async for event in stream_multi_agent_workflow(prompt, context, conversation_id):
+        node = event.get("node")
+        phase = event.get("workflow_phase", "executing")
+        mascot = event.get("mascot_state", "thinking")
+        msg = event.get("message", "")
 
-    for token in tokens:
         yield _format_sse_event(
-            "token",
+            "status",
             {
-                "delta": token,
-                "conversation_id": conversation_id,
+                "node": node,
+                "phase": phase,
+                "mascot_state": mascot,
+                "message": msg,
             },
         )
         await asyncio.sleep(0.005)
+
+        # Emit tool telemetry if tools were executed
+        if event.get("tool_calls"):
+            yield _format_sse_event(
+                "tool_call",
+                {
+                    "node": node,
+                    "tool_calls": event.get("tool_calls"),
+                },
+            )
+
+        if event.get("final_response"):
+            final_response = event["final_response"]
+            citations = event.get("citations", [])
+            final_mascot_state = mascot
+
+    # 3. Stream Generated Markdown Tokens
+    if final_response:
+        # Stream word tokens for smooth client UI animation
+        words = final_response.split(" ")
+        for i, word in enumerate(words):
+            delta = word if i == 0 else f" {word}"
+            yield _format_sse_event(
+                "token",
+                {
+                    "delta": delta,
+                    "conversation_id": conversation_id,
+                },
+            )
+            await asyncio.sleep(0.002)
 
     # 4. Stream Completion Frame with Mascot State
     elapsed_ms = round((time.time() - start_time) * 1000, 2)
@@ -99,8 +121,8 @@ async def generate_chat_stream(
             "conversation_id": conversation_id,
             "tenant_id": context.tenant_id,
             "elapsed_ms": elapsed_ms,
-            "mascot_state": "idle",
-            "citations": [],
+            "mascot_state": final_mascot_state,
+            "citations": citations,
         },
     )
 
@@ -119,7 +141,6 @@ async def chat_stream_endpoint(
     context: TenantContext = Depends(get_current_tenant),
 ) -> StreamingResponse:
     """Enforce security & rate limits, then initiate real-time SSE stream."""
-    # Perimeter Rate Limiting per Tenant & IP
     await enforce_rate_limit(request, context.tenant_id)
 
     conv_id = payload.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
