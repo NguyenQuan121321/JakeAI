@@ -93,7 +93,7 @@ class SemanticCacheManager:
         self._redis_available: bool = True
 
     async def _get_redis(self) -> Any | None:
-        """Lazily initialize Redis connection if available."""
+        """Lazily initialize Redis connection if available with connection verification."""
         if self.redis_client is not None:
             return self.redis_client
         if not self._redis_available:
@@ -104,11 +104,14 @@ class SemanticCacheManager:
             from app.core.config import get_settings
 
             settings = get_settings()
-            self.redis_client = aioredis.from_url(
+            client = aioredis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_timeout=1.0,
+                socket_connect_timeout=0.2,
+                socket_timeout=0.2,
             )
+            await client.ping()
+            self.redis_client = client
             return self.redis_client
         except Exception:
             self._redis_available = False

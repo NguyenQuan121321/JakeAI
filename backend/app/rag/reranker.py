@@ -35,7 +35,7 @@ class CrossEncoderReranker:
             return None
 
         try:
-            from fastembed import (  # type: ignore[import-not-found,import-untyped]
+            from fastembed import (
                 TextCrossEncoder,
             )
 
