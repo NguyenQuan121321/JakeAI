@@ -91,6 +91,53 @@
           }
         ]
       }
+    },
+    "/api/v1/rag/ingest": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Ingest document into tenant RAG index",
+        "description": "Chunk, embed, and index document into tenant-isolated vector and keyword stores.",
+        "operationId": "ingest_document_api_v1_rag_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentIngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -140,6 +187,92 @@
         "type": "object",
         "title": "ChatStreamRequest",
         "description": "Payload model for chat streaming requests supporting both prompt and query aliases."
+      },
+      "DocumentIngestRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content",
+            "description": "Raw document text to be chunked and indexed"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source document name, URL, or identifier",
+            "default": "Internal Document"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "description": "Arbitrary metadata attached to each document chunk"
+          },
+          "chunk_size": {
+            "type": "integer",
+            "maximum": 4000.0,
+            "minimum": 50.0,
+            "title": "Chunk Size",
+            "description": "Maximum characters per document chunk",
+            "default": 500
+          },
+          "chunk_overlap": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Chunk Overlap",
+            "description": "Character overlap between consecutive chunks",
+            "default": 50
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "DocumentIngestRequest",
+        "description": "Payload for ingesting raw documents into tenant-isolated RAG indexes."
+      },
+      "DocumentIngestResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Ingestion status",
+            "default": "success"
+          },
+          "indexed_chunks": {
+            "type": "integer",
+            "title": "Indexed Chunks",
+            "description": "Total chunks generated and indexed"
+          },
+          "chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Chunk Ids",
+            "description": "Unique deterministic IDs of created chunks"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Document source identifier"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Tenant ID boundary where chunks reside"
+          }
+        },
+        "type": "object",
+        "required": [
+          "indexed_chunks",
+          "chunk_ids",
+          "source",
+          "tenant_id"
+        ],
+        "title": "DocumentIngestResponse",
+        "description": "Outcome metadata of document ingestion pipeline execution."
       },
       "HTTPValidationError": {
         "properties": {
@@ -260,6 +393,10 @@
     {
       "name": "Multi-Agent",
       "description": "LangGraph multi-agent financial reasoning and orchestration"
+    },
+    {
+      "name": "RAG",
+      "description": "Document ingestion, chunking, and tenant retrieval operations"
     }
   ],
   "security": [

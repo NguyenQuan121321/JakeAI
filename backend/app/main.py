@@ -87,6 +87,12 @@ def create_application() -> FastAPI:
                         "LangGraph multi-agent financial reasoning and orchestration"
                     ),
                 },
+                {
+                    "name": "RAG",
+                    "description": (
+                        "Document ingestion, chunking, and tenant retrieval operations"
+                    ),
+                },
             ],
         )
 

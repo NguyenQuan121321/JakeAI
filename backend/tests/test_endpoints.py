@@ -283,3 +283,52 @@ async def test_chat_stream_query_alias_compatibility(
     )
     assert response.status_code == status.HTTP_200_OK
     assert "event: done" in response.text
+
+
+@pytest.mark.asyncio
+async def test_rag_ingest_endpoint(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify POST /api/v1/rag/ingest accepts document, chunks it, and returns 201."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
+    token = generate_endpoint_jwt(tenant_id="tenant-rag-endpoint")
+
+    # Unauthorized check
+    unauth_resp = await async_client.post(
+        "/api/v1/rag/ingest",
+        json={"content": "Some financial disclosure"},
+    )
+    assert unauth_resp.status_code in (
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+    )
+
+    # Authorized ingestion
+    payload = {
+        "content": (
+            "JakeAI Enterprise Cloud Services Report.\n\n"
+            "Total contract value increased by 42% year-over-year. "
+            "Customer net retention rate exceeded 125% in Q3.\n\n"
+            "Operating margins improved to 34.5% driven by AI inference optimization."
+        ),
+        "source": "Cloud Services Q3 2026",
+        "metadata": {"department": "sales", "quarter": "Q3-2026"},
+        "chunk_size": 200,
+        "chunk_overlap=40": 40,
+    }
+
+    auth_resp = await async_client.post(
+        "/api/v1/rag/ingest",
+        headers={"Authorization": f"Bearer {token}"},
+        json=payload,
+    )
+
+    assert auth_resp.status_code == status.HTTP_201_CREATED
+    data = auth_resp.json()
+    assert data["status"] == "success"
+    assert data["indexed_chunks"] >= 1
+    assert data["tenant_id"] == "tenant-rag-endpoint"
+    assert data["source"] == "Cloud Services Q3 2026"
+    assert len(data["chunk_ids"]) == data["indexed_chunks"]

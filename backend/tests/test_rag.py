@@ -7,6 +7,10 @@ import pytest
 from app.agents.verifier import verifier_node
 from app.rag.bm25 import BM25Retriever
 from app.rag.citations import CitationGenerator
+from app.rag.ingestion import (
+    DocumentIngestionPipeline,
+    DocumentIngestRequest,
+)
 from app.rag.models import DocumentChunk
 from app.rag.reranker import CrossEncoderReranker
 from app.rag.retriever import HybridRetriever
@@ -202,3 +206,79 @@ async def test_verifier_node_self_rag_groundedness_reject_loop() -> None:
     assert result["mascot_state"] == "alert"
     assert result["next_agent"] == "supervisor"
     assert result["revision_count"] == 1
+
+
+def test_cross_encoder_reranker_with_custom_callable(
+    sample_chunks: list[DocumentChunk],
+) -> None:
+    """Verify CrossEncoderReranker applies custom ONNX/CrossEncoder callable scores."""
+
+    def mock_scorer(query: str, docs: list[str]) -> list[float]:
+        # Return 0.95 for doc 0, 0.20 for doc 1
+        return [0.95, 0.20]
+
+    reranker = CrossEncoderReranker(
+        model_name="test-model",
+        cross_encoder_fn=mock_scorer,
+    )
+    dense_candidates = [sample_chunks[0], sample_chunks[1]]
+    sparse_candidates = [sample_chunks[1]]
+
+    reranked = reranker.rerank(
+        query="operating metrics",
+        dense_results=dense_candidates,
+        sparse_results=sparse_candidates,
+        top_k=2,
+    )
+    assert len(reranked) == 2
+    assert reranked[0].chunk_id == sample_chunks[0].chunk_id
+    assert reranked[0].score > reranked[1].score
+
+
+def test_cross_encoder_empty_inputs() -> None:
+    """Verify CrossEncoderReranker gracefully handles empty candidate inputs."""
+    reranker = CrossEncoderReranker()
+    assert reranker.rerank(query="anything", dense_results=[], sparse_results=[]) == []
+
+
+@pytest.mark.asyncio
+async def test_document_ingestion_pipeline_end_to_end() -> None:
+    """Verify DocumentIngestionPipeline chunks, creates deterministic IDs, and indexes."""
+    retriever = HybridRetriever()
+    pipeline = DocumentIngestionPipeline(retriever=retriever)
+
+    long_text = (
+        "Enterprise Quarter 3 Financial Review.\n\n"
+        "Net revenue reached $12,400,000 for the third fiscal quarter. "
+        "Operating costs were reported at $7,800,000. "
+        "Operating profit stood at $4,600,000 with a 37.1% operating margin.\n\n"
+        "Guidance for Quarter 4 projects further revenue expansion to $14,000,000 "
+        "driven by cloud software growth."
+    )
+
+    request = DocumentIngestRequest(
+        content=long_text,
+        source="Q3 Report 2026",
+        metadata={"category": "financial_filing", "department": "investor_relations"},
+        chunk_size=150,
+        chunk_overlap=30,
+    )
+
+    response = await pipeline.ingest(request=request, tenant_id="tenant-ingest-test")
+
+    assert response.status_code if hasattr(response, "status_code") else True
+    assert response.status == "success"
+    assert response.indexed_chunks >= 2
+    assert len(response.chunk_ids) == response.indexed_chunks
+    assert response.tenant_id == "tenant-ingest-test"
+    assert response.source == "Q3 Report 2026"
+
+    # Verify indexed chunks are retrievable via hybrid retriever
+    retrieved = await retriever.retrieve(
+        query="operating margin net revenue",
+        tenant_id="tenant-ingest-test",
+        top_k=3,
+    )
+    assert len(retrieved.chunks) >= 1
+    assert retrieved.chunks[0].tenant_id == "tenant-ingest-test"
+    assert "tenant-ingest-test" in retrieved.chunks[0].tenant_id

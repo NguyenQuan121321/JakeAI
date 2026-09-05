@@ -59,6 +59,11 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
     # If already under revision from verifier critique, preserve specialized route
     if state.get("verification_verdict") == "NEEDS_REVISION" and revision_count < 2:
         target = state.get("next_agent", "financial_specialist")
+        if target in ("supervisor", "verifier", "", None):
+            classified = classify_intent(prompt)
+            target = (
+                "financial_specialist" if classified == "synthesizer" else classified
+            )
         return {
             "current_agent": "supervisor",
             "workflow_phase": "re_routing",

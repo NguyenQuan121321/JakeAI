@@ -234,3 +234,109 @@ async def test_chat_sse_stream_multi_agent(
     assert "event: done" in body
     assert "supervisor" in body
     assert "$800,000.00" in body
+
+
+@pytest.mark.asyncio
+async def test_branch_supervisor_to_finnapigo_tool() -> None:
+    """Verify Branch 2: supervisor -> finnapigo_tool -> verifier -> synthesizer."""
+    graph = create_agent_graph()
+    initial_state: AgentState = {
+        "prompt": "Fetch transactions and customer profile from finnapi",
+        "tenant_id": "tenant-tool-branch",
+        "user_id": "user-tb",
+        "roles": ["admin"],
+        "permissions": ["all"],
+        "conversation_id": "conv-tool-branch",
+        "correlation_id": "corr-tb",
+        "messages": [],
+        "tool_calls": [],
+        "financial_analysis": {},
+        "revision_count": 0,
+        "citations": [],
+    }
+
+    final_state = await graph.ainvoke(initial_state)
+
+    assert final_state["current_agent"] == "synthesizer"
+    assert len(final_state["tool_calls"]) >= 1
+    assert final_state["tool_calls"][0]["tool_name"] in (
+        "list_transactions",
+        "get_account_balance",
+    )
+    assert final_state["verification_verdict"] == "PASS"
+    assert "final_response" in final_state
+    assert final_state["workflow_phase"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_branch_supervisor_to_synthesizer_direct() -> None:
+    """Verify Branch 3: supervisor -> synthesizer (direct general inquiry routing)."""
+    graph = create_agent_graph()
+    initial_state: AgentState = {
+        "prompt": "Hello! What capabilities does JakeAI offer?",
+        "tenant_id": "tenant-direct-branch",
+        "user_id": "user-db",
+        "roles": ["viewer"],
+        "permissions": ["read"],
+        "conversation_id": "conv-direct-branch",
+        "correlation_id": "corr-db",
+        "messages": [],
+        "tool_calls": [],
+        "financial_analysis": {},
+        "revision_count": 0,
+        "citations": [],
+    }
+
+    final_state = await graph.ainvoke(initial_state)
+
+    assert final_state["current_agent"] == "synthesizer"
+    assert final_state["financial_analysis"] == {}
+    assert len(final_state["tool_calls"]) == 0
+    assert "final_response" in final_state
+    assert "Verified by JakeAI" in final_state["final_response"]
+
+
+@pytest.mark.asyncio
+async def test_branch_verifier_critique_revision_loop() -> None:
+    """Verify Branch 4: verifier -> supervisor critique/revision loop on variance."""
+    # Build state with math discrepancy to simulate verifier rejection
+    state: AgentState = {
+        "prompt": "Calculate margin for revenue $2000000 and cost $1200000",
+        "tenant_id": "tenant-critique",
+        "user_id": "user-critique",
+        "financial_analysis": {
+            "revenue": 2000000.0,
+            "operating_expenses": 1200000.0,
+            "operating_income": 999999.0,  # Intentional discrepancy
+        },
+        "tool_calls": [],
+        "revision_count": 0,
+        "messages": [],
+    }
+
+    # Step 1: Verifier detects error and routes to supervisor for revision
+    critique = await verifier_node(state)
+    assert critique["verification_verdict"] == "NEEDS_REVISION"
+    assert critique["revision_count"] == 1
+    assert critique["next_agent"] == "supervisor"
+
+    # Step 2: Supervisor handles revision and re-dispatches to specialist
+    state.update(critique)  # type: ignore[typeddict-item]
+    from app.agents.supervisor import supervisor_node
+
+    re_route = await supervisor_node(state)
+    assert re_route["current_agent"] == "supervisor"
+    assert re_route["workflow_phase"] == "re_routing"
+    assert re_route["next_agent"] == "financial_specialist"
+
+    # Step 3: Financial specialist re-computes with accurate arithmetic
+    state.update(re_route)  # type: ignore[typeddict-item]
+    corrected = await financial_specialist_node(state)
+    assert corrected["financial_analysis"]["operating_income"] == 800000.0
+    assert corrected["next_agent"] == "verifier"
+
+    # Step 4: Verifier checks corrected calculation and passes
+    state.update(corrected)  # type: ignore[typeddict-item]
+    passed = await verifier_node(state)
+    assert passed["verification_verdict"] == "PASS"
+    assert passed["next_agent"] == "synthesizer"
