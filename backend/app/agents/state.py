@@ -16,6 +16,8 @@ class AgentState(TypedDict, total=False):
     permissions: list[str]
     conversation_id: str
     correlation_id: str
+    obo_token: str
+    raw_token: str
 
     # Dynamic Workflow Routing
     next_agent: str

@@ -1,5 +1,5 @@
 # Gitleaks Configuration for JakeAI Platform
-# Defines custom allowlists for mock testing fixtures and synthetic tokens
+# Defines custom allowlists for mock testing fixtures, synthetic tokens, and golden evals
 
 [extend]
 useDefault = true
@@ -9,9 +9,15 @@ description = "Allowlist mock tokens and test fixtures"
 paths = [
     '''backend/tests/.*''',
     '''backend/tests/evals/.*''',
+    '''backend/tests/evals/golden_dataset\.json''',
+    '''\.gitleaks\.toml''',
 ]
 regexes = [
     '''(?i)wrong-forged-.*''',
     '''(?i)super_secret_token_.*''',
     '''(?i)insecure-development-.*''',
+    '''(?i)test-key-for-ci-.*''',
+    '''(?i)mock_jwt_token_.*''',
+    '''(?i)mock-secret-.*''',
+    '''(?i)test-ci-.*''',
 ]

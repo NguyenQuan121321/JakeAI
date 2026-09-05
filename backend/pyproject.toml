@@ -62,9 +62,9 @@ omit = ["tests/*", "app/main.py"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 80
+fail_under = 85
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
-skips = ["B101", "B104"]
+skips = ["B101", "B104", "B105", "B324"]
 

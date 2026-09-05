@@ -148,13 +148,18 @@ jobs:
         image: qdrant/qdrant:v1.12.1
         ports:
           - 6333:6333
+          - 6334:6334
 
     env:
       REDIS_HOST: localhost
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
-      FINNAPIGO_SECRET_KEY: test-key-for-ci-pipeline-min-32-chars-long
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || '' }}
+      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY || '' }}
 
     steps:
       - name: Checkout Source Code
@@ -172,10 +177,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Pytest Unit & AI RAG Regression Tests with Coverage Floor
+      - name: Run Pytest Unit & Integration Tests with Raised Coverage Floor (85%)
         run: |
           cd backend
-          pytest --cov=app tests/ -v --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+          pytest --cov=app tests/ -v --cov-report=xml --cov-report=term-missing --cov-fail-under=85
+
+      - name: RAG Quality Gate & Anti-Hallucination Regression (Block 5)
+        run: |
+          cd backend
+          pytest tests/evals/test_rag_regression.py -v
 
       - name: Verify OpenAPI Schema Export & Drift Prevention
         run: |

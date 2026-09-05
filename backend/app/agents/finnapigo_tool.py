@@ -4,6 +4,8 @@ import time
 from typing import Any
 
 from app.agents.state import AgentState
+from app.core.context import TenantContext
+from app.core.security import exchange_obo_token
 
 
 async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
@@ -40,11 +42,24 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
             "plan": "ENTERPRISE",
         }
 
+    # Propagate On-Behalf-Of (OBO) token
+    obo_token = state.get("obo_token")
+    if not obo_token:
+        ctx = TenantContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            roles=state.get("roles", []),
+            permissions=state.get("permissions", []),
+        )
+        obo_token = exchange_obo_token(ctx)
+
     tool_call_entry = {
         "tool_name": tool_name,
         "invoked_at": time.time(),
         "tenant_id": tenant_id,
         "caller_user_id": user_id,
+        "delegated_actor": "jakeai-platform",
+        "authorization_header": f"Bearer {obo_token[:15]}...",
         "output": result_payload,
     }
 

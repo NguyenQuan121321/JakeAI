@@ -1,5 +1,6 @@
 """Security utilities and FinnApiGo JWT policy enforcement."""
 
+import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -113,3 +114,49 @@ def require_permissions(
         return context
 
     return permission_checker
+
+
+def exchange_obo_token(
+    context: TenantContext,
+    target_audience: str = "finnapigo-api",
+    requested_scopes: list[str] | None = None,
+    expires_in_seconds: int = 300,
+    secret_key: str | None = None,
+    algorithm: str | None = None,
+) -> str:
+    """Exchange caller TenantContext for a signed On-Behalf-Of (OBO) JWT token.
+
+    Adheres to RFC 8693 token exchange standards with an 'act' (actor) claim
+    identifying JakeAI Platform as the authorized executor on behalf of the user.
+    """
+    settings = get_settings()
+    key = secret_key or settings.JWT_SECRET_KEY
+    algo = algorithm or settings.JWT_ALGORITHM
+
+    # If algorithm is RSA but key is a symmetric secret string, fall back to HS256
+    if algo.startswith("RS") and not (
+        isinstance(key, str) and key.strip().startswith("-----BEGIN")
+    ):
+        algo = "HS256"
+
+    now = int(time.time())
+    scopes = requested_scopes if requested_scopes is not None else context.scopes
+
+    payload: dict[str, Any] = {
+        "sub": context.user_id,
+        "tenant_id": context.tenant_id,
+        "org_id": context.org_id,
+        "roles": context.roles,
+        "scopes": scopes,
+        "permissions": context.permissions,
+        "aud": target_audience,
+        "iss": "jakeai-gateway",
+        "act": {
+            "sub": "jakeai-platform",
+            "client_id": "jakeai-gateway",
+        },
+        "iat": now,
+        "exp": now + expires_in_seconds,
+    }
+
+    return jwt.encode(payload, key, algorithm=algo)

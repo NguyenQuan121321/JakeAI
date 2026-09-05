@@ -21,6 +21,7 @@ select = [
 ignore = [
     "B008",   # Do not perform function calls in argument defaults (needed for FastAPI Depends)
     "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
+    "E501",   # Line length handled by ruff format; long regex and docstrings permitted
 ]
 
 [lint.isort]

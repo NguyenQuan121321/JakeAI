@@ -11,7 +11,11 @@ from httpx import AsyncClient
 from app.core.config import get_settings
 from app.core.context import TenantContext
 from app.core.rate_limiter import TokenBucketRateLimiter
-from app.core.security import require_permissions, verify_finnapigo_jwt
+from app.core.security import (
+    exchange_obo_token,
+    require_permissions,
+    verify_finnapigo_jwt,
+)
 
 
 def create_test_jwt(
@@ -185,3 +189,38 @@ async def test_chat_stream_success(
     assert "event: token" in body
     assert "event: done" in body
     assert "tenant-acme" in body
+
+
+def test_exchange_obo_token() -> None:
+    """Verify On-Behalf-Of (OBO) token exchange produces valid delegation JWT."""
+    ctx = TenantContext(
+        tenant_id="tenant_obo_99",
+        user_id="user_obo_123",
+        org_id="org_enterprise",
+        roles=["financial_analyst"],
+        scopes=["reports:read", "transactions:read"],
+        permissions=["ledger:access"],
+    )
+
+    obo_token = exchange_obo_token(
+        context=ctx,
+        target_audience="finnapigo-api",
+        algorithm="HS256",
+        secret_key="test-key-for-ci-pipeline-min-32-chars-long",
+    )
+    assert obo_token is not None
+
+    # Decode and verify claims
+    decoded: dict[str, Any] = jwt.decode(
+        obo_token,
+        "test-key-for-ci-pipeline-min-32-chars-long",
+        algorithms=["HS256"],
+        audience="finnapigo-api",
+    )
+    assert decoded["sub"] == "user_obo_123"
+    assert decoded["tenant_id"] == "tenant_obo_99"
+    assert decoded["org_id"] == "org_enterprise"
+    assert decoded["aud"] == "finnapigo-api"
+    assert decoded["act"]["sub"] == "jakeai-platform"
+    assert "financial_analyst" in decoded["roles"]
+    assert "reports:read" in decoded["scopes"]
