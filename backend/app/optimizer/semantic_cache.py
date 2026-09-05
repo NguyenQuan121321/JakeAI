@@ -229,6 +229,8 @@ class SemanticCacheManager:
     async def invalidate(self, tenant_id: str | None = None) -> int:
         """Invalidate cache entries for a tenant or globally."""
         cleared_count = 0
+        redis_conn = await self._get_redis()
+
         if tenant_id:
             keys_to_delete = [
                 k for k, v in self._memory_exact.items() if v.tenant_id == tenant_id
@@ -241,17 +243,28 @@ class SemanticCacheManager:
                 cleared_count += len(self._memory_vectors[tenant_id])
                 del self._memory_vectors[tenant_id]
 
-            if self.redis_client is not None:
+            if redis_conn is not None:
                 try:
                     pattern = f"cache:exact:{tenant_id}:*"
-                    keys = await self.redis_client.keys(pattern)
+                    keys = await redis_conn.keys(pattern)
                     if keys:
-                        await self.redis_client.delete(*keys)
+                        deleted = await redis_conn.delete(*keys)
+                        cleared_count = max(cleared_count, int(deleted))
                 except Exception:
                     self._redis_available = False
         else:
             cleared_count = len(self._memory_exact)
             self._memory_exact.clear()
             self._memory_vectors.clear()
+
+            if redis_conn is not None:
+                try:
+                    pattern = "cache:exact:*"
+                    keys = await redis_conn.keys(pattern)
+                    if keys:
+                        deleted = await redis_conn.delete(*keys)
+                        cleared_count = max(cleared_count, int(deleted))
+                except Exception:
+                    self._redis_available = False
 
         return cleared_count

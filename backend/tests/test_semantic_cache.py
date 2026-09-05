@@ -74,6 +74,7 @@ async def test_semantic_vector_cache_hit_and_tenant_isolation() -> None:
 async def test_cache_invalidation() -> None:
     """Verify cache invalidation by tenant and globally."""
     cache = SemanticCacheManager()
+    await cache.invalidate()
     await cache.set("query 1", "tenant_1", "resp 1")
     await cache.set("query 2", "tenant_2", "resp 2")
 

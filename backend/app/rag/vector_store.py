@@ -52,16 +52,24 @@ class QdrantVectorStore:
         self._is_qdrant_available = False
 
     async def _get_client(self) -> Any:
-        """Lazily initialize Qdrant client connection."""
+        """Lazily initialize Qdrant client connection and ensure collection exists."""
         if self._client is None:
             try:
                 from qdrant_client import AsyncQdrantClient
+                from qdrant_client.http import models
 
                 client = AsyncQdrantClient(
                     url=self.url, timeout=1, check_compatibility=False
                 )
-                # Test connectivity
-                await client.get_collections()
+                # Test connectivity and ensure target collection exists
+                if not await client.collection_exists(self.collection_name):
+                    await client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=models.VectorParams(
+                            size=self.dimension,
+                            distance=models.Distance.COSINE,
+                        ),
+                    )
                 self._client = client
                 self._is_qdrant_available = True
             except Exception:
