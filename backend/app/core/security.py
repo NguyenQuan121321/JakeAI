@@ -51,7 +51,7 @@ def verify_finnapigo_jwt(
     except jwt.InvalidTokenError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication token: {e!s}",
+            detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
 

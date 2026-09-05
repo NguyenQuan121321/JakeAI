@@ -8,6 +8,38 @@ from fastapi import HTTPException, Request, status
 
 from app.core.config import get_settings
 
+# Atomic Redis Lua script to eliminate TOCTOU race conditions under high concurrency
+_RATELIMIT_LUA_SCRIPT = """  # nosec B105
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local ttl = tonumber(ARGV[4])
+
+local data = redis.call('HMGET', key, 'tokens', 'last_time')
+local last_tokens = tonumber(data[1])
+local last_time = tonumber(data[2])
+
+if not last_tokens or not last_time then
+    last_tokens = capacity
+    last_time = now
+end
+
+local elapsed = math.max(0, now - last_time)
+local current_tokens = math.min(capacity, last_tokens + (elapsed * refill_rate))
+
+if current_tokens >= 1.0 then
+    current_tokens = current_tokens - 1.0
+    redis.call('HSET', key, 'tokens', tostring(current_tokens))
+    redis.call('HSET', key, 'last_time', tostring(now))
+    redis.call('EXPIRE', key, ttl)
+    return {1, math.floor(current_tokens), 0}
+else
+    local wait_time = (1.0 - current_tokens) / refill_rate
+    return {0, math.floor(current_tokens), math.ceil(wait_time)}
+end
+"""
+
 
 class TokenBucketRateLimiter:
     """Token bucket rate limiter supporting Redis and in-memory local caching."""
@@ -41,8 +73,8 @@ class TokenBucketRateLimiter:
                     settings.REDIS_URL,
                     encoding="utf-8",
                     decode_responses=True,
-                    socket_connect_timeout=0.1,
-                    socket_timeout=0.1,
+                    socket_connect_timeout=0.2,
+                    socket_timeout=0.2,
                 )
                 await client.ping()
                 self._redis_client = client
@@ -51,13 +83,27 @@ class TokenBucketRateLimiter:
                 self._redis_retry_after = now + 30.0  # Back off 30s before retrying
         return self._redis_client
 
+    def _prune_memory_store(self, now: float) -> None:
+        """Prevent unbounded memory growth by pruning stale in-memory bucket entries."""
+        if len(self._memory_store) > 1000:
+            stale_cutoff = now - 120.0
+            stale_keys = [
+                k
+                for k, (_, last_refill) in self._memory_store.items()
+                if last_refill < stale_cutoff
+            ]
+            for k in stale_keys:
+                del self._memory_store[k]
+
     def _check_in_memory(self, key: str) -> tuple[bool, int, float]:
-        """Evaluate token bucket consumption in local memory."""
+        """Evaluate token bucket consumption in local memory with leak protection."""
         now = time.time()
+        self._prune_memory_store(now)
+
         tokens, last_refill = self._memory_store.get(key, (float(self.capacity), now))
 
         # Refill tokens based on elapsed time
-        elapsed = now - last_refill
+        elapsed = max(0.0, now - last_refill)
         tokens = min(float(self.capacity), tokens + (elapsed * self.refill_rate))
 
         if tokens >= 1.0:
@@ -73,7 +119,7 @@ class TokenBucketRateLimiter:
         tenant_id: str,
         client_ip: str,
     ) -> tuple[bool, int, float]:
-        """Verify token bucket availability.
+        """Verify token bucket availability atomically.
 
         Returns:
             (is_allowed, remaining_tokens, retry_after_seconds)
@@ -84,41 +130,31 @@ class TokenBucketRateLimiter:
         if redis is None:
             return self._check_in_memory(key)
 
-        # Atomic Redis token bucket evaluation
         now = time.time()
-        token_key = f"{key}:tokens"
-        time_key = f"{key}:timestamp"
 
         try:
-            async with redis.pipeline(transaction=True) as pipe:
-                pipe.get(token_key)
-                pipe.get(time_key)
-                results: list[Any] = await pipe.execute()
-
-            raw_tokens, raw_time = results[0], results[1]
-            last_tokens = (
-                float(raw_tokens) if raw_tokens is not None else float(self.capacity)
-            )
-            last_time = float(raw_time) if raw_time is not None else now
-
-            elapsed = now - last_time
-            current_tokens = min(
-                float(self.capacity),
-                last_tokens + (elapsed * self.refill_rate),
+            # Execute atomic Lua script inside Redis
+            result: Any = await redis.eval(
+                _RATELIMIT_LUA_SCRIPT,
+                1,
+                key,
+                self.capacity,
+                self.refill_rate,
+                now,
+                60,
             )
 
-            if current_tokens >= 1.0:
-                current_tokens -= 1.0
-                async with redis.pipeline(transaction=True) as pipe:
-                    pipe.set(token_key, current_tokens, ex=60)
-                    pipe.set(time_key, now, ex=60)
-                    await pipe.execute()
-                return True, int(current_tokens), 0.0
+            if isinstance(result, list) and len(result) >= 3:
+                allowed = bool(result[0] == 1)
+                remaining = int(result[1])
+                wait_time = float(result[2])
+                return allowed, remaining, wait_time
 
-            wait_time = (1.0 - current_tokens) / self.refill_rate
-            return False, int(current_tokens), round(wait_time, 2)
+            return self._check_in_memory(key)
         except Exception:
-            # Resilient fallback to memory if Redis operation times out
+            # On connection failure, reset client and fall back to memory
+            self._redis_client = None
+            self._redis_retry_after = now + 15.0
             return self._check_in_memory(key)
 
 

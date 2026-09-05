@@ -1,0 +1,387 @@
+:host {
+  --jake-primary: #3b82f6;
+  --jake-primary-hover: #2563eb;
+  --jake-bg-dark: #0f172a;
+  --jake-surface: #1e293b;
+  --jake-surface-card: #273549;
+  --jake-border: #334155;
+  --jake-text-primary: #f8fafc;
+  --jake-text-secondary: #94a3b8;
+  --jake-accent: #f59e0b;
+  --jake-success: #10b981;
+  --jake-error: #ef4444;
+  --jake-radius: 16px;
+  --jake-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  color: var(--jake-text-primary);
+  line-height: 1.5;
+  box-sizing: border-box;
+  z-index: 99999;
+}
+
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+/* Floating Launcher Button */
+.jake-trigger-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 2px solid #38bdf8;
+  box-shadow: 0 10px 20px rgba(56, 189, 248, 0.3), var(--jake-shadow);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
+  z-index: 100000;
+  outline: none;
+  padding: 0;
+}
+
+.jake-trigger-btn:hover {
+  transform: scale(1.08) translateY(-2px);
+  box-shadow: 0 14px 28px rgba(56, 189, 248, 0.4), var(--jake-shadow);
+}
+
+.jake-trigger-btn:active {
+  transform: scale(0.96);
+}
+
+/* Chat Window Container */
+.jake-chat-window {
+  position: fixed;
+  bottom: 96px;
+  right: 24px;
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  height: 620px;
+  max-height: calc(100vh - 120px);
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--jake-border);
+  border-radius: var(--jake-radius);
+  box-shadow: var(--jake-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: bottom right;
+  z-index: 100000;
+}
+
+.jake-chat-window.hidden {
+  opacity: 0;
+  transform: scale(0.85) translateY(20px);
+  pointer-events: none;
+}
+
+/* Header */
+.jake-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--jake-surface);
+  border-bottom: 1px solid var(--jake-border);
+}
+
+.jake-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.jake-header-title {
+  display: flex;
+  flex-direction: column;
+}
+
+.jake-header-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--jake-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jake-status-badge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--jake-success);
+  box-shadow: 0 0 8px var(--jake-success);
+}
+
+.jake-header-subtitle {
+  font-size: 11px;
+  color: var(--jake-text-secondary);
+}
+
+.jake-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--jake-text-secondary);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.jake-close-btn:hover {
+  background: var(--jake-surface-card);
+  color: var(--jake-text-primary);
+}
+
+/* Messages Area */
+.jake-messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+.jake-messages-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.jake-messages-container::-webkit-scrollbar-thumb {
+  background: var(--jake-border);
+  border-radius: 3px;
+}
+
+/* Message Bubble */
+.jake-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+  animation: jakeFadeIn 0.2s ease forwards;
+}
+
+.jake-message.user {
+  align-self: flex-end;
+}
+
+.jake-message.assistant,
+.jake-message.system {
+  align-self: flex-start;
+}
+
+.jake-message-bubble {
+  padding: 10px 14px;
+  border-radius: 12px;
+  word-break: break-word;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.jake-message.user .jake-message-bubble {
+  background: var(--jake-primary);
+  color: #ffffff;
+  border-bottom-right-radius: 3px;
+}
+
+.jake-message.assistant .jake-message-bubble {
+  background: var(--jake-surface-card);
+  color: var(--jake-text-primary);
+  border: 1px solid var(--jake-border);
+  border-bottom-left-radius: 3px;
+}
+
+.jake-message.system .jake-message-bubble {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  font-size: 12px;
+}
+
+/* Tool Execution Status Card */
+.jake-tool-card {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px dashed var(--jake-border);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--jake-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jake-tool-card.executing {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+.jake-tool-card.done {
+  border-color: var(--jake-success);
+  color: #6ee7b7;
+}
+
+.jake-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: jakeSpin 0.75s linear infinite;
+  display: inline-block;
+}
+
+/* Streaming Cursor */
+.jake-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background: var(--jake-primary);
+  margin-left: 3px;
+  vertical-align: middle;
+  animation: jakeBlink 0.9s infinite;
+}
+
+/* Input Footer */
+.jake-chat-footer {
+  padding: 12px 16px;
+  background: var(--jake-surface);
+  border-top: 1px solid var(--jake-border);
+}
+
+.jake-input-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.jake-input-field {
+  flex: 1;
+  background: var(--jake-bg-dark);
+  border: 1px solid var(--jake-border);
+  border-radius: 20px;
+  padding: 10px 16px;
+  color: var(--jake-text-primary);
+  font-size: 13.5px;
+  outline: none;
+  resize: none;
+  max-height: 100px;
+  transition: border-color 0.2s ease;
+}
+
+.jake-input-field:focus {
+  border-color: var(--jake-primary);
+}
+
+.jake-input-field::placeholder {
+  color: var(--jake-text-secondary);
+}
+
+.jake-send-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--jake-primary);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, transform 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.jake-send-btn:hover:not(:disabled) {
+  background: var(--jake-primary-hover);
+  transform: scale(1.05);
+}
+
+.jake-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jake-footer-note {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--jake-text-secondary);
+  opacity: 0.7;
+}
+
+/* Mascot SVG Animations */
+.jake-mascot-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jake-corgi-svg.state-idle .corgi-ear {
+  animation: jakeEarWiggle 4s ease-in-out infinite;
+}
+
+.jake-corgi-svg.state-thinking {
+  animation: jakeThinkPulse 1.8s ease-in-out infinite;
+}
+
+.jake-corgi-svg.state-success {
+  animation: jakeCelebration 0.6s ease-in-out 2;
+}
+
+.jake-corgi-svg.state-alert {
+  animation: jakeAlertShake 0.4s ease-in-out infinite;
+}
+
+@keyframes jakeFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes jakeBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes jakeSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes jakeEarWiggle {
+  0%, 85%, 100% { transform: rotate(0deg); }
+  90% { transform: rotate(4deg); }
+  95% { transform: rotate(-4deg); }
+}
+
+@keyframes jakeThinkPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+@keyframes jakeCelebration {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px) rotate(-3deg); }
+}
+
+@keyframes jakeAlertShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
