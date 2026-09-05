@@ -3,14 +3,17 @@
 from typing import Any
 
 from app.agents.state import AgentState
+from app.rag.citations import CitationGenerator
+from app.rag.models import DocumentChunk
 
 
 async def synthesizer_node(state: AgentState) -> dict[str, Any]:
-    """Consolidate multi-agent outputs into polished Markdown for UI consumption."""
+    """Consolidate multi-agent outputs into Markdown with citations."""
     prompt = state.get("prompt", "")
     tenant_id = state.get("tenant_id", "default")
     financial_data = state.get("financial_analysis", {})
     tool_calls = state.get("tool_calls", [])
+    raw_retrieved_chunks = state.get("retrieved_chunks", [])
     citations: list[dict[str, Any]] = []
 
     markdown_parts: list[str] = [
@@ -68,18 +71,38 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
                 }
             )
 
-    if not financial_data and not tool_calls:
-        markdown_parts.append(
-            "\nHello! I am JakeAI, your financial and operational AI companion.\n\n"
-            f'You asked: *"{prompt}"*\n\n'
-            "How can I assist your financial analytics or FinnApiGo services today?"
+    # 3. Contextual RAG Passage Citations
+    if raw_retrieved_chunks:
+        doc_chunks = [
+            DocumentChunk(
+                chunk_id=c.get("chunk_id", f"chk-{i}"),
+                content=c.get("content", ""),
+                tenant_id=c.get("tenant_id", tenant_id),
+                source=c.get("source", "Retrieved Document"),
+                metadata=c.get("metadata", {}),
+                score=c.get("score", 0.9),
+            )
+            for i, c in enumerate(raw_retrieved_chunks)
+        ]
+        preliminary_text = "\n".join(markdown_parts)
+        generator = CitationGenerator()
+        annotated_text, rag_citations = generator.generate_citations(
+            preliminary_text, doc_chunks
         )
-
-    markdown_parts.append(
-        "\n---\n*Verified by JakeAI Self-RAG Verifier & Policy Enforcement.*"
-    )
-
-    final_response = "\n".join(markdown_parts)
+        final_response = annotated_text
+        for cite in rag_citations:
+            citations.append(cite.model_dump())
+    else:
+        if not financial_data and not tool_calls:
+            markdown_parts.append(
+                "\nHello! I am JakeAI, your financial and operational AI companion.\n\n"
+                f'You asked: *"{prompt}"*\n\n'
+                "How can I assist your financial analytics or FinnApiGo services today?"
+            )
+        markdown_parts.append(
+            "\n---\n*Verified by JakeAI Self-RAG Verifier & Policy Enforcement.*"
+        )
+        final_response = "\n".join(markdown_parts)
 
     return {
         "current_agent": "synthesizer",

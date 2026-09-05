@@ -27,6 +27,10 @@ class AgentState(TypedDict, total=False):
     tool_calls: list[dict[str, Any]]
     financial_analysis: dict[str, Any]
 
+    # RAG Context & Retrieval Buffers
+    retrieved_chunks: list[dict[str, Any]]
+    groundedness_score: float
+
     # Quality Assurance & Self-Correction
     verification_verdict: str  # "PASS" or "NEEDS_REVISION"
     critique_notes: str
