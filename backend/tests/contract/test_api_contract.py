@@ -47,8 +47,10 @@ def test_critical_endpoints_exist(runtime_openapi: dict[str, Any]) -> None:
 
     critical_routes: dict[str, list[str]] = {
         "/health": ["get"],
+        "/api/v1/health": ["get"],
         "/api/v1/chat/stream": ["post"],
         "/api/v1/rag/ingest": ["post"],
+        "/api/v1/rag/query": ["post"],
         "/api/v1/byok/keys": ["post", "get"],
         "/api/v1/gateway/chat/completions": ["post"],
         "/api/v1/billing/webhook": ["post"],
@@ -60,9 +62,9 @@ def test_critical_endpoints_exist(runtime_openapi: dict[str, Any]) -> None:
     for path, methods in critical_routes.items():
         assert path in paths, f"Critical route '{path}' is missing from OpenAPI schema"
         for method in methods:
-            assert (
-                method in paths[path]
-            ), f"HTTP method '{method.upper()}' missing on '{path}'"
+            assert method in paths[path], (
+                f"HTTP method '{method.upper()}' missing on '{path}'"
+            )
 
 
 def test_chat_sse_contract(runtime_openapi: dict[str, Any]) -> None:
@@ -73,9 +75,9 @@ def test_chat_sse_contract(runtime_openapi: dict[str, Any]) -> None:
     responses = chat_path.get("responses", {})
     assert "200" in responses, "Status 200 response definition missing"
     content = responses["200"].get("content", {})
-    assert (
-        "text/event-stream" in content
-    ), "Chat stream endpoint must specify 'text/event-stream' content type"
+    assert "text/event-stream" in content, (
+        "Chat stream endpoint must specify 'text/event-stream' content type"
+    )
 
     # Request body must support prompt and query aliases
     request_body = chat_path.get("requestBody", {})
@@ -112,12 +114,12 @@ def test_rag_ingest_contract(runtime_openapi: dict[str, Any]) -> None:
     ingest_schema = schemas.get(schema_name, {})
 
     properties = ingest_schema.get("properties", {})
-    assert (
-        "content" in properties
-    ), "Property 'content' missing in DocumentIngestRequest"
-    assert (
-        "text" in properties
-    ), "Property 'text' alias missing in DocumentIngestRequest"
+    assert "content" in properties, (
+        "Property 'content' missing in DocumentIngestRequest"
+    )
+    assert "text" in properties, (
+        "Property 'text' alias missing in DocumentIngestRequest"
+    )
 
 
 def test_backward_compatibility_no_deleted_endpoints(
@@ -138,9 +140,9 @@ def test_backward_compatibility_no_deleted_endpoints(
             if method not in runtime_paths[path]:
                 missing_methods.append(f"{method.upper()} {path}")
 
-    assert (
-        not missing_endpoints
-    ), f"Breaking change detected! Endpoints removed: {missing_endpoints}"
-    assert (
-        not missing_methods
-    ), f"Breaking change detected! HTTP methods removed: {missing_methods}"
+    assert not missing_endpoints, (
+        f"Breaking change detected! Endpoints removed: {missing_endpoints}"
+    )
+    assert not missing_methods, (
+        f"Breaking change detected! HTTP methods removed: {missing_methods}"
+    )

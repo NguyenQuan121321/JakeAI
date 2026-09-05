@@ -174,12 +174,18 @@ jobs:
           output-file: "sbom-container.cyclonedx.json"
 
       - name: Cryptographically Sign Container Image (Sigstore Keyless OIDC)
+        env:
+          IMAGE_DIGEST: ${{ steps.build-push.outputs.digest }}
         run: |
-          cosign sign --yes "ghcr.io/${{ github.repository }}/backend@${{ steps.build-push.outputs.digest }}"
+          LOWER_REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          cosign sign --yes "ghcr.io/${LOWER_REPO}/backend@${IMAGE_DIGEST}"
 
       - name: Attest CycloneDX SBOM to Container Image in GHCR
+        env:
+          IMAGE_DIGEST: ${{ steps.build-push.outputs.digest }}
         run: |
-          cosign attest --yes --predicate sbom-container.cyclonedx.json --type cyclonedx "ghcr.io/${{ github.repository }}/backend@${{ steps.build-push.outputs.digest }}"
+          LOWER_REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          cosign attest --yes --predicate sbom-container.cyclonedx.json --type cyclonedx "ghcr.io/${LOWER_REPO}/backend@${IMAGE_DIGEST}"
 
   trigger-cloud-deployment:
     name: Trigger Cloud Server Webhook Deployment

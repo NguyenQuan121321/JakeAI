@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.byok import get_byok_manager
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import get_settings
 from app.optimizer.semantic_cache import get_semantic_cache_manager
@@ -263,11 +264,27 @@ class GatewayInferenceProxy:
                 tokens_saved=est_saved,
             )
 
-        # 3. Model Generation (Wrapped in CircuitBreaker)
+        # 3. Dynamic BYOK Key Injection (decrypt transiently in memory)
+        provider = (
+            "gemini"
+            if "gemini" in request.model.lower()
+            else (
+                "openai"
+                if "gpt" in request.model.lower()
+                else (
+                    "anthropic" if "claude" in request.model.lower() else "openrouter"
+                )
+            )
+        )
+        byok_mgr = get_byok_manager()
+        byok_key = await byok_mgr.get_decrypted_key(tenant_id, provider)
+
+        # 4. Model Generation (Wrapped in CircuitBreaker)
         async def call_model() -> str:
-            # Deterministic generator for gateway requests
+            # Deterministic generator for gateway requests with BYOK provenance
+            key_tag = " [BYOK active]" if byok_key else ""
             return (
-                f"[JakeAI Gateway Response via {request.model}]\n"
+                f"[JakeAI Gateway Response via {request.model}{key_tag}]\n"
                 f"Processed query: {last_user_msg[:120]}"
             )
 
