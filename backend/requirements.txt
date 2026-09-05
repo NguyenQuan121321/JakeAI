@@ -1,0 +1,28 @@
+# Core Application Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# Multi-Agent & Orchestration
+langgraph==0.2.60
+langchain==0.3.14
+langchain-core==0.3.29
+
+# Security & Authentication
+pyjwt[crypto]==2.10.1
+cryptography==44.0.0
+
+# State, Caching & Vector Store
+redis[hiredis]==5.2.1
+qdrant-client==1.12.1
+
+# HTTP Client
+httpx==0.28.1
+
+# Development & Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+ruff==0.8.4
+mypy==1.14.0
