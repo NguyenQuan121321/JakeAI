@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.agents import stream_multi_agent_workflow
 from app.core.context import TenantContext
@@ -22,12 +22,17 @@ router = APIRouter()
 
 
 class ChatStreamRequest(BaseModel):
-    """Payload model for chat streaming requests."""
+    """Payload model for chat streaming requests supporting both prompt and query aliases."""
 
     prompt: str = Field(
-        min_length=1,
+        default="",
         max_length=8000,
         description="User question or financial prompt",
+    )
+    query: str | None = Field(
+        default=None,
+        max_length=8000,
+        description="Alias for prompt used by frontend widget",
     )
     conversation_id: str | None = Field(
         default=None,
@@ -38,6 +43,26 @@ class ChatStreamRequest(BaseModel):
         default_factory=dict,
         description="Optional model execution parameters",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonize_prompt_and_query(cls, data: Any) -> Any:
+        """Reconcile prompt and query aliases."""
+        if isinstance(data, dict):
+            p = data.get("prompt")
+            q = data.get("query")
+            if not p and q:
+                data["prompt"] = q
+            elif p and not q:
+                data["query"] = p
+        return data
+
+    @model_validator(mode="after")
+    def validate_content_not_empty(self) -> "ChatStreamRequest":
+        """Ensure resolved prompt is not empty."""
+        if not self.prompt.strip():
+            raise ValueError("Prompt or query must not be empty.")
+        return self
 
 
 def _format_sse_event(event: str, data: dict[str, Any]) -> str:

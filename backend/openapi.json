@@ -100,9 +100,22 @@
           "prompt": {
             "type": "string",
             "maxLength": 8000,
-            "minLength": 1,
             "title": "Prompt",
-            "description": "User question or financial prompt"
+            "description": "User question or financial prompt",
+            "default": ""
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query",
+            "description": "Alias for prompt used by frontend widget"
           },
           "conversation_id": {
             "anyOf": [
@@ -125,11 +138,8 @@
           }
         },
         "type": "object",
-        "required": [
-          "prompt"
-        ],
         "title": "ChatStreamRequest",
-        "description": "Payload model for chat streaming requests."
+        "description": "Payload model for chat streaming requests supporting both prompt and query aliases."
       },
       "HTTPValidationError": {
         "properties": {

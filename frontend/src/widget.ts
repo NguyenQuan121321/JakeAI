@@ -161,7 +161,11 @@ export class JakeAIWidget extends HTMLElement {
       const response = await fetch(this.config.apiUrl || "/api/v1/chat/stream", {
         method: "POST",
         headers,
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({
+          prompt: query,
+          query,
+          conversation_id: `conv-${Date.now()}`,
+        }),
       });
 
       if (!response.ok) {
@@ -250,22 +254,46 @@ export class JakeAIWidget extends HTMLElement {
         // Fallback
       }
     } else if (event === "tool_call") {
-      this.mascot.setState("running");
       try {
         const parsed = JSON.parse(dataStr);
-        const toolName = String(parsed.name || parsed.tool || "FinnApiGo");
+        let toolName = "FinnApiGo";
+        let isBlocked = false;
+        let blockedReason = "";
+
+        if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
+          const firstCall = parsed.tool_calls[0];
+          toolName = firstCall.tool_name || toolName;
+          if (firstCall.status === "BLOCKED") {
+            isBlocked = true;
+            blockedReason = firstCall.reason || "Unauthorized";
+          }
+        } else if (parsed.name || parsed.tool) {
+          toolName = String(parsed.name || parsed.tool);
+        }
+
+        if (isBlocked) {
+          this.mascot.setState("alert");
+        } else {
+          this.mascot.setState("running");
+        }
+
         const card = document.createElement("div");
-        card.className = "jake-tool-card executing";
+        card.className = isBlocked ? "jake-tool-card blocked" : "jake-tool-card executing";
 
         const spinner = document.createElement("span");
-        spinner.className = "jake-spinner";
+        spinner.className = isBlocked ? "jake-blocked-icon" : "jake-spinner";
+        if (isBlocked) spinner.textContent = "⚠️";
 
         const label = document.createElement("span");
-        label.textContent = "Querying ";
-        const strong = document.createElement("strong");
-        strong.textContent = toolName;
-        label.appendChild(strong);
-        label.appendChild(document.createTextNode("..."));
+        if (isBlocked) {
+          label.textContent = `Access Denied for ${toolName}: ${blockedReason}`;
+        } else {
+          label.textContent = "Querying ";
+          const strong = document.createElement("strong");
+          strong.textContent = toolName;
+          label.appendChild(strong);
+          label.appendChild(document.createTextNode("..."));
+        }
 
         card.appendChild(spinner);
         card.appendChild(label);
@@ -299,6 +327,17 @@ export class JakeAIWidget extends HTMLElement {
         const parsed = JSON.parse(dataStr);
         if (parsed.mascot_state) {
           this.mascot.setState(parsed.mascot_state as MascotState);
+        }
+        if (Array.isArray(parsed.citations) && parsed.citations.length > 0) {
+          const citationsContainer = document.createElement("div");
+          citationsContainer.className = "jake-citations-container";
+          for (const cite of parsed.citations) {
+            const chip = document.createElement("span");
+            chip.className = "jake-citation-chip";
+            chip.textContent = `📚 ${cite.source || "FinnApiGo"} (${Math.round((cite.confidence || 1.0) * 100)}%)`;
+            citationsContainer.appendChild(chip);
+          }
+          toolsContainer.appendChild(citationsContainer);
         }
       } catch {
         // Fallback
@@ -496,6 +535,9 @@ export class JakeAIWidget extends HTMLElement {
         }
         .jake-tool-card.executing { border-color: #38bdf8; color: #7dd3fc; }
         .jake-tool-card.done { border-color: var(--jake-success); color: #6ee7b7; }
+        .jake-tool-card.blocked { border-color: var(--jake-error); color: #fca5a5; }
+        .jake-citations-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .jake-citation-chip { font-size: 11px; padding: 2px 8px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 12px; color: #93c5fd; }
         .jake-spinner {
           width: 10px;
           height: 10px;

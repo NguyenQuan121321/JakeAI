@@ -261,3 +261,25 @@ async def test_chat_stream_rbac_blocking(
     body = response.text
     # Should flag blocked in status or event
     assert "blocked" in body.lower() or "alert" in body.lower()
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_query_alias_compatibility(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify endpoint accepts {query: '...'} payload seamlessly for frontend widget."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
+    token = generate_endpoint_jwt()
+
+    response = await async_client.post(
+        "/api/v1/chat/stream",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "query": "Calculate operating margin",
+            "conversation_id": "conv-query-alias-01",
+        },
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert "event: done" in response.text
