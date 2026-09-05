@@ -119,7 +119,7 @@ jobs:
           retention-days: 90
 
   build-and-publish:
-    name: Build & Publish Container (GHCR / Docker Hub)
+    name: Build & Publish Container (GHCR)
     runs-on: ubuntu-latest
     needs: semver-release
     steps:
@@ -139,20 +139,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Docker Hub (Optional)
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Extract Docker Metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ghcr.io/${{ github.repository }}/backend
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/jakeai-backend', secrets.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=raw,value=${{ needs.semver-release.outputs.new_version }},enable=${{ needs.semver-release.outputs.new_version != '' }}
             type=sha,prefix=sha-
@@ -176,18 +168,21 @@ jobs:
     needs: [build-and-publish, frontend-and-openapi-release, semver-release]
     steps:
       - name: Invoke Deployment Webhook (Render / VPS / AWS / Railway)
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          SEMVER_TAG: ${{ needs.semver-release.outputs.new_version }}
         run: |
-          if [ -z "${{ secrets.DEPLOY_WEBHOOK_URL }}" ]; then
+          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
             echo "DEPLOY_WEBHOOK_URL secret not configured. Skipping external webhook dispatch."
             exit 0
           fi
 
-          echo "Dispatching deployment webhook with SemVer release ${{ needs.semver-release.outputs.new_version }}..."
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${{ secrets.DEPLOY_WEBHOOK_URL }}" \
+          echo "Dispatching deployment webhook with SemVer release $SEMVER_TAG..."
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$DEPLOY_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d '{
               "repository": "${{ github.repository }}",
-              "tag": "${{ needs.semver-release.outputs.new_version }}",
+              "tag": "'"$SEMVER_TAG"'",
               "commit": "${{ github.sha }}",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
             }')
