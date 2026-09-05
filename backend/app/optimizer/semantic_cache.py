@@ -92,17 +92,38 @@ class SemanticCacheManager:
         self._memory_vectors: dict[str, list[SemanticCacheEntry]] = {}
         self._redis_available: bool = True
 
+    async def _get_redis(self) -> Any | None:
+        """Lazily initialize Redis connection if available."""
+        if self.redis_client is not None:
+            return self.redis_client
+        if not self._redis_available:
+            return None
+        try:
+            import redis.asyncio as aioredis
+
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            self.redis_client = aioredis.from_url(
+                settings.REDIS_URL,
+                decode_responses=True,
+                socket_timeout=1.0,
+            )
+            return self.redis_client
+        except Exception:
+            self._redis_available = False
+            return None
+
     async def get(self, prompt: str, tenant_id: str) -> SemanticCacheEntry | None:
         """Query cache for exact or semantic matches for the given tenant."""
         exact_key = _compute_hash(prompt, tenant_id)
         now = time.time()
 
         # 1. Tier 1: Check Exact Match in Redis
-        if self.redis_client is not None:
+        redis_conn = await self._get_redis()
+        if redis_conn is not None:
             try:
-                raw_data = await self.redis_client.get(
-                    f"cache:exact:{tenant_id}:{exact_key}"
-                )
+                raw_data = await redis_conn.get(f"cache:exact:{tenant_id}:{exact_key}")
                 if raw_data:
                     data = json.loads(raw_data)
                     entry = SemanticCacheEntry(**data)
@@ -185,10 +206,11 @@ class SemanticCacheManager:
         )
 
         # 1. Write Exact Match to Redis
-        if self.redis_client is not None:
+        redis_conn = await self._get_redis()
+        if redis_conn is not None:
             try:
                 data_str = json.dumps(entry.model_dump())
-                await self.redis_client.set(
+                await redis_conn.set(
                     f"cache:exact:{tenant_id}:{exact_key}",
                     data_str,
                     ex=ttl,

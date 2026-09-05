@@ -3,8 +3,15 @@
 from typing import Any
 
 from app.agents.state import AgentState
+from app.core.circuit_breaker import CircuitBreaker
 from app.rag.citations import CitationGenerator
 from app.rag.models import DocumentChunk
+
+_synthesizer_circuit = CircuitBreaker(
+    name="synthesizer_circuit",
+    failure_threshold=3,
+    recovery_timeout_seconds=15.0,
+)
 
 
 async def synthesizer_node(state: AgentState) -> dict[str, Any]:

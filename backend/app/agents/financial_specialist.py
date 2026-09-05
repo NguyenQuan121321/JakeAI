@@ -4,6 +4,13 @@ import re
 from typing import Any
 
 from app.agents.state import AgentState
+from app.core.circuit_breaker import CircuitBreaker
+
+_financial_circuit = CircuitBreaker(
+    name="financial_specialist_circuit",
+    failure_threshold=3,
+    recovery_timeout_seconds=15.0,
+)
 
 
 def _extract_numbers(text: str) -> list[float]:
@@ -35,16 +42,22 @@ async def financial_specialist_node(state: AgentState) -> dict[str, Any]:
         round((operating_income / revenue) * 100, 2) if revenue > 0 else 0.0
     )
 
-    analysis = {
-        "revenue": revenue,
-        "operating_expenses": expenses,
-        "operating_income": operating_income,
-        "operating_margin_pct": operating_margin,
-        "ebitda": operating_income * 1.12,  # Standard adjustment
-        "tenant_id": state.get("tenant_id", "default"),
-        "currency": "USD",
-        "grounded": True,
-    }
+    def _compute_deterministic_financials() -> dict[str, Any]:
+        return {
+            "revenue": revenue,
+            "operating_expenses": expenses,
+            "operating_income": operating_income,
+            "operating_margin_pct": operating_margin,
+            "ebitda": operating_income * 1.12,  # Standard adjustment
+            "tenant_id": state.get("tenant_id", "default"),
+            "currency": "USD",
+            "grounded": True,
+        }
+
+    analysis: dict[str, Any] = await _financial_circuit.call_with_fallback(
+        primary_fn=_compute_deterministic_financials,
+        deterministic_fallback_fn=_compute_deterministic_financials,
+    )
 
     status_msg = (
         f"Financial Specialist: Computed operating income (${operating_income:,.2f}) "
