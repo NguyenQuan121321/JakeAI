@@ -1,11 +1,13 @@
 """Security utilities and FinnApiGo JWT policy enforcement."""
 
+import hashlib
+import hmac
 import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
@@ -25,8 +27,9 @@ def verify_finnapigo_jwt(
 ) -> TenantContext:
     """Decode and validate a FinnApiGo JWT access token.
 
-    Verifies signature, expiration, and extracts claims:
-    sub, tenant_id, org_id, roles, scopes, permissions.
+    Verifies signature, expiration, and extracts claims supporting both
+    FinnApiGo compact enterprise schema (tid, perms, role, uid) and standard
+    expanded claims (tenant_id, permissions, roles, sub).
     """
     settings = get_settings()
     key = secret_key or settings.JWT_SECRET_KEY
@@ -47,7 +50,6 @@ def verify_finnapigo_jwt(
                 "verify_signature": True,
                 "verify_exp": True,
                 "verify_aud": False,
-                "require": ["sub", "tenant_id"],
             },
         )
     except jwt.ExpiredSignatureError as e:
@@ -63,27 +65,35 @@ def verify_finnapigo_jwt(
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
 
-    sub = str(payload.get("sub", ""))
-    tenant_id = str(payload.get("tenant_id", ""))
+    # Invariant 5: Token Type Isolation
+    token_type = payload.get("type")
+    if token_type and token_type != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token type '{token_type}': expected access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Invariant 5: Dual Claim Schema Resolution
+    sub = str(payload.get("sub") or payload.get("uid") or "")
+    tenant_id = str(payload.get("tenant_id") or payload.get("tid") or "")
 
     if not sub or not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing mandatory subject (sub) or tenant_id claim",
+            detail="Token missing mandatory subject (sub/uid) or tenant identifier (tenant_id/tid)",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    roles = payload.get("roles", [])
-    if isinstance(roles, str):
-        roles = [roles]
+    raw_roles = payload.get("roles") or payload.get("role") or []
+    roles = [raw_roles] if isinstance(raw_roles, str) else list(raw_roles)
 
     scopes = payload.get("scopes", [])
     if isinstance(scopes, str):
         scopes = scopes.split(" ")
 
-    permissions = payload.get("permissions", [])
-    if isinstance(permissions, str):
-        permissions = [permissions]
+    raw_perms = payload.get("permissions") or payload.get("perms") or []
+    permissions = [raw_perms] if isinstance(raw_perms, str) else list(raw_perms)
 
     context = TenantContext(
         tenant_id=tenant_id,
@@ -97,11 +107,104 @@ def verify_finnapigo_jwt(
     return context
 
 
+async def check_token_denylist(token: str) -> None:
+    """Verify that caller token JTI or session UUID is not denylisted in Redis."""
+    try:
+        payload = jwt.decode(
+            token,
+            options={"verify_signature": False, "verify_exp": False},
+        )
+    except jwt.PyJWTError:
+        return
+
+    jti = str(payload.get("jti") or payload.get("id") or "")
+    sid = str(payload.get("sid") or "")
+    if not jti and not sid:
+        return
+
+    settings = get_settings()
+    try:
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=0.2,
+            socket_timeout=0.2,
+        )
+        if jti and await client.exists(f"denylist:jti:{jti}"):
+            await client.aclose()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if sid and await client.exists(f"denylist:sid:{sid}"):
+            await client.aclose()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        await client.aclose()
+    except HTTPException:
+        raise
+    except Exception:
+        # Bounded resilience: if Redis is unreachable, fail open bounded by access token TTL
+        pass
+
+
+def verify_internal_perimeter_secret(request: Request | None) -> bool:
+    """Verify that request claiming FinnApiGo edge provenance carries valid internal credentials.
+
+    Enforces Invariant 4: Mutual Perimeter Authentication & Network Isolation.
+    Accepts either static X-Internal-Secret or timestamped HMAC X-Internal-Sig.
+    """
+    if request is None:
+        return False
+
+    forwarded_by = request.headers.get("x-forwarded-by", "").strip().lower()
+    if forwarded_by != "finnapigo":
+        return False
+
+    settings = get_settings()
+    configured_secret = settings.INTERNAL_GATEWAY_SECRET
+
+    # 1. Check direct X-Internal-Secret header
+    internal_secret = request.headers.get("x-internal-secret", "").strip()
+    if internal_secret and hmac.compare_digest(internal_secret, configured_secret):
+        return True
+
+    # 2. Check timestamped HMAC X-Internal-Sig: t=<unix>;v1=<hmac>
+    sig_header = request.headers.get("x-internal-sig", "").strip()
+    if sig_header and "v1=" in sig_header and "t=" in sig_header:
+        try:
+            parts = dict(
+                item.split("=", 1) for item in sig_header.split(";") if "=" in item
+            )
+            ts = int(parts.get("t", "0"))
+            v1 = parts.get("v1", "")
+            now = int(time.time())
+            if abs(now - ts) <= 60:  # 60s replay defense window
+                expected = hmac.new(
+                    configured_secret.encode(),
+                    f"{request.method}|{request.url.path}|{ts}".encode(),
+                    hashlib.sha256,
+                ).hexdigest()
+                if hmac.compare_digest(v1, expected):
+                    return True
+        except Exception:
+            pass
+
+    return False
+
+
 async def get_current_tenant(
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> TenantContext:
     """FastAPI security dependency resolving and validating TenantContext."""
-    return verify_finnapigo_jwt(credentials.credentials)
+    context = verify_finnapigo_jwt(credentials.credentials)
+    await check_token_denylist(credentials.credentials)
+    return context
 
 
 def require_permissions(

@@ -115,11 +115,10 @@ async def generate_chat_stream(
         )
         await asyncio.sleep(0.01)
 
-        # 4. Check Semantic Cache (Tier 1 & Tier 2) - bypassed if edge proxy already evaluated
-        is_edge_forwarded = bool(
-            request
-            and request.headers.get("x-forwarded-by", "").strip().lower() == "finnapigo"
-        )
+        # 4. Check Semantic Cache (Tier 1 & Tier 2) - bypassed ONLY if edge proxy evaluated with valid secret (Invariant 4)
+        from app.core.security import verify_internal_perimeter_secret
+
+        is_edge_forwarded = bool(request and verify_internal_perimeter_secret(request))
         cached_entry = (
             None
             if is_edge_forwarded

@@ -167,9 +167,10 @@ async def enforce_rate_limit(
     limiter: TokenBucketRateLimiter = default_rate_limiter,
 ) -> None:
     """Enforce rate limits per tenant and client IP address."""
-    # Edge Dual-Mode: bypass redundant rate limit if already enforced by FinnApiGo edge proxy
-    forwarded_by = request.headers.get("x-forwarded-by", "").strip().lower()
-    if forwarded_by == "finnapigo":
+    # Edge Dual-Mode: bypass redundant rate limit ONLY if authenticated by FinnApiGo edge proxy with valid secret (Invariant 4)
+    from app.core.security import verify_internal_perimeter_secret
+
+    if verify_internal_perimeter_secret(request):
         return
 
     client_ip = request.client.host if request.client else "127.0.0.1"

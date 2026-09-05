@@ -224,3 +224,162 @@ def test_exchange_obo_token() -> None:
     assert decoded["act"]["sub"] == "jakeai-platform"
     assert "financial_analyst" in decoded["roles"]
     assert "reports:read" in decoded["scopes"]
+
+
+def test_verify_finnapigo_compact_enterprise_claims() -> None:
+    """Verify FinnApiGo compact enterprise token (tid, uid, perms, role) parses correctly."""
+    settings = get_settings()
+    payload = {
+        "uid": 42,
+        "tid": "tenant-corp-42",
+        "role": "admin",
+        "perms": ["chat:stream", "reports:read"],
+        "type": "access",
+        "exp": int(time.time()) + 3600,
+    }
+    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+
+    assert context.user_id == "42"
+    assert context.tenant_id == "tenant-corp-42"
+    assert context.roles == ["admin"]
+    assert "chat:stream" in context.permissions
+    assert "reports:read" in context.permissions
+
+
+def test_verify_token_type_isolation() -> None:
+    """Verify non-access token types (e.g. reset or email verify) are rejected with 401."""
+    settings = get_settings()
+    payload = {
+        "sub": "user-reset-01",
+        "tenant_id": "tenant-01",
+        "type": "reset",
+        "exp": int(time.time()) + 3600,
+    }
+    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt(token, algorithm="HS256")
+
+    assert exc_info.value.status_code == 401
+    assert "expected access token" in exc_info.value.detail
+
+
+def test_verify_internal_perimeter_secret_validation() -> None:
+    """Verify Invariant 4 perimeter provenance validation via X-Internal-Secret and HMAC."""
+    import hashlib
+    import hmac
+
+    from starlette.requests import Request
+
+    from app.core.security import verify_internal_perimeter_secret
+
+    settings = get_settings()
+
+    # 1. No headers -> False
+    req_empty = Request(
+        {"type": "http", "method": "POST", "path": "/api/v1/chat/stream", "headers": []}
+    )
+    assert verify_internal_perimeter_secret(req_empty) is False
+
+    # 2. X-Forwarded-By only (spoofing attempt) -> False
+    req_spoof = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [(b"x-forwarded-by", b"finnapigo")],
+        }
+    )
+    assert verify_internal_perimeter_secret(req_spoof) is False
+
+    # 3. Valid X-Internal-Secret -> True
+    req_valid_secret = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [
+                (b"x-forwarded-by", b"finnapigo"),
+                (b"x-internal-secret", settings.INTERNAL_GATEWAY_SECRET.encode()),
+            ],
+        }
+    )
+    assert verify_internal_perimeter_secret(req_valid_secret) is True
+
+    # 4. Wrong X-Internal-Secret -> False
+    req_wrong_secret = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [
+                (b"x-forwarded-by", b"finnapigo"),
+                (b"x-internal-secret", b"wrong-secret-value"),
+            ],
+        }
+    )
+    assert verify_internal_perimeter_secret(req_wrong_secret) is False
+
+    # 5. Valid HMAC signature -> True
+    ts = int(time.time())
+    sig = hmac.new(
+        settings.INTERNAL_GATEWAY_SECRET.encode(),
+        f"POST|/api/v1/chat/stream|{ts}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    req_valid_sig = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [
+                (b"x-forwarded-by", b"finnapigo"),
+                (b"x-internal-sig", f"t={ts};v1={sig}".encode()),
+            ],
+        }
+    )
+    assert verify_internal_perimeter_secret(req_valid_sig) is True
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_perimeter_spoofing_defense() -> None:
+    """Verify rate limiter blocks spoofed X-Forwarded-By and allows authenticated edge requests."""
+    from starlette.requests import Request
+
+    from app.core.rate_limiter import enforce_rate_limit
+
+    settings = get_settings()
+
+    # Create exhausted rate limiter
+    limiter = TokenBucketRateLimiter(rate_per_minute=60, burst=0, enable_redis=False)
+
+    # Spoofed request without secret must be throttled with 429
+    req_spoof = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "client": ("192.168.1.100", 5000),
+            "headers": [(b"x-forwarded-by", b"finnapigo")],
+        }
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await enforce_rate_limit(req_spoof, "tenant-spoof", limiter=limiter)
+    assert exc_info.value.status_code == 429
+
+    # Authenticated edge request with valid secret must bypass rate limiter
+    req_auth = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "client": ("192.168.1.100", 5000),
+            "headers": [
+                (b"x-forwarded-by", b"finnapigo"),
+                (b"x-internal-secret", settings.INTERNAL_GATEWAY_SECRET.encode()),
+            ],
+        }
+    )
+    # Should not raise any exception
+    await enforce_rate_limit(req_auth, "tenant-spoof", limiter=limiter)
