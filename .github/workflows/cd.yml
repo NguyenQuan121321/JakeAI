@@ -119,12 +119,15 @@ jobs:
           retention-days: 90
 
   build-and-publish:
-    name: Build & Publish Container (GHCR)
+    name: Build, Publish & Cosign Container (GHCR)
     runs-on: ubuntu-latest
     needs: semver-release
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+
+      - name: Install Sigstore Cosign
+        uses: sigstore/cosign-installer@v3.8.0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -151,6 +154,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and Push Multi-Arch Docker Image
+        id: build-push
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -161,6 +165,21 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Generate CycloneDX Container SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./backend
+          format: "cyclonedx-json"
+          output-file: "sbom-container.cyclonedx.json"
+
+      - name: Cryptographically Sign Container Image (Sigstore Keyless OIDC)
+        run: |
+          cosign sign --yes "ghcr.io/${{ github.repository }}/backend@${{ steps.build-push.outputs.digest }}"
+
+      - name: Attest CycloneDX SBOM to Container Image in GHCR
+        run: |
+          cosign attest --yes --predicate sbom-container.cyclonedx.json --type cyclonedx "ghcr.io/${{ github.repository }}/backend@${{ steps.build-push.outputs.digest }}"
 
   trigger-cloud-deployment:
     name: Trigger Cloud Server Webhook Deployment
@@ -195,3 +214,24 @@ jobs:
             echo "Deployment webhook returned unexpected status ${STATUS_CODE}."
             exit 1
           fi
+
+  post-deployment-smoke-test:
+    name: Post-Deployment Canary Smoke Test
+    runs-on: ubuntu-latest
+    needs: [trigger-cloud-deployment, semver-release]
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Execute Live Canary Health Check & Liveness Polling
+        env:
+          DEPLOY_TARGET_URL: ${{ secrets.DEPLOY_TARGET_URL }}
+          EXPECTED_TAG: ${{ needs.semver-release.outputs.new_version }}
+        run: |
+          python backend/scripts/post_deploy_smoke_test.py
+
