@@ -11,6 +11,7 @@ import json
 import math
 import re
 import time
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -37,8 +38,13 @@ class SemanticCacheEntry(BaseModel):
 
 
 def _compute_hash(text: str, tenant_id: str) -> str:
-    """Compute deterministic SHA-256 hash for normalized prompt and tenant."""
-    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    """Compute deterministic SHA-256 hash for normalized prompt and tenant.
+
+    Applies Unicode NFC normalization, lowercase conversion, and single-space
+    collapsing to guarantee exact cross-language hash parity with FinnApiGo (Go).
+    """
+    nfc_text = unicodedata.normalize("NFC", text.strip().lower())
+    normalized = re.sub(r"\s+", " ", nfc_text)
     payload = f"{tenant_id}:{normalized}".encode()
     return hashlib.sha256(payload).hexdigest()
 
