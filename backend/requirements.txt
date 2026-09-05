@@ -24,12 +24,12 @@ httpx==0.28.1
 # Development & Testing
 pytest==9.1.1
 pytest-asyncio==1.4.0
-pytest-cov==6.0.0
-ruff==0.8.4
-mypy==1.14.0
+pytest-cov==7.1.0
+ruff==0.16.5
+mypy==2.3.1
 
 # DevSecOps & Security Auditing
-bandit==1.8.2
-pip-audit==2.8.0
+bandit==1.9.4
+pip-audit==2.10.1
 pip-licenses==5.5.5
 
