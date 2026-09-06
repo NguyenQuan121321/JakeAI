@@ -285,3 +285,110 @@ def test_internal_resume_perimeter_security() -> None:
         json={"call_id": cross_id, "tenant_id": "tenant-beta", "result": {}},
     )
     assert res_mismatch.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_resume_bridge_redis_lock_cleanup_and_error_branches() -> None:
+    """Exercise Redis lock release on 404, 403, in-flight locks, and lock acquisition exceptions."""
+    mgr = ResumeBridgeManager()
+    mock_redis = AsyncMock()
+    mock_redis.set.return_value = True
+    mock_redis.delete.return_value = 1
+    mock_redis.get.return_value = None
+    mgr.redis_client = mock_redis
+
+    # 1. Non-existent checkpoint with Redis: deletes lock and raises KeyError
+    missing_id = f"call-missing-{uuid.uuid4().hex[:8]}"
+    with pytest.raises(KeyError):
+        await mgr.resume_checkpoint(missing_id, {}, "tenant-any")
+    assert mock_redis.delete.called
+
+    # 2. Non-existent checkpoint with Redis delete error: logs debug and raises KeyError
+    mock_redis.delete.side_effect = Exception("Redis connection reset")
+    with pytest.raises(KeyError):
+        await mgr.resume_checkpoint(f"{missing_id}-del-err", {}, "tenant-any")
+
+    # 3. Tenant mismatch with Redis: deletes lock and raises PermissionError
+    mock_redis.delete.side_effect = None
+    tenant_mismatch_id = f"call-mismatch-{uuid.uuid4().hex[:8]}"
+    mismatch_record = {
+        "call_id": tenant_mismatch_id,
+        "tenant_id": "tenant-owner",
+        "state_data": {},
+        "created_at": time.time(),
+        "status": "pending",
+    }
+    mock_redis.get.return_value = json.dumps(mismatch_record)
+    with pytest.raises(PermissionError):
+        await mgr.resume_checkpoint(tenant_mismatch_id, {}, "tenant-intruder")
+    assert mock_redis.delete.called
+
+    # 4. In-flight call ID guard
+    in_flight_id = f"call-inflight-{uuid.uuid4().hex[:8]}"
+    mgr._in_flight_call_ids.add(in_flight_id)
+    in_flight_record = {
+        "call_id": in_flight_id,
+        "tenant_id": "tenant-ok",
+        "state_data": {},
+        "created_at": time.time(),
+        "status": "pending",
+    }
+    mock_redis.get.return_value = json.dumps(in_flight_record)
+    with pytest.raises(ValueError, match="already being processed"):
+        await mgr.resume_checkpoint(in_flight_id, {}, "tenant-ok")
+    mgr._in_flight_call_ids.discard(in_flight_id)
+
+    # 5. Redis lock acquisition exception: falls back gracefully and proceeds
+    lock_err_id = f"call-lockerr-{uuid.uuid4().hex[:8]}"
+    lock_record = {
+        "call_id": lock_err_id,
+        "tenant_id": "tenant-ok",
+        "state_data": {},
+        "created_at": time.time(),
+        "status": "pending",
+    }
+    mock_redis.get.return_value = json.dumps(lock_record)
+    mock_redis.set.side_effect = Exception("Redis cluster unavailable")
+    res = await mgr.resume_checkpoint(lock_err_id, {"status": "ok"}, "tenant-ok")
+    assert res.status == "resumed"
+
+
+@pytest.mark.asyncio
+async def test_resume_bridge_event_loop_validation_branches() -> None:
+    """Verify loop rehydration in _get_redis for closed, active, and invalid client loops."""
+    mgr = ResumeBridgeManager()
+
+    # Custom non-mock fake client class so it enters the inspection block
+    class FakeRedisClient:
+        def __init__(self, loop: Any):
+            self._loop = loop
+
+    current_loop = asyncio.get_running_loop()
+
+    # Case A: client loop matches current running loop -> returns client
+    fake_valid = FakeRedisClient(current_loop)
+    mgr.redis_client = fake_valid  # type: ignore[assignment]
+    client_res = await mgr._get_redis()
+    assert client_res is fake_valid
+
+    # Case B: client loop is closed or different -> resets client to None
+    other_loop = asyncio.new_event_loop()
+    other_loop.close()
+    fake_closed = FakeRedisClient(other_loop)
+    mgr.redis_client = fake_closed  # type: ignore[assignment]
+    mgr._redis_available = True
+    client_res2 = await mgr._get_redis()
+    assert client_res2 is None
+    assert mgr.redis_client is None
+
+    # Case C: Exception during loop check -> resets client to None
+    class FaultyRedisClient:
+        @property
+        def connection_pool(self) -> None:
+            raise RuntimeError("Corrupted connection pool state")
+
+    mgr._redis_available = True
+    mgr.redis_client = FaultyRedisClient()  # type: ignore[assignment]
+    client_res3 = await mgr._get_redis()
+    assert client_res3 is None
+    assert mgr.redis_client is None

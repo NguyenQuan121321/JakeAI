@@ -221,30 +221,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Pytest Unit & Integration Tests with Strict Branch Coverage Floor (85%)
+      - name: Strict Test Coverage Floor (>= 85% Branch Coverage Enforcement)
         run: |
           cd backend
           pytest --cov=app --cov-branch tests/ -v --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=85
 
-      - name: Strict Coverage Gate & Patch Coverage Diff Analysis
+      - name: Strict Coverage Gate & Patch Coverage Diff Analysis (>= 85% Line, >= 80% Patch)
         if: always()
         run: |
           cd backend
           python scripts/check_coverage_diff.py --min-line 85 --min-patch 80
+
+      - name: Token Optimization Benchmark Gate (Phase 4 Empirical Validation >= 40%)
+        run: |
+          cd backend
+          pytest tests/evals/test_token_benchmark.py -v -s
+
+      - name: Internal Mutual Auth Contract Gate (Invariant 4 Perimeter Authentication)
+        run: |
+          cd backend
+          pytest tests/contract/test_internal_mutual_auth.py -v
 
       - name: RAG Quality Gate & Anti-Hallucination Regression (Block 5)
         run: |
           cd backend
           pytest tests/evals/test_rag_regression.py -v
 
-      - name: API Contract & Backward Compatibility Verification
+      - name: API Breaking Change & Schema Drift Gate (OpenAPI Contract Verification)
         run: |
           cd backend
           pytest tests/contract/test_api_contract.py -v
-
-      - name: Verify OpenAPI Schema Export & Breaking Change Prevention
-        run: |
-          cd backend
           python -m app.main --export-openapi openapi.json
           git diff --exit-code openapi.json
           python scripts/check_openapi_breaking_changes.py
