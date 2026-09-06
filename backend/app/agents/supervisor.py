@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from app.agents.state import AgentState
-from app.rag.retriever import HybridRetriever
+from app.rag.retriever import get_hybrid_retriever
 
 FINANCIAL_PATTERNS = [
     r"(?i)\b(?:ebitda|margins?|revenues?|profits?|expenses?|ratios?|balances?|debts?|equity)\b",
@@ -34,7 +34,7 @@ def classify_intent(prompt: str) -> str:
     return "synthesizer"
 
 
-_retriever = HybridRetriever()
+_retriever = get_hybrid_retriever()
 
 
 async def supervisor_node(state: AgentState) -> dict[str, Any]:

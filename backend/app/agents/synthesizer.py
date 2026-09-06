@@ -3,7 +3,7 @@ from typing import Any
 
 from app.agents.state import AgentState
 from app.core.circuit_breaker import CircuitBreaker
-from app.core.config import get_settings
+from app.core.llm_provider import call_upstream_llm
 from app.rag.citations import CitationGenerator
 from app.rag.models import DocumentChunk
 
@@ -15,86 +15,7 @@ _synthesizer_circuit = CircuitBreaker(
     recovery_timeout_seconds=15.0,
 )
 
-
-async def _call_gemini_or_openai(prompt: str, tenant_id: str = "default") -> str | None:
-    """Call Google Gemini or OpenAI using tenant BYOK key or platform key with graceful fallback."""
-    from app.core.byok import get_byok_manager
-
-    settings = get_settings()
-    byok_mgr = get_byok_manager()
-
-    gemini_key = (
-        await byok_mgr.get_decrypted_key(tenant_id, "gemini") or settings.GEMINI_API_KEY
-    )
-    openai_key = (
-        await byok_mgr.get_decrypted_key(tenant_id, "openai") or settings.OPENAI_API_KEY
-    )
-
-    if gemini_key:
-        try:
-            import httpx
-
-            url = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-1.5-flash:generateContent?key={gemini_key}"
-            )
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "systemInstruction": {
-                    "parts": [
-                        {
-                            "text": (
-                                "You are JakeAI, an enterprise financial and operational AI companion. "
-                                "Respond helpfully, concisely, and professionally in the same language as the user's prompt (e.g. Vietnamese or English)."
-                            )
-                        }
-                    ]
-                },
-            }
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            return str(parts[0].get("text", "")).strip()
-        except Exception as exc:
-            logger.debug("Gemini API call failed (%s), falling back to template", exc)
-
-    if openai_key:
-        try:
-            import httpx
-
-            url = "https://api.openai.com/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {openai_key}"}
-            payload = {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are JakeAI, an enterprise financial and operational AI companion. "
-                            "Respond in the same language as the user's inquiry."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-            }
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(url, headers=headers, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    choices = data.get("choices", [])
-                    if choices:
-                        return str(
-                            choices[0].get("message", {}).get("content", "")
-                        ).strip()
-        except Exception as exc:
-            logger.debug("OpenAI API call failed (%s), falling back to template", exc)
-
-    return None
+_call_gemini_or_openai = call_upstream_llm
 
 
 async def synthesizer_node(state: AgentState) -> dict[str, Any]:

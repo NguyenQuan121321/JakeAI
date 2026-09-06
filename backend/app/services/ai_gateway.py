@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from app.core.byok import get_byok_manager
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import get_settings
+from app.core.llm_provider import call_upstream_llm
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens, get_token_pruner
@@ -319,6 +320,16 @@ class GatewayInferenceProxy:
 
         # 5. Model Generation (Wrapped in CircuitBreaker)
         async def call_model() -> str:
+            upstream_text = await call_upstream_llm(
+                prompt=effective_query,
+                tenant_id=tenant_id,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+            if upstream_text:
+                return upstream_text
+
             # Deterministic generator for gateway requests with BYOK provenance
             key_tag = " [BYOK active]" if byok_key else ""
             return (

@@ -16,7 +16,7 @@ from app.core.context import TenantContext
 from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
 from app.guardrails import GuardrailsEngine
-from app.optimizer.semantic_cache import SemanticCacheManager
+from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
 
@@ -73,7 +73,7 @@ def _format_sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json_data}\n\n"
 
 
-_semantic_cache = SemanticCacheManager()
+_semantic_cache = get_semantic_cache_manager()
 
 
 async def generate_chat_stream(

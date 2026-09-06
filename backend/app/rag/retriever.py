@@ -73,3 +73,9 @@ class HybridRetriever:
 
 
 default_hybrid_retriever = HybridRetriever()
+
+
+def get_hybrid_retriever() -> HybridRetriever:
+    """Singleton getter for HybridRetriever."""
+    global default_hybrid_retriever
+    return default_hybrid_retriever
