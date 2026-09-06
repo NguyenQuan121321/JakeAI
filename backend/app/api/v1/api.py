@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     billing,
     byok,
     chat,
+    coding,
     devops,
     gateway,
     health,
@@ -22,3 +23,6 @@ api_router.include_router(devops.router, prefix="/devops", tags=["DevOps Bot"])
 api_router.include_router(gateway.router, prefix="/gateway", tags=["AI Gateway"])
 api_router.include_router(billing.router, prefix="/billing", tags=["Billing"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+api_router.include_router(
+    coding.router, prefix="/coding", tags=["Coding Agent & Tool Bridge"]
+)

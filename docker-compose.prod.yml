@@ -1,0 +1,159 @@
+# Production Docker Compose Configuration for JakeAI Platform
+# Target Deployment: 2 vCPU / 4GB RAM VPS (Total container budget <= 3,224 MB RAM)
+# Invariant 4: Backend port 8000 and datastores are strictly isolated to Docker internal network
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: jakeai-caddy-proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 128M
+    depends_on:
+      jakeai-backend:
+        condition: service_healthy
+    networks:
+      - jakeai-prod-network
+
+  jakeai-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jakeai-backend-prod
+    restart: always
+    expose:
+      - "8000"
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - PROJECT_NAME=JakeAI
+      - API_V1_STR=/api/v1
+      - CORS_ORIGINS=["https://jakeai.local","https://jakeai.yourdomain.com"]
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - INTERNAL_GATEWAY_SECRET=${INTERNAL_GATEWAY_SECRET:-replace-with-prod-secret-min-32-chars}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-replace-with-prod-jwt-secret-min-32-chars}
+      - BYOK_ENCRYPTION_MASTER_KEY=${BYOK_ENCRYPTION_MASTER_KEY:-replace-with-master-aes-key-64-hex}
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1200M
+        reservations:
+          memory: 800M
+    networks:
+      - jakeai-prod-network
+
+  jakeai-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jakeai-worker-prod
+    restart: always
+    command: python -m app.worker
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - PROJECT_NAME=JakeAI-Worker
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+        reservations:
+          memory: 400M
+    networks:
+      - jakeai-prod-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: jakeai-redis-prod
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
+    expose:
+      - "6379"
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 128M
+    networks:
+      - jakeai-prod-network
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: jakeai-qdrant-prod
+    restart: always
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - qdrant_prod_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1000M
+        reservations:
+          memory: 500M
+    networks:
+      - jakeai-prod-network
+
+volumes:
+  redis_prod_data:
+    driver: local
+  qdrant_prod_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  jakeai-prod-network:
+    driver: bridge

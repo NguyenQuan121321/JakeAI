@@ -16,9 +16,7 @@ _synthesizer_circuit = CircuitBreaker(
 )
 
 
-async def _call_gemini_or_openai(
-    prompt: str, tenant_id: str = "default"
-) -> str | None:
+async def _call_gemini_or_openai(prompt: str, tenant_id: str = "default") -> str | None:
     """Call Google Gemini or OpenAI using tenant BYOK key or platform key with graceful fallback."""
     from app.core.byok import get_byok_manager
 

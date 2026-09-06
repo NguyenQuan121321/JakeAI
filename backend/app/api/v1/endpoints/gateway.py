@@ -24,6 +24,22 @@ class UpdateQuotaRequest(BaseModel):
     new_limit: int = Field(..., ge=10_000, description="New token limit (e.g. 5000000)")
 
 
+class ModelItem(BaseModel):
+    """OpenAI model descriptor."""
+
+    id: str
+    object: str = "model"
+    created: int = 1700000000
+    owned_by: str = "jakeai"
+
+
+class ModelListResponse(BaseModel):
+    """OpenAI-compatible model list response."""
+
+    object: str = "list"
+    data: list[ModelItem]
+
+
 @router.post("/chat/completions", response_model=GatewayChatResponse)
 async def proxy_chat_completions(
     request: GatewayChatRequest,
@@ -41,6 +57,23 @@ async def proxy_chat_completions(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(exc),
         ) from exc
+
+
+@router.get("/models", response_model=ModelListResponse)
+async def list_available_models(
+    _context: TenantContext = Depends(get_current_tenant),
+) -> Any:
+    """Return catalog of available models supported by the AI Gateway."""
+    return ModelListResponse(
+        object="list",
+        data=[
+            ModelItem(id="gemini-1.5-flash", owned_by="google"),
+            ModelItem(id="gemini-2.0-flash", owned_by="google"),
+            ModelItem(id="gpt-4o", owned_by="openai"),
+            ModelItem(id="gpt-4o-mini", owned_by="openai"),
+            ModelItem(id="claude-3-5-sonnet", owned_by="anthropic"),
+        ],
+    )
 
 
 @router.get("/quotas", response_model=QuotaStatus)

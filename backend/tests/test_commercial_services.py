@@ -182,3 +182,46 @@ async def test_commercial_api_endpoints(auth_headers: dict[str, str]):
         assert "tokens_processed" in dash_data
         assert "avg_ttft_ms" in dash_data
         assert "cost_savings_usd" in dash_data
+
+        # 6. Post Billing Webhook (Invalid Signature -> 400 Bad Request)
+        bad_webhook_res = await client.post(
+            "/api/v1/billing/webhook",
+            json={
+                "code": "00",
+                "desc": "success",
+                "data": {
+                    "amount": 149_000,
+                    "description": "JAKEAI tenant-comm-pro pro",
+                },
+                "signature": "invalidsignature123",
+            },
+        )
+        assert bad_webhook_res.status_code == 400
+
+        # 7. Post Billing Webhook (Valid Signature -> 200 OK)
+        settings = get_settings()
+        webhook_data = {
+            "amount": 149_000,
+            "description": "JAKEAI tenant-comm-pro pro",
+            "orderCode": 987654,
+        }
+        sorted_keys = sorted(webhook_data.keys())
+        sign_str = "&".join(f"{k}={webhook_data[k]}" for k in sorted_keys)
+        valid_sig = hmac.new(
+            settings.PAYOS_CHECKSUM_KEY.encode("utf-8"),
+            sign_str.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        good_webhook_res = await client.post(
+            "/api/v1/billing/webhook",
+            json={
+                "code": "00",
+                "desc": "success",
+                "data": webhook_data,
+                "signature": valid_sig,
+            },
+        )
+        assert good_webhook_res.status_code == 200
+        assert good_webhook_res.json()["status"] == "success"
+        assert good_webhook_res.json()["tier"] == "pro"

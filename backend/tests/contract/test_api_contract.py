@@ -57,6 +57,10 @@ def test_critical_endpoints_exist(runtime_openapi: dict[str, Any]) -> None:
         "/api/v1/billing/subscription": ["get"],
         "/api/v1/analytics/dashboard": ["get"],
         "/api/v1/devops/audit-pr": ["post"],
+        "/v1/chat/completions": ["post"],
+        "/v1/models": ["get"],
+        "/api/v1/coding/tool-result": ["post"],
+        "/internal/v1/coding/resume": ["post"],
     }
 
     for path, methods in critical_routes.items():

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
 from app.api.v1.api import api_router
+from app.api.v1.endpoints import coding, gateway
 from app.api.v1.endpoints.health import HealthResponse, check_health
 from app.core.config import get_settings
 
@@ -52,6 +53,16 @@ def create_application() -> FastAPI:
 
     # Mount API v1 router
     app.include_router(api_router, prefix=settings.API_V1_STR)
+
+    # Mount Root OpenAI-compatible AI Gateway alias (/v1/chat/completions, /v1/models)
+    app.include_router(
+        gateway.router, prefix="/v1", tags=["OpenAI Compatible AI Gateway"]
+    )
+
+    # Mount ADR-001 Internal Coding Resume Bridge (/internal/v1/coding/resume)
+    app.include_router(
+        coding.router, prefix="/internal/v1/coding", tags=["Internal Coding Bridge"]
+    )
 
     def custom_openapi() -> dict[str, Any]:
         """Generate custom OpenAPI schema with FinnApiGo security schemes."""

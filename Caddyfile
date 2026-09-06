@@ -1,0 +1,45 @@
+# Production Caddy Reverse Proxy Configuration for JakeAI Platform
+# Provides automated TLS, SSE streaming passthrough, and perimeter security headers
+
+{
+    admin off
+    email {$ACME_EMAIL:admin@example.com}
+}
+
+{$DOMAIN:localhost} {
+    encode gzip zstd
+
+    # Strict Security Perimeter Headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    # Dedicated unbuffered routing for real-time Server-Sent Events (SSE) streaming
+    @sse_chat {
+        path /api/v1/chat/stream
+        path /v1/chat/completions
+    }
+    handle @sse_chat {
+        reverse_proxy jakeai-backend:8000 {
+            flush_interval -1
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Accel-Buffering "no"
+        }
+    }
+
+    # General API reverse proxy
+    handle {
+        reverse_proxy jakeai-backend:8000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+}

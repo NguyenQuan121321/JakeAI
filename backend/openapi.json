@@ -533,6 +533,33 @@
         ]
       }
     },
+    "/api/v1/gateway/models": {
+      "get": {
+        "tags": [
+          "AI Gateway"
+        ],
+        "summary": "List Available Models",
+        "description": "Return catalog of available models supported by the AI Gateway.",
+        "operationId": "list_available_models_api_v1_gateway_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/gateway/quotas": {
       "get": {
         "tags": [
@@ -719,6 +746,332 @@
             "FinnApiGoAuth": []
           }
         ]
+      }
+    },
+    "/api/v1/coding/tool-result": {
+      "post": {
+        "tags": [
+          "Coding Agent & Tool Bridge"
+        ],
+        "summary": "Submit Tool Result",
+        "description": "Submit local developer workstation tool execution outcome and resume agent workflow.",
+        "operationId": "submit_tool_result_api_v1_coding_tool_result_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolResultSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumedExecutionResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/coding/resume": {
+      "post": {
+        "tags": [
+          "Coding Agent & Tool Bridge",
+          "Internal Coding Bridge"
+        ],
+        "summary": "Internal Resume Endpoint",
+        "description": "Internal perimeter resume bridge invoked by FinnApiGo with Invariant 4 authentication.",
+        "operationId": "internal_resume_endpoint_api_v1_coding_resume_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternalResumeSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumedExecutionResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "OpenAI Compatible AI Gateway"
+        ],
+        "summary": "Proxy Chat Completions",
+        "description": "OpenAI-compatible inference proxy with Tier 1 Redis exact caching and quota deduction.",
+        "operationId": "proxy_chat_completions_v1_chat_completions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "OpenAI Compatible AI Gateway"
+        ],
+        "summary": "List Available Models",
+        "description": "Return catalog of available models supported by the AI Gateway.",
+        "operationId": "list_available_models_v1_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/quotas": {
+      "get": {
+        "tags": [
+          "OpenAI Compatible AI Gateway"
+        ],
+        "summary": "Get Tenant Quota",
+        "description": "Retrieve active period token usage, limits, and budget health.",
+        "operationId": "get_tenant_quota_v1_quotas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "OpenAI Compatible AI Gateway"
+        ],
+        "summary": "Update Tenant Quota",
+        "description": "Configure monthly token quota limit for a tenant.",
+        "operationId": "update_tenant_quota_v1_quotas_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateQuotaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/coding/tool-result": {
+      "post": {
+        "tags": [
+          "Internal Coding Bridge"
+        ],
+        "summary": "Submit Tool Result",
+        "description": "Submit local developer workstation tool execution outcome and resume agent workflow.",
+        "operationId": "submit_tool_result_internal_v1_coding_tool_result_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolResultSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumedExecutionResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/internal/v1/coding/resume": {
+      "post": {
+        "tags": [
+          "Internal Coding Bridge",
+          "Internal Coding Bridge"
+        ],
+        "summary": "Internal Resume Endpoint",
+        "description": "Internal perimeter resume bridge invoked by FinnApiGo with Invariant 4 authentication.",
+        "operationId": "internal_resume_endpoint_internal_v1_coding_resume_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternalResumeSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumedExecutionResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -1454,6 +1807,97 @@
         "title": "IngestionTaskStatus",
         "description": "Lifecycle status of an asynchronous document ingestion job."
       },
+      "InternalResumeSubmission": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Call Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Tenant Id"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "tenant_id",
+          "result"
+        ],
+        "title": "InternalResumeSubmission",
+        "description": "Payload routed internally by FinnApiGo edge gateway."
+      },
+      "ModelItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "object": {
+            "type": "string",
+            "title": "Object",
+            "default": "model"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created",
+            "default": 1700000000
+          },
+          "owned_by": {
+            "type": "string",
+            "title": "Owned By",
+            "default": "jakeai"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ModelItem",
+        "description": "OpenAI model descriptor."
+      },
+      "ModelListResponse": {
+        "properties": {
+          "object": {
+            "type": "string",
+            "title": "Object",
+            "default": "list"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ModelItem"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "ModelListResponse",
+        "description": "OpenAI-compatible model list response."
+      },
       "PRAuditRequest": {
         "properties": {
           "repo": {
@@ -1709,6 +2153,51 @@
         "title": "RAGQueryResponse",
         "description": "Response returning retrieved document chunks and latency."
       },
+      "ResumedExecutionResult": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resumed_at": {
+            "type": "number",
+            "title": "Resumed At"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "tool_acknowledged": {
+            "type": "boolean",
+            "title": "Tool Acknowledged"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "status",
+          "resumed_at",
+          "tenant_id",
+          "message",
+          "tool_acknowledged"
+        ],
+        "title": "ResumedExecutionResult",
+        "description": "Outcome of rehydrated execution after tool result processing."
+      },
       "SecurityFinding": {
         "properties": {
           "rule_id": {
@@ -1815,6 +2304,56 @@
         ],
         "title": "SuggestedTestScaffold",
         "description": "Automated test scaffold recommendation."
+      },
+      "ToolResultSubmission": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Call Id",
+            "description": "Unique tool call execution identifier generated during interrupt()"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result",
+            "description": "Structured tool output (e.g. file contents, AST matches, test outcome)"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id",
+            "description": "Optional LangGraph thread identifier"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id",
+            "description": "Optional conversation identifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "result"
+        ],
+        "title": "ToolResultSubmission",
+        "description": "Payload submitted by client application upon completing a local tool execution."
       },
       "UpdateQuotaRequest": {
         "properties": {
