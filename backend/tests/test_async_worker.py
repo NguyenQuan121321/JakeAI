@@ -17,9 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 import jwt
 import pytest
+import pytest_asyncio
 from fastapi import status
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from httpx import AsyncClient
 
 from app.core.config import get_settings
@@ -30,8 +33,22 @@ from app.rag.ingestion import (
 from app.rag.tasks import (
     IngestionTaskManager,
     IngestionTaskStatus,
+    get_task_manager,
+    reset_task_manager,
 )
 from app.worker import IngestionWorker
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_worker_environment() -> AsyncGenerator[None, None]:
+    """Isolate each worker test by clearing Redis queue and resetting singleton."""
+    mgr = get_task_manager()
+    await mgr.clear()
+    reset_task_manager()
+    yield
+    mgr = get_task_manager()
+    await mgr.clear()
+    reset_task_manager()
 
 
 def generate_test_jwt(tenant_id: str, user_id: str = "user-worker-test") -> str:
@@ -53,6 +70,7 @@ def generate_test_jwt(tenant_id: str, user_id: str = "user-worker-test") -> str:
 async def test_task_manager_enqueue_and_isolation() -> None:
     """Verify task enqueuing, retrieval, and multi-tenant isolation."""
     mgr = IngestionTaskManager(max_concurrency=2)
+    await mgr.clear()
     req = DocumentIngestRequest(
         content="Acme Q3 Earnings: Revenue surged 22% to $120M.",
         source="Acme_Q3.txt",
@@ -81,6 +99,7 @@ async def test_task_manager_enqueue_and_isolation() -> None:
 async def test_task_manager_lifecycle_states() -> None:
     """Verify state transitions: QUEUED -> PROCESSING -> COMPLETED / FAILED."""
     mgr = IngestionTaskManager(max_concurrency=2)
+    await mgr.clear()
     req = DocumentIngestRequest(
         content="Enterprise AI Architecture Report.",
         source="Tech_Report.md",
@@ -129,6 +148,7 @@ async def test_task_manager_lifecycle_states() -> None:
 async def test_worker_process_single_run() -> None:
     """Verify IngestionWorker processes queued tasks end-to-end."""
     mgr = IngestionTaskManager(max_concurrency=2)
+    await mgr.clear()
     worker = IngestionWorker(task_manager=mgr)
 
     req = DocumentIngestRequest(
@@ -159,6 +179,8 @@ async def test_api_async_ingest_and_polling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify API POST /api/v1/rag/ingest?async_mode=true (202) and GET /tasks/{task_id}."""
+    task_mgr = get_task_manager()
+    await task_mgr.clear()
     settings = get_settings()
     monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
     token_alpha = generate_test_jwt("tenant-async-api")

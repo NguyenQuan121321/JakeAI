@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JakeAI Platform — Local Development Sandbox</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --accent: #58a6ff;
+    }
+    body {
+      margin: 0;
+      padding: 2rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .container {
+      max-width: 800px;
+      width: 100%;
+    }
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 1.6rem;
+      color: #fff;
+    }
+    .badge {
+      background: #238636;
+      color: #fff;
+      font-size: 0.8rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 12px;
+      font-weight: bold;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.2rem;
+      color: var(--accent);
+    }
+    .control-group {
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 0.6rem;
+      border: 1px solid var(--border);
+      background: #090d13;
+      color: #fff;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-family: monospace;
+      font-size: 0.85rem;
+    }
+    .btn {
+      background: #238636;
+      color: #fff;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    .btn:hover {
+      background: #2ea043;
+    }
+    .info {
+      font-size: 0.85rem;
+      color: #8b949e;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🐕 JakeAI Widget Playground</h1>
+      <span class="badge">Development Mode</span>
+    </div>
+
+    <div class="card">
+      <h2>Host Application Simulation</h2>
+      <p class="info">
+        This page simulates an enterprise host application embedding the <code>&lt;jake-ai-widget&gt;</code> web component.
+        The Corgi mascot launcher is pinned at the bottom-right corner of your screen.
+      </p>
+
+      <div class="control-group">
+        <label for="backend-url">Backend Stream API URL:</label>
+        <input type="text" id="backend-url" value="http://127.0.0.1:8000/api/v1/chat/stream" />
+      </div>
+
+      <div class="control-group">
+        <label for="jwt-token">FinnApiGo Bearer JWT Token:</label>
+        <input type="text" id="jwt-token" value="" placeholder="Paste Bearer JWT token here" />
+      </div>
+
+      <button class="btn" id="update-token-btn">Apply Token & Reconnect</button>
+      <button class="btn" id="open-widget-btn" style="background: #1f6feb; margin-left: 0.5rem;">Open Widget</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { JakeAI } from "./src/index.ts";
+
+    // Standard dev token with demo claims matching FinnApiGo signature format
+    // Header: {"alg":"HS256","typ":"JWT"}
+    // Payload: {"sub":"user-demo-001","uid":101,"tid":"tenant-demo","role":"admin","perms":["chat:write","rag:read"],"type":"access","exp":253402300799}
+    // Signed with secret: a8f3e2b1c9d7f6e5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2
+    const DEFAULT_DEV_TOKEN =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+      "eyJzdWIiOiJ1c2VyLWRlbW8tMDAxIiwidWlkIjoxMDEsInRpZCI6InRlbmFudC1kZW1vIiwicm9sZSI6ImFkbWluIiwicGVybXMiOlsiY2hhdDp3cml0ZSIsInJhZzpyZWFkIl0sInR5cGUiOiJhY2Nlc3MiLCJleHAiOjI1MzQwMjMwMDc5OX0." +
+      "r1mG1R3qV-6J0R87r_3G2W1xWf3o9YjV5pYkH4e4XW4";
+
+    const tokenInput = document.getElementById("jwt-token");
+    const backendUrlInput = document.getElementById("backend-url");
+    const updateBtn = document.getElementById("update-token-btn");
+    const openBtn = document.getElementById("open-widget-btn");
+
+    tokenInput.value = DEFAULT_DEV_TOKEN;
+
+    // Initialize widget
+    const widget = JakeAI.init({
+      apiUrl: backendUrlInput.value,
+      token: DEFAULT_DEV_TOKEN,
+      theme: "dark",
+      initialOpen: false,
+    });
+
+    updateBtn.addEventListener("click", () => {
+      const newToken = tokenInput.value.trim();
+      const newUrl = backendUrlInput.value.trim();
+      widget.configure({
+        apiUrl: newUrl,
+        token: newToken,
+      });
+      alert("JakeAI widget configuration updated!");
+    });
+
+    openBtn.addEventListener("click", () => {
+      JakeAI.open();
+    });
+  </script>
+</body>
+</html>

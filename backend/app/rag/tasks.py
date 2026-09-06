@@ -123,6 +123,9 @@ class IngestionTaskManager:
             chunk_overlap=request.chunk_overlap,
         )
 
+        # Store deep copy in memory cache for immediate availability
+        self._memory_tasks[task_id] = state.model_copy(deep=True)
+
         redis = await self._get_redis()
         if redis is not None:
             try:
@@ -133,10 +136,8 @@ class IngestionTaskManager:
                 await redis.rpush(INGESTION_QUEUE_KEY, task_id)
             except Exception as exc:
                 logger.debug("Redis enqueue failed (%s), falling back to memory", exc)
-                self._memory_tasks[task_id] = state
                 self._memory_queue.append(task_id)
         else:
-            self._memory_tasks[task_id] = state
             self._memory_queue.append(task_id)
 
         return IngestionTaskResponse(
@@ -159,6 +160,7 @@ class IngestionTaskManager:
                 raw = await redis.get(f"{INGESTION_TASK_PREFIX}{task_id}")
                 if raw:
                     state = IngestionTaskState.model_validate_json(raw)
+                    self._memory_tasks[task_id] = state.model_copy(deep=True)
             except Exception as exc:
                 logger.debug("Redis get_task failed (%s)", exc)
 
@@ -168,7 +170,7 @@ class IngestionTaskManager:
         if state and tenant_id and state.tenant_id != tenant_id:
             return None
 
-        return state
+        return state.model_copy(deep=True) if state is not None else None
 
     async def claim_next_task(self) -> IngestionTaskState | None:
         """Pop next task ID from queue and set status to PROCESSING."""
@@ -193,7 +195,7 @@ class IngestionTaskManager:
         task.status = IngestionTaskStatus.PROCESSING
         task.started_at = time.time()
         await self._save_task(task)
-        return task
+        return task.model_copy(deep=True)
 
     async def complete_task(self, task_id: str, result: DocumentIngestResponse) -> None:
         """Mark task as successfully completed."""
@@ -217,6 +219,7 @@ class IngestionTaskManager:
 
     async def _save_task(self, task: IngestionTaskState) -> None:
         """Persist updated task state."""
+        self._memory_tasks[task.task_id] = task.model_copy(deep=True)
         redis = await self._get_redis()
         if redis is not None:
             with contextlib.suppress(Exception):
@@ -225,7 +228,15 @@ class IngestionTaskManager:
                     task.model_dump_json(),
                     ex=DEFAULT_TASK_TTL_SECONDS,
                 )
-        self._memory_tasks[task.task_id] = task
+
+    async def clear(self) -> None:
+        """Purge queue and task state from memory and Redis (test isolation utility)."""
+        redis = await self._get_redis()
+        if redis is not None:
+            with contextlib.suppress(Exception):
+                await redis.delete(INGESTION_QUEUE_KEY)
+        self._memory_tasks.clear()
+        self._memory_queue.clear()
 
 
 _task_manager: IngestionTaskManager | None = None
@@ -237,3 +248,9 @@ def get_task_manager() -> IngestionTaskManager:
     if _task_manager is None:
         _task_manager = IngestionTaskManager()
     return _task_manager
+
+
+def reset_task_manager() -> None:
+    """Reset singleton instance (used for test isolation)."""
+    global _task_manager
+    _task_manager = None
