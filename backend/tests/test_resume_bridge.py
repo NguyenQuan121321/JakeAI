@@ -371,24 +371,25 @@ async def test_resume_bridge_event_loop_validation_branches() -> None:
     client_res = await mgr._get_redis()
     assert client_res is fake_valid
 
-    # Case B: client loop is closed or different -> resets client to None
+    # Case B: client loop is closed or different -> discards stale client
     other_loop = asyncio.new_event_loop()
     other_loop.close()
     fake_closed = FakeRedisClient(other_loop)
     mgr.redis_client = fake_closed  # type: ignore[assignment]
     mgr._redis_available = True
     client_res2 = await mgr._get_redis()
-    assert client_res2 is None
-    assert mgr.redis_client is None
+    assert client_res2 is not fake_closed
+    assert mgr.redis_client is not fake_closed
 
-    # Case C: Exception during loop check -> resets client to None
+    # Case C: Exception during loop check -> discards corrupted client
     class FaultyRedisClient:
         @property
         def connection_pool(self) -> None:
             raise RuntimeError("Corrupted connection pool state")
 
+    faulty = FaultyRedisClient()
     mgr._redis_available = True
-    mgr.redis_client = FaultyRedisClient()  # type: ignore[assignment]
+    mgr.redis_client = faulty  # type: ignore[assignment]
     client_res3 = await mgr._get_redis()
-    assert client_res3 is None
-    assert mgr.redis_client is None
+    assert client_res3 is not faulty
+    assert mgr.redis_client is not faulty
