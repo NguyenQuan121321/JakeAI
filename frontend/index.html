@@ -132,14 +132,12 @@
   <script type="module">
     import { JakeAI } from "./src/index.ts";
 
-    // Standard dev token with demo claims matching FinnApiGo signature format
-    // Header: {"alg":"HS256","typ":"JWT"}
+    // Validly signed JWT token matching backend JWT_SECRET_KEY (a8f3e2b1c9d7f6e5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2)
     // Payload: {"sub":"user-demo-001","uid":101,"tid":"tenant-demo","role":"admin","perms":["chat:write","rag:read"],"type":"access","exp":253402300799}
-    // Signed with secret: a8f3e2b1c9d7f6e5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2
     const DEFAULT_DEV_TOKEN =
       "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
       "eyJzdWIiOiJ1c2VyLWRlbW8tMDAxIiwidWlkIjoxMDEsInRpZCI6InRlbmFudC1kZW1vIiwicm9sZSI6ImFkbWluIiwicGVybXMiOlsiY2hhdDp3cml0ZSIsInJhZzpyZWFkIl0sInR5cGUiOiJhY2Nlc3MiLCJleHAiOjI1MzQwMjMwMDc5OX0." +
-      "r1mG1R3qV-6J0R87r_3G2W1xWf3o9YjV5pYkH4e4XW4";
+      "vjTAyaIxrc6JwGmere5k8Up9kADaamq27HPSVU6wi3c";
 
     const tokenInput = document.getElementById("jwt-token");
     const backendUrlInput = document.getElementById("backend-url");
