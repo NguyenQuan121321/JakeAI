@@ -383,3 +383,118 @@ async def test_rate_limiter_perimeter_spoofing_defense() -> None:
     )
     # Should not raise any exception
     await enforce_rate_limit(req_auth, "tenant-spoof", limiter=limiter)
+
+
+@pytest.mark.asyncio
+async def test_check_token_denylist_revoked_jti(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify check_token_denylist blocks revoked JTI tokens."""
+    import redis.asyncio as aioredis
+
+    from app.core.security import check_token_denylist
+
+    settings = get_settings()
+    token = jwt.encode(
+        {"sub": "u1", "jti": "revoked-jti-123"},
+        settings.JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    class FakeRedisClient:
+        async def exists(self, key: str) -> bool:
+            return "denylist:jti:revoked-jti-123" in key
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr(aioredis, "from_url", lambda *args, **kwargs: FakeRedisClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_token_denylist(token)
+    assert exc_info.value.status_code == 401
+    assert "Token has been revoked" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_check_token_denylist_revoked_sid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify check_token_denylist blocks revoked session SID tokens."""
+    import redis.asyncio as aioredis
+
+    from app.core.security import check_token_denylist
+
+    settings = get_settings()
+    token = jwt.encode(
+        {"sub": "u1", "sid": "revoked-sid-456"},
+        settings.JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    class FakeRedisClient:
+        async def exists(self, key: str) -> bool:
+            return "denylist:sid:revoked-sid-456" in key
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr(aioredis, "from_url", lambda *args, **kwargs: FakeRedisClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await check_token_denylist(token)
+    assert exc_info.value.status_code == 401
+    assert "Session has been revoked" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_check_token_denylist_malformed_and_resilient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify check_token_denylist handles malformed tokens and Redis connection drop."""
+    import redis.asyncio as aioredis
+
+    from app.core.security import check_token_denylist
+
+    # 1. Malformed token returns without error
+    await check_token_denylist("malformed.token.format")
+
+    # 2. Redis failure fails open bounded by token TTL
+    settings = get_settings()
+    token = jwt.encode(
+        {"sub": "u1", "jti": "some-jti"},
+        settings.JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    def failing_from_url(*args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("Redis unreachable")
+
+    monkeypatch.setattr(aioredis, "from_url", failing_from_url)
+
+    # Must not raise
+    await check_token_denylist(token)
+
+
+def test_verify_internal_perimeter_secret_edge_cases() -> None:
+    """Verify perimeter secret checks for None request and malformed HMAC signatures."""
+    from starlette.requests import Request
+
+    from app.core.security import verify_internal_perimeter_secret
+
+    # 1. None request
+    assert verify_internal_perimeter_secret(None) is False
+
+    # 2. Malformed HMAC signature with invalid timestamp format
+    req_malformed_sig = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [
+                (b"x-forwarded-by", b"finnapigo"),
+                (b"x-internal-sig", b"t=invalid_timestamp;v1=bad"),
+            ],
+        }
+    )
+    assert verify_internal_perimeter_secret(req_malformed_sig) is False

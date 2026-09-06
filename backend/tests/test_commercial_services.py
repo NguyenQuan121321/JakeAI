@@ -173,7 +173,7 @@ async def test_commercial_api_endpoints(auth_headers: dict[str, str]):
         # 4. Get Subscription
         sub_res = await client.get("/api/v1/billing/subscription", headers=auth_headers)
         assert sub_res.status_code == 200
-        assert sub_res.json()["tier"] in ("free", "starter", "enterprise")
+        assert sub_res.json()["tier"] in ("free", "starter", "pro", "enterprise")
 
         # 5. Get Analytics Dashboard
         dash_res = await client.get("/api/v1/analytics/dashboard", headers=auth_headers)

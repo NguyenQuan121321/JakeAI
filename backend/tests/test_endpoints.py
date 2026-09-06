@@ -96,6 +96,7 @@ async def test_chat_stream_endpoint_standard_flow(
     body = response.text
     assert "event: status" in body
     assert "event: token" in body
+    assert "event: telemetry" in body
     assert "event: done" in body
     assert "conv-test-01" in body
 
@@ -153,6 +154,7 @@ async def test_chat_stream_endpoint_semantic_cache_hit(
     )
     assert res1.status_code == 200
     assert "event: done" in res1.text
+    assert "event: telemetry" in res1.text
 
     # Second call -> Must hit semantic cache
     res2 = await async_client.post(
@@ -163,6 +165,7 @@ async def test_chat_stream_endpoint_semantic_cache_hit(
     assert res2.status_code == 200
     assert "semantic_cache" in res2.text
     assert "cache_hit" in res2.text
+    assert "event: telemetry" in res2.text
 
 
 @pytest.mark.asyncio

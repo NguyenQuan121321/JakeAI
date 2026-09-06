@@ -20,6 +20,8 @@ from app.core.byok import get_byok_manager
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import get_settings
 from app.optimizer.semantic_cache import get_semantic_cache_manager
+from app.optimizer.token_accounting import TokenAccounting
+from app.optimizer.token_pruner import estimate_tokens, get_token_pruner
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,7 @@ class GatewayChatResponse(BaseModel):
     usage: dict[str, int]
     cached: bool
     tokens_saved: int
+    reduction_percentage: float = 0.0
 
 
 class QuotaManager:
@@ -182,6 +185,22 @@ class QuotaManager:
         self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + total
         return self._memory_usage[mem_key]
 
+    async def record_tokens_saved(self, tenant_id: str, tokens_saved: int) -> int:
+        """Increment tokens saved atomically in Redis or memory."""
+        period = self._get_period_key()
+        redis = await self._get_redis()
+        if redis is not None:
+            try:
+                key = f"gateway:tokens_saved:{tenant_id}:{period}"
+                new_val = await redis.incrby(key, tokens_saved)
+                return int(new_val)
+            except Exception as exc:
+                logger.debug("Redis incrby tokens_saved failed (%s)", exc)
+
+        mem_key = f"tokens_saved:{tenant_id}:{period}"
+        self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + tokens_saved
+        return self._memory_usage[mem_key]
+
     async def get_status(self, tenant_id: str) -> QuotaStatus:
         """Return full quota status object for a tenant."""
         limit = await self.get_quota_limit(tenant_id)
@@ -237,12 +256,25 @@ class GatewayInferenceProxy:
         # 2. Tier 1 Exact Match Cache
         cache_entry = await self.cache_mgr.get(last_user_msg, tenant_id=tenant_id)
         now_ts = int(time.time())
+        raw_prompt_tokens = estimate_tokens(last_user_msg)
 
         if cache_entry is not None:
-            # Immediate zero-cost return
-            est_saved = len(cache_entry.response) // 4 + len(last_user_msg) // 4
+            # Immediate zero-cost return with exact accounting
+            est_completion = max(1, estimate_tokens(cache_entry.response))
+            req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+            record = TokenAccounting.record_transaction(
+                request_id=req_id,
+                tenant_id=tenant_id,
+                model=request.model,
+                raw_prompt_tokens=raw_prompt_tokens,
+                pruned_prompt_tokens=0,
+                completion_tokens=est_completion,
+                cache_hit=True,
+                cache_type=cache_entry.cache_type or "exact",
+            )
+            await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
             return GatewayChatResponse(
-                id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                id=req_id,
                 created=now_ts,
                 model=request.model,
                 choices=[
@@ -261,7 +293,8 @@ class GatewayInferenceProxy:
                     "total_tokens": 0,
                 },
                 cached=True,
-                tokens_saved=est_saved,
+                tokens_saved=record.tokens_saved,
+                reduction_percentage=record.reduction_percentage,
             )
 
         # 3. Dynamic BYOK Key Injection (decrypt transiently in memory)
@@ -279,36 +312,53 @@ class GatewayInferenceProxy:
         byok_mgr = get_byok_manager()
         byok_key = await byok_mgr.get_decrypted_key(tenant_id, provider)
 
-        # 4. Model Generation (Wrapped in CircuitBreaker)
+        # 4. Context Pruning via HeuristicTokenPruner
+        pruner = get_token_pruner()
+        pruned_result = pruner.prune_context(last_user_msg)
+        effective_query = pruned_result.pruned_text or last_user_msg
+
+        # 5. Model Generation (Wrapped in CircuitBreaker)
         async def call_model() -> str:
             # Deterministic generator for gateway requests with BYOK provenance
             key_tag = " [BYOK active]" if byok_key else ""
             return (
                 f"[JakeAI Gateway Response via {request.model}{key_tag}]\n"
-                f"Processed query: {last_user_msg[:120]}"
+                f"Processed query: {effective_query[:120]}"
             )
 
         output_text = await self.breaker.call_with_fallback(call_model)
 
-        prompt_tokens = max(1, len(last_user_msg) // 4)
-        completion_tokens = max(1, len(output_text) // 4)
+        completion_tokens = max(1, estimate_tokens(output_text))
+        req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        record = TokenAccounting.record_transaction(
+            request_id=req_id,
+            tenant_id=tenant_id,
+            model=request.model,
+            raw_prompt_tokens=pruned_result.original_tokens,
+            pruned_prompt_tokens=pruned_result.pruned_tokens,
+            completion_tokens=completion_tokens,
+            cache_hit=False,
+            cache_type="none",
+        )
 
-        # 4. Populate Tier 1 Cache for future hits
+        # 6. Populate Tier 1 Cache for future hits
         await self.cache_mgr.set(
             prompt=last_user_msg,
             tenant_id=tenant_id,
             response=output_text,
         )
 
-        # 5. Deduct token usage
+        # 7. Deduct token usage & record tokens saved
         await self.quota_mgr.record_usage(
             tenant_id=tenant_id,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
+            prompt_tokens=record.pruned_prompt_tokens,
+            completion_tokens=record.completion_tokens,
         )
+        if record.tokens_saved > 0:
+            await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
 
         return GatewayChatResponse(
-            id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            id=req_id,
             created=now_ts,
             model=request.model,
             choices=[
@@ -319,12 +369,13 @@ class GatewayInferenceProxy:
                 }
             ],
             usage={
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
+                "prompt_tokens": record.pruned_prompt_tokens,
+                "completion_tokens": record.completion_tokens,
+                "total_tokens": record.actual_billed_tokens,
             },
             cached=False,
-            tokens_saved=0,
+            tokens_saved=record.tokens_saved,
+            reduction_percentage=record.reduction_percentage,
         )
 
 

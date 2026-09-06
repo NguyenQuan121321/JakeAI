@@ -26,6 +26,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+    restart: unless-stopped
+    networks:
+      - jakeai-network
+
+  jakeai-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jakeai-worker
+    command: python -m app.worker
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - PROJECT_NAME=JakeAI-Worker
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     restart: unless-stopped
     networks:
       - jakeai-network

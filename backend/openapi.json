@@ -101,25 +101,63 @@
           "RAG"
         ],
         "summary": "Ingest document into tenant RAG index",
-        "description": "Chunk, embed, and index document into tenant-isolated vector and keyword stores.",
+        "description": "Chunk, embed, and index document into tenant-isolated stores. Supports asynchronous bounded task queue (202 Accepted) or synchronous ingestion (201 Created).",
         "operationId": "ingest_document_api_v1_rag_ingest_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "async_mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Enqueue document for asynchronous bounded worker processing (202 Accepted)",
+              "default": false,
+              "title": "Async Mode"
+            },
+            "description": "Enqueue document for asynchronous bounded worker processing (202 Accepted)"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DocumentIngestRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
-            "description": "Successful Response",
+            "description": "Document ingested synchronously",
             "content": {
               "application/json": {
                 "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DocumentIngestResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IngestionTaskResponse"
+                    }
+                  ],
+                  "title": "Response Ingest Document Api V1 Rag Ingest Post",
                   "$ref": "#/components/schemas/DocumentIngestResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Document ingestion job enqueued for bounded background processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionTaskResponse"
                 }
               }
             }
@@ -134,12 +172,55 @@
               }
             }
           }
-        },
+        }
+      }
+    },
+    "/api/v1/rag/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Poll status of asynchronous ingestion task",
+        "description": "Retrieve the current status, chunk count, and execution outcome of an ingestion task.",
+        "operationId": "get_ingestion_task_api_v1_rag_tasks__task_id__get",
         "security": [
           {
             "FinnApiGoAuth": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionTaskState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/rag/query": {
@@ -1151,6 +1232,11 @@
           "tokens_saved": {
             "type": "integer",
             "title": "Tokens Saved"
+          },
+          "reduction_percentage": {
+            "type": "number",
+            "title": "Reduction Percentage",
+            "default": 0.0
           }
         },
         "type": "object",
@@ -1218,6 +1304,155 @@
         ],
         "title": "HealthResponse",
         "description": "Health check status response model."
+      },
+      "IngestionTaskResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IngestionTaskStatus"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "poll_url": {
+            "type": "string",
+            "title": "Poll Url"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Document ingestion job accepted for asynchronous processing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_id",
+          "status",
+          "source",
+          "created_at",
+          "poll_url"
+        ],
+        "title": "IngestionTaskResponse",
+        "description": "Client-facing response for enqueued ingestion job."
+      },
+      "IngestionTaskState": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IngestionTaskStatus"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "chunk_size": {
+            "type": "integer",
+            "title": "Chunk Size",
+            "default": 500
+          },
+          "chunk_overlap": {
+            "type": "integer",
+            "title": "Chunk Overlap",
+            "default": 50
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentIngestResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_id",
+          "status",
+          "source",
+          "content"
+        ],
+        "title": "IngestionTaskState",
+        "description": "Full persistent state of an ingestion task."
+      },
+      "IngestionTaskStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "title": "IngestionTaskStatus",
+        "description": "Lifecycle status of an asynchronous document ingestion job."
       },
       "PRAuditRequest": {
         "properties": {

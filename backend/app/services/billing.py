@@ -32,6 +32,17 @@ TIER_CONFIGS: dict[str, TierConfig] = {
         "monthly_quota": 500_000,
         "features": ["Standard AI Chat", "Basic Heuristic RRF"],
     },
+    "pro": {
+        "name": "Pro Developer",
+        "monthly_quota": 5_000_000,
+        "features": [
+            "All Free Features",
+            "Priority AI Gateway Proxy",
+            "Tier 1 & Tier 2 Caching",
+            "White-label Widget Embedding",
+            "Circuit Breaker Multi-Provider Fallback",
+        ],
+    },
     "starter": {
         "name": "Starter Pro",
         "monthly_quota": 5_000_000,
@@ -123,8 +134,8 @@ class PayOSBillingService:
         # Tier decision based on amount (VND or equivalent)
         if amount >= 2_000_000:
             target_tier = "enterprise"
-        elif amount >= 500_000:
-            target_tier = "starter"
+        elif amount >= 149_000:
+            target_tier = "pro"
         else:
             target_tier = "free"
 

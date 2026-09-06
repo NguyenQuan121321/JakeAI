@@ -17,6 +17,8 @@ from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
 from app.guardrails import GuardrailsEngine
 from app.optimizer.semantic_cache import SemanticCacheManager
+from app.optimizer.token_accounting import TokenAccounting
+from app.optimizer.token_pruner import estimate_tokens
 
 router = APIRouter()
 
@@ -150,6 +152,29 @@ async def generate_chat_stream(
                 )
                 await asyncio.sleep(0.002)
 
+            raw_tokens = estimate_tokens(sanitized_prompt)
+            est_comp = max(1, estimate_tokens(cached_entry.response))
+            record = TokenAccounting.record_transaction(
+                request_id=f"stream-{conversation_id}",
+                tenant_id=context.tenant_id,
+                model="stream",
+                raw_prompt_tokens=raw_tokens,
+                pruned_prompt_tokens=0,
+                completion_tokens=est_comp,
+                cache_hit=True,
+                cache_type=cached_entry.cache_type or "exact",
+            )
+            yield _format_sse_event(
+                "telemetry",
+                {
+                    "baseline_tokens": raw_tokens + est_comp,
+                    "billed_tokens": record.actual_billed_tokens,
+                    "tokens_saved": record.tokens_saved,
+                    "reduction_rate": round(record.reduction_percentage / 100.0, 4),
+                    "cache_hit": cached_entry.cache_type or "exact",
+                },
+            )
+
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
             yield _format_sse_event(
                 "done",
@@ -243,7 +268,30 @@ async def generate_chat_stream(
                 )
                 await asyncio.sleep(0.002)
 
-        # 7. Stream Completion Frame with Mascot State
+        # 7. Telemetry & Token Optimization Frame
+        raw_tokens = estimate_tokens(sanitized_prompt)
+        comp_tokens = max(1, estimate_tokens(final_response)) if final_response else 10
+        record = TokenAccounting.record_transaction(
+            request_id=f"stream-{conversation_id}",
+            tenant_id=context.tenant_id,
+            model="stream",
+            raw_prompt_tokens=raw_tokens,
+            pruned_prompt_tokens=raw_tokens,
+            completion_tokens=comp_tokens,
+            cache_hit=False,
+            cache_type="none",
+        )
+        yield _format_sse_event(
+            "telemetry",
+            {
+                "baseline_tokens": raw_tokens + comp_tokens,
+                "billed_tokens": record.actual_billed_tokens,
+                "tokens_saved": record.tokens_saved,
+                "reduction_rate": round(record.reduction_percentage / 100.0, 4),
+            },
+        )
+
+        # 8. Stream Completion Frame with Mascot State
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
         yield _format_sse_event(
             "done",
