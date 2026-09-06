@@ -1,17 +1,90 @@
-"""Response Synthesizer node for Markdown formatting and citation assembly."""
-
+import logging
 from typing import Any
 
 from app.agents.state import AgentState
 from app.core.circuit_breaker import CircuitBreaker
+from app.core.config import get_settings
 from app.rag.citations import CitationGenerator
 from app.rag.models import DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 _synthesizer_circuit = CircuitBreaker(
     name="synthesizer_circuit",
     failure_threshold=3,
     recovery_timeout_seconds=15.0,
 )
+
+
+async def _call_gemini_or_openai(prompt: str) -> str | None:
+    """Call Google Gemini or OpenAI if configured in settings, with graceful fallback."""
+    settings = get_settings()
+
+    if settings.GEMINI_API_KEY:
+        try:
+            import httpx
+
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "systemInstruction": {
+                    "parts": [
+                        {
+                            "text": (
+                                "You are JakeAI, an enterprise financial and operational AI companion. "
+                                "Respond helpfully, concisely, and professionally in the same language as the user's prompt (e.g. Vietnamese or English)."
+                            )
+                        }
+                    ]
+                },
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(url, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            return str(parts[0].get("text", "")).strip()
+        except Exception as exc:
+            logger.debug("Gemini API call failed (%s), falling back to template", exc)
+
+    if settings.OPENAI_API_KEY:
+        try:
+            import httpx
+
+            url = "https://api.openai.com/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are JakeAI, an enterprise financial and operational AI companion. "
+                            "Respond in the same language as the user's inquiry."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(url, headers=headers, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        return str(
+                            choices[0].get("message", {}).get("content", "")
+                        ).strip()
+        except Exception as exc:
+            logger.debug("OpenAI API call failed (%s), falling back to template", exc)
+
+    return None
 
 
 async def synthesizer_node(state: AgentState) -> dict[str, Any]:
@@ -107,11 +180,15 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
             citations.append(cite.model_dump())
     else:
         if not financial_data and not tool_calls:
-            markdown_parts.append(
-                "\nHello! I am JakeAI, your financial and operational AI companion.\n\n"
-                f'You asked: *"{prompt}"*\n\n'
-                "How can I assist your financial analytics or FinnApiGo services today?"
-            )
+            llm_text = await _call_gemini_or_openai(prompt)
+            if llm_text:
+                markdown_parts.append(f"\n{llm_text}\n")
+            else:
+                markdown_parts.append(
+                    "\nHello! I am JakeAI, your financial and operational AI companion.\n\n"
+                    f'You asked: *"{prompt}"*\n\n'
+                    "How can I assist your financial analytics or FinnApiGo services today?"
+                )
         markdown_parts.append(
             "\n---\n*Verified by JakeAI Self-RAG Verifier & Policy Enforcement.*"
         )
