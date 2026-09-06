@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import logging
 import time
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -12,6 +13,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
 from app.core.context import TenantContext, set_current_tenant_context
+
+logger = logging.getLogger(__name__)
 
 http_bearer = HTTPBearer(
     scheme_name="FinnApiGoAuth",
@@ -148,9 +151,9 @@ async def check_token_denylist(token: str) -> None:
         await client.aclose()
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
         # Bounded resilience: if Redis is unreachable, fail open bounded by access token TTL
-        pass
+        logger.warning("Redis token denylist check unavailable, failing open: %s", exc)
 
 
 def verify_internal_perimeter_secret(request: Request | None) -> bool:
@@ -192,8 +195,10 @@ def verify_internal_perimeter_secret(request: Request | None) -> bool:
                 ).hexdigest()
                 if hmac.compare_digest(v1, expected):
                     return True
-        except Exception:
-            pass
+        except (ValueError, KeyError, TypeError) as exc:
+            logger.debug(
+                "Failed to parse or verify internal perimeter signature: %s", exc
+            )
 
     return False
 
