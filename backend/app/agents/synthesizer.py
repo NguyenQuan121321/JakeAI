@@ -16,17 +16,29 @@ _synthesizer_circuit = CircuitBreaker(
 )
 
 
-async def _call_gemini_or_openai(prompt: str) -> str | None:
-    """Call Google Gemini or OpenAI if configured in settings, with graceful fallback."""
-    settings = get_settings()
+async def _call_gemini_or_openai(
+    prompt: str, tenant_id: str = "default"
+) -> str | None:
+    """Call Google Gemini or OpenAI using tenant BYOK key or platform key with graceful fallback."""
+    from app.core.byok import get_byok_manager
 
-    if settings.GEMINI_API_KEY:
+    settings = get_settings()
+    byok_mgr = get_byok_manager()
+
+    gemini_key = (
+        await byok_mgr.get_decrypted_key(tenant_id, "gemini") or settings.GEMINI_API_KEY
+    )
+    openai_key = (
+        await byok_mgr.get_decrypted_key(tenant_id, "openai") or settings.OPENAI_API_KEY
+    )
+
+    if gemini_key:
         try:
             import httpx
 
             url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+                f"gemini-1.5-flash:generateContent?key={gemini_key}"
             )
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
@@ -53,12 +65,12 @@ async def _call_gemini_or_openai(prompt: str) -> str | None:
         except Exception as exc:
             logger.debug("Gemini API call failed (%s), falling back to template", exc)
 
-    if settings.OPENAI_API_KEY:
+    if openai_key:
         try:
             import httpx
 
             url = "https://api.openai.com/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
+            headers = {"Authorization": f"Bearer {openai_key}"}
             payload = {
                 "model": "gpt-4o-mini",
                 "messages": [
@@ -180,7 +192,7 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
             citations.append(cite.model_dump())
     else:
         if not financial_data and not tool_calls:
-            llm_text = await _call_gemini_or_openai(prompt)
+            llm_text = await _call_gemini_or_openai(prompt, tenant_id=tenant_id)
             if llm_text:
                 markdown_parts.append(f"\n{llm_text}\n")
             else:
