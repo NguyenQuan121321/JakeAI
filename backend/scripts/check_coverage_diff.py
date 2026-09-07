@@ -26,13 +26,22 @@ def get_git_diff_modified_lines(base_ref: str = "HEAD~1") -> dict[str, set[int]]
     modified_lines: dict[str, set[int]] = {}
     cmd = ["git", "diff", "-U0", base_ref, "HEAD", "--", "app"]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
         if proc.returncode != 0:
             # Fallback to unstaged/staged diff if HEAD~1 is not available
             proc = subprocess.run(
                 ["git", "diff", "-U0", "HEAD", "--", "app"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
             )
 

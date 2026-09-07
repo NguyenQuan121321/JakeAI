@@ -15,6 +15,7 @@ from typing import Any, TypedDict
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.finops.service import get_finops_service
 from app.services.ai_gateway import get_quota_manager
 
 logger = logging.getLogger(__name__)
@@ -201,16 +202,40 @@ class PayOSBillingService:
 
     async def get_dashboard_metrics(self, tenant_id: str) -> AnalyticsDashboard:
         """Compute real-time operational metrics for dashboard."""
-        quota_mgr = get_quota_manager()
-        tokens_used = await quota_mgr.get_tokens_used(tenant_id)
-        # Estimate cache savings ratio: typically 35-45% of total query tokens
-        tokens_saved = int(tokens_used * 0.42) if tokens_used > 0 else 12500
-        total_tokens = tokens_used + tokens_saved
+        finops_svc = get_finops_service()
+        summary = await finops_svc.get_summary(tenant_id)
 
-        cost_savings = round((tokens_saved / 1_000_000) * 2.50, 4)  # $2.50/M token avg
-        savings_pct = (
-            round((tokens_saved / total_tokens * 100), 1) if total_tokens > 0 else 42.0
-        )
+        if summary.total_requests > 0:
+            total_tokens = summary.total_raw_tokens + summary.total_output_tokens
+            tokens_saved = (
+                summary.total_physical_tokens_removed + summary.total_cached_tokens
+            )
+            cost_savings = summary.total_savings_usd
+            savings_pct = summary.overall_savings_percentage
+            prov_cached = summary.total_cached_tokens
+            prov_saved_usd = summary.savings_attribution.provider_cache_usd
+            prov_hit_rate = (
+                round((summary.reconciled_requests / summary.total_requests * 100.0), 1)
+                if summary.total_requests > 0
+                else 0.0
+            )
+        else:
+            quota_mgr = get_quota_manager()
+            tokens_used = await quota_mgr.get_tokens_used(tenant_id)
+            # Estimate cache savings ratio: typically 35-45% of total query tokens
+            tokens_saved = int(tokens_used * 0.42) if tokens_used > 0 else 12500
+            total_tokens = tokens_used + tokens_saved
+            cost_savings = round(
+                (tokens_saved / 1_000_000) * 2.50, 4
+            )  # $2.50/M token avg
+            savings_pct = (
+                round((tokens_saved / total_tokens * 100), 1)
+                if total_tokens > 0
+                else 42.0
+            )
+            prov_cached = 0
+            prov_saved_usd = 0.0
+            prov_hit_rate = 0.0
 
         sub_info = self.get_subscription(tenant_id)
         prs_count = self._prs_audited_count.get(tenant_id, 8)
@@ -229,6 +254,9 @@ class PayOSBillingService:
                 "openrouter": 10.0,
             },
             subscription_tier=sub_info.tier,
+            tokens_saved_provider_cache=prov_cached,
+            provider_cache_savings_usd=prov_saved_usd,
+            provider_cache_hit_rate=prov_hit_rate,
         )
 
 

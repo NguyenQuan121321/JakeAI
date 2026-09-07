@@ -8,11 +8,16 @@ Cost-optimizing reverse proxy providing:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import json
 import logging
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +29,8 @@ from app.core.llm_provider import (
     call_upstream_llm,
     call_upstream_llm_detailed,
 )
+from app.finops.budget import get_budget_manager
+from app.finops.service import get_finops_service
 from app.optimizer.context_optimizer import get_context_optimizer
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
@@ -63,6 +70,10 @@ class GatewayChatRequest(BaseModel):
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
+    stream: bool = Field(
+        default=False,
+        description="Whether to stream back partial progress via Server-Sent Events",
+    )
 
 
 class GatewayChatResponse(BaseModel):
@@ -88,28 +99,37 @@ class QuotaManager:
         self._memory_limits: dict[str, int] = {}
         self.redis_client: Any | None = None
         self._redis_available = True
+        self._redis_retry_after: float = 0.0
 
     async def _get_redis(self) -> Any | None:
-        """Lazily initialize Redis connection with fast ping check."""
+        """Lazily initialize Redis connection with fast ping check and cooldown."""
         if self.redis_client is not None:
             return self.redis_client
-        if not self._redis_available:
+        now = time.time()
+        if not self._redis_available and now < self._redis_retry_after:
             return None
         try:
             from redis import asyncio as aioredis
 
             settings = get_settings()
+            timeout = float(getattr(settings, "REDIS_CONNECT_TIMEOUT_SECONDS", 0.2))
             client = aioredis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
+                socket_connect_timeout=timeout,
+                socket_timeout=timeout,
             )
             await client.ping()
             self.redis_client = client
+            self._redis_available = True
+            self._redis_retry_after = 0.0
             return self.redis_client
         except Exception:
+            settings = get_settings()
             self._redis_available = False
+            cooldown = float(getattr(settings, "REDIS_COOLDOWN_SECONDS", 5.0))
+            self._redis_retry_after = time.time() + cooldown
+            self.redis_client = None
             return None
 
     def _get_period_key(self) -> str:
@@ -134,6 +154,8 @@ class QuotaManager:
             with contextlib.suppress(Exception):
                 await redis.set(f"gateway:limit:{tenant_id}", str(new_limit))
         self._memory_limits[tenant_id] = new_limit
+        with contextlib.suppress(Exception):
+            await get_budget_manager().set_budget(tenant_id, token_quota=new_limit)
         return new_limit
 
     async def get_tokens_used(self, tenant_id: str) -> int:
@@ -185,12 +207,16 @@ class QuotaManager:
             try:
                 key = f"gateway:usage:{tenant_id}:{period}"
                 new_val = await redis.incrby(key, total)
+                with contextlib.suppress(Exception):
+                    await get_budget_manager().settle_request(tenant_id, total, 0.0)
                 return int(new_val)
             except Exception as exc:
                 logger.debug("Redis incrby failed (%s)", exc)
 
         mem_key = f"{tenant_id}:{period}"
         self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + total
+        with contextlib.suppress(Exception):
+            await get_budget_manager().settle_request(tenant_id, total, 0.0)
         return self._memory_usage[mem_key]
 
     async def record_tokens_saved(self, tenant_id: str, tokens_saved: int) -> int:
@@ -281,6 +307,15 @@ class GatewayInferenceProxy:
                 cache_type=cache_entry.cache_type or "exact",
             )
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
+            with contextlib.suppress(Exception):
+                await get_finops_service().record_cache_hit(
+                    request_id=req_id,
+                    tenant_id=tenant_id,
+                    model=request.model,
+                    raw_tokens=raw_prompt_tokens,
+                    output_tokens=est_completion,
+                    cache_type=cache_entry.cache_type or "exact",
+                )
             return GatewayChatResponse(
                 id=req_id,
                 created=now_ts,
@@ -438,6 +473,25 @@ class GatewayInferenceProxy:
         if record.tokens_saved > 0:
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
 
+        with contextlib.suppress(Exception):
+            await get_finops_service().record_upstream_inference(
+                request_id=req_id,
+                tenant_id=tenant_id,
+                provider=telemetry.provider if telemetry else provider,
+                model=request.model,
+                raw_tokens=optimized_result.raw_tokens
+                or estimate_tokens(last_user_msg),
+                optimized_tokens=optimized_result.optimized_tokens
+                or estimate_tokens(effective_query),
+                output_tokens=completion_tokens,
+                provider_usage=telemetry.model_dump() if telemetry else None,
+                provider_cached_tokens=telemetry.cached_tokens if telemetry else 0,
+                provider_cache_write_tokens=telemetry.cache_write_tokens
+                if telemetry
+                else 0,
+                metadata={"prefix_hash": compiled.static_prefix_hash},
+            )
+
         return GatewayChatResponse(
             id=req_id,
             created=now_ts,
@@ -459,6 +513,165 @@ class GatewayInferenceProxy:
             reduction_percentage=record.reduction_percentage,
             provider_cache=provider_cache_meta,
         )
+
+    async def chat_completions_stream(
+        self,
+        tenant_id: str,
+        request: GatewayChatRequest,
+        raw_request: Any = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream OpenAI-compatible chat completion chunks via SSE."""
+        # 1. Quota Pre-check
+        allowed, error_msg = await self.quota_mgr.check_quota(tenant_id)
+        if not allowed:
+            err_payload = {
+                "error": {
+                    "message": error_msg or "Token budget quota exceeded",
+                    "type": "insufficient_quota",
+                    "param": None,
+                    "code": "quota_exceeded",
+                }
+            }
+            yield f"data: {json.dumps(err_payload)}\n\n"
+            return
+
+        req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        now_ts = int(time.time())
+
+        # Extract last user message
+        last_user_msg = next(
+            (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        )
+        raw_prompt_tokens = estimate_tokens(last_user_msg)
+
+        # 2. Tier 1 Exact Match Cache (stream instant chunks)
+        cache_entry = await self.cache_mgr.get(last_user_msg, tenant_id=tenant_id)
+        if cache_entry is not None:
+            words = cache_entry.response.split(" ")
+            for i, word in enumerate(words):
+                if raw_request and await raw_request.is_disconnected():
+                    return
+                delta_content = word if i == 0 else f" {word}"
+                chunk = {
+                    "id": req_id,
+                    "object": "chat.completion.chunk",
+                    "created": now_ts,
+                    "model": request.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": delta_content},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+                await asyncio.sleep(0.002)
+
+            final_chunk = {
+                "id": req_id,
+                "object": "chat.completion.chunk",
+                "created": now_ts,
+                "model": request.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+            est_completion = max(1, estimate_tokens(cache_entry.response))
+            record = TokenAccounting.record_transaction(
+                request_id=req_id,
+                tenant_id=tenant_id,
+                model=request.model,
+                raw_prompt_tokens=raw_prompt_tokens,
+                pruned_prompt_tokens=0,
+                completion_tokens=est_completion,
+                cache_hit=True,
+                cache_type=cache_entry.cache_type or "exact",
+            )
+            await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
+            return
+
+        # 3. Model Generation via Provider Stream or Fallback
+        compiler = get_two_zone_compiler()
+        compiled = compiler.partition_messages(request.messages)
+
+        from app.core.llm_provider import call_upstream_llm
+
+        output_text = await call_upstream_llm(
+            prompt=last_user_msg,
+            tenant_id=tenant_id,
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            compiled_prompt=compiled,
+        )
+        if not output_text:
+            output_text = (
+                f"[JakeAI Gateway Stream via {request.model}]\n"
+                f"Processed query: {last_user_msg[:120]}"
+            )
+
+        # Stream words as SSE chunks
+        words = output_text.split(" ")
+        streamed_words: list[str] = []
+        try:
+            for i, word in enumerate(words):
+                if raw_request and await raw_request.is_disconnected():
+                    break
+                delta_content = word if i == 0 else f" {word}"
+                streamed_words.append(delta_content)
+                chunk = {
+                    "id": req_id,
+                    "object": "chat.completion.chunk",
+                    "created": now_ts,
+                    "model": request.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": delta_content},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+                await asyncio.sleep(0.002)
+
+            final_chunk = {
+                "id": req_id,
+                "object": "chat.completion.chunk",
+                "created": now_ts,
+                "model": request.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            # Deduct usage & populate cache even on disconnect
+            completion_tokens = max(1, estimate_tokens("".join(streamed_words)))
+            await self.quota_mgr.record_usage(
+                tenant_id=tenant_id,
+                prompt_tokens=raw_prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            if len(streamed_words) == len(words):
+                await self.cache_mgr.set(
+                    prompt=last_user_msg,
+                    tenant_id=tenant_id,
+                    response=output_text,
+                )
 
 
 _quota_manager: QuotaManager | None = None

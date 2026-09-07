@@ -179,7 +179,13 @@ DEFAULT_FALLBACK_PRICING = ModelPricing(
 def get_model_pricing(model: str) -> ModelPricing:
     """Retrieve pricing definition for model name, falling back to closest match or default."""
     m_lower = model.lower().strip()
-    for key, pricing in PRICING_CATALOG.items():
+    if m_lower in PRICING_CATALOG:
+        return PRICING_CATALOG[m_lower]
+
+    # Check longest keys first so specific models (e.g. gpt-4o-mini) match before broader prefixes (gpt-4o)
+    for key, pricing in sorted(
+        PRICING_CATALOG.items(), key=lambda x: len(x[0]), reverse=True
+    ):
         if key in m_lower or m_lower in key:
             return pricing
 
