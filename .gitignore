@@ -45,6 +45,7 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+benchmark-results/
 
 # Type Checking & Linting
 .mypy_cache/

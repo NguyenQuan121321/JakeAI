@@ -37,7 +37,7 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: minor
+          default_bump: patch
           release_branches: main
           create_annotated_tag: true
 
@@ -240,4 +240,16 @@ jobs:
           EXPECTED_TAG: ${{ needs.semver-release.outputs.new_version }}
         run: |
           python backend/scripts/post_deploy_smoke_test.py
+
+      - name: Rollback Advisory on Deployment Failure
+        if: failure()
+        env:
+          FAILED_TAG: ${{ needs.semver-release.outputs.new_version }}
+        run: |
+          echo "================================================================================"
+          echo "🚨 CRITICAL: Canary Smoke Test FAILED for Release: ${FAILED_TAG}"
+          echo "Action Required: Initiate automated rollback to previous immutable release."
+          echo "Run on production host: docker compose pull jakeai-backend:<previous_tag> && docker compose up -d"
+          echo "================================================================================"
+
 

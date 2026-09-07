@@ -167,3 +167,52 @@ class CrossTierResult(BaseModel):
     latency_metrics: dict[str, float] = Field(
         default_factory=dict, description="Execution latencies per stage in seconds"
     )
+
+
+class EvaluationRecord(BaseModel):
+    """Normalized empirical evaluation entry for Phase 00 measurement model (Section 3)."""
+
+    request_id: str = Field(..., description="Unique evaluation interaction ID")
+    workload_id: str = Field(..., description="Workload case identifier")
+    workload_type: str = Field(
+        ...,
+        description="Type: simple_chat, long_conversation, rag, financial_reasoning, coding_context, structured_json, multilingual",
+    )
+    provider: str = Field(..., description="Upstream model provider")
+    model: str = Field(..., description="Evaluated model name")
+    raw_input_tokens: int = Field(..., description="Unoptimized baseline input tokens")
+    optimized_input_tokens: int = Field(..., description="Tokens after optimization")
+    physical_tokens_removed: int = Field(
+        ..., description="Raw tokens removed physically"
+    )
+    provider_cached_input_tokens: int = Field(
+        default=0, description="Tokens read from provider KV cache"
+    )
+    provider_uncached_input_tokens: int = Field(
+        default=0, description="Tokens processed as uncached input by provider"
+    )
+    output_tokens: int = Field(default=0, description="Completion/output tokens")
+    total_provider_reported_tokens: int = Field(
+        default=0, description="Total tokens reported by provider usage API"
+    )
+    latency_ms: float = Field(default=0.0, description="End-to-end execution latency")
+    estimated_cost_usd: float = Field(
+        default=0.0, description="Estimated USD cost under pricing matrix"
+    )
+    actual_cost_usd_when_available: float | None = Field(
+        default=None, description="Actual provider invoice cost if reported"
+    )
+    tokens_saved: int = Field(
+        ..., description="Total tokens saved (physical + cache hit)"
+    )
+    cost_saved: float = Field(..., description="Total USD cost saved")
+    quality_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Quality score from Layered Oracle"
+    )
+    quality_regression: float = Field(
+        default=0.0, description="Quality regression vs baseline"
+    )
+    passed: bool = Field(..., description="True if test case passed all gates")
+    verdict_details: dict[str, Any] = Field(
+        default_factory=dict, description="Detailed diagnostic verdicts"
+    )

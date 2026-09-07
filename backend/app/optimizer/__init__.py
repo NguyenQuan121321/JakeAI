@@ -17,6 +17,7 @@ from app.optimizer.context_optimizer import (
 from app.optimizer.contracts import (
     ContextArtifact,
     CrossTierResult,
+    EvaluationRecord,
     OptimizationLevel,
     OptimizedContext,
     ProviderCacheMetrics,
@@ -48,10 +49,12 @@ from app.optimizer.provider_cache_policy import (
     get_provider_cache_policy,
 )
 from app.optimizer.provider_pricing import (
+    CostMeasurement,
     ModelPricing,
     ProviderCostBreakdown,
     calculate_provider_costs,
     get_model_pricing,
+    measure_cost,
 )
 from app.optimizer.semantic_cache import (
     SemanticCacheEntry,
@@ -86,9 +89,11 @@ __all__ = [
     "ContextArtifact",
     "ContextBudgetExceededError",
     "ContextOptimizer",
+    "CostMeasurement",
     "CrossTierPipeline",
     "CrossTierResult",
     "DeepSeekPromptCacheAdapter",
+    "EvaluationRecord",
     "GeminiPromptCacheAdapter",
     "GroqPromptCacheAdapter",
     "HeuristicTokenPruner",
@@ -126,4 +131,5 @@ __all__ = [
     "get_semantic_cache_manager",
     "get_token_pruner",
     "get_two_zone_compiler",
+    "measure_cost",
 ]

@@ -24,6 +24,21 @@ class ModelPricing(BaseModel):
     output_per_million: float
 
 
+class CostMeasurement(BaseModel):
+    """Normalized internal cost record as required by Phase 00 Section 7."""
+
+    provider: str
+    model: str
+    raw_input_tokens: int
+    optimized_input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    baseline_cost_usd: float
+    actual_cost_usd: float | None = None
+    estimated_savings_usd: float
+    savings_percentage: float
+
+
 class ProviderCostBreakdown(BaseModel):
     """Calculated cost metrics for an upstream inference request."""
 
@@ -132,6 +147,23 @@ PRICING_CATALOG: dict[str, ModelPricing] = {
         cache_write_per_million=0.14,
         output_per_million=0.28,
     ),
+    # Groq
+    "llama-3.3-70b-versatile": ModelPricing(
+        model_id="llama-3.3-70b-versatile",
+        provider="groq",
+        input_per_million=0.59,
+        cache_read_per_million=0.59,
+        cache_write_per_million=0.59,
+        output_per_million=0.79,
+    ),
+    "llama-3.1-8b-instant": ModelPricing(
+        model_id="llama-3.1-8b-instant",
+        provider="groq",
+        input_per_million=0.05,
+        cache_read_per_million=0.05,
+        cache_write_per_million=0.05,
+        output_per_million=0.08,
+    ),
 }
 
 DEFAULT_FALLBACK_PRICING = ModelPricing(
@@ -158,6 +190,8 @@ def get_model_pricing(model: str) -> ModelPricing:
         return PRICING_CATALOG["gemini-1.5-flash"]
     if "deepseek" in m_lower:
         return PRICING_CATALOG["deepseek-chat"]
+    if "llama" in m_lower or "groq" in m_lower:
+        return PRICING_CATALOG["llama-3.3-70b-versatile"]
     if "mini" in m_lower:
         return PRICING_CATALOG["gpt-4o-mini"]
     if "gpt" in m_lower:
@@ -206,5 +240,64 @@ def calculate_provider_costs(
         baseline_cost_usd=round(baseline_cost, 6),
         actual_cost_usd=round(actual_cost, 6),
         savings_usd=round(savings, 6),
+        savings_percentage=savings_pct,
+    )
+
+
+def measure_cost(
+    model: str,
+    raw_input_tokens: int,
+    optimized_input_tokens: int,
+    cached_input_tokens: int = 0,
+    output_tokens: int = 0,
+    actual_cost_usd: float | None = None,
+    provider: str | None = None,
+) -> CostMeasurement:
+    """Compute normalized CostMeasurement comparing unoptimized raw baseline vs optimized execution.
+
+    Implements Phase 00 Section 7 requirements.
+    Baseline cost assumes unoptimized raw input tokens + output tokens at standard uncached rate.
+    Optimized cost accounts for physically reduced tokens and cached input token discounts.
+    """
+    pricing = get_model_pricing(model)
+    resolved_provider = provider or pricing.provider
+
+    # 1. Baseline: raw unoptimized input at standard rate
+    baseline_cost = (
+        (raw_input_tokens * pricing.input_per_million)
+        + (output_tokens * pricing.output_per_million)
+    ) / 1_000_000.0
+
+    # 2. Optimized estimated cost: uncached optimized tokens + cached discount
+    uncached_opt = max(0, optimized_input_tokens - cached_input_tokens)
+    computed_opt_cost = (
+        (uncached_opt * pricing.input_per_million)
+        + (cached_input_tokens * pricing.cache_read_per_million)
+        + (output_tokens * pricing.output_per_million)
+    ) / 1_000_000.0
+
+    effective_actual = (
+        actual_cost_usd if actual_cost_usd is not None else computed_opt_cost
+    )
+
+    estimated_savings = max(0.0, baseline_cost - effective_actual)
+    savings_pct = (
+        round((estimated_savings / baseline_cost) * 100.0, 2)
+        if baseline_cost > 0.0
+        else 0.0
+    )
+
+    return CostMeasurement(
+        provider=resolved_provider,
+        model=pricing.model_id,
+        raw_input_tokens=raw_input_tokens,
+        optimized_input_tokens=optimized_input_tokens,
+        cached_input_tokens=cached_input_tokens,
+        output_tokens=output_tokens,
+        baseline_cost_usd=round(baseline_cost, 6),
+        actual_cost_usd=round(effective_actual, 6)
+        if actual_cost_usd is not None
+        else None,
+        estimated_savings_usd=round(estimated_savings, 6),
         savings_percentage=savings_pct,
     )

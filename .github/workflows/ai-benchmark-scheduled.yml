@@ -1,0 +1,89 @@
+name: Scheduled AI Benchmark & Live Provider Measurement
+
+on:
+  schedule:
+    # Run weekly on Monday at 02:00 UTC (controlled off-peak live benchmark)
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      min_reduction:
+        description: "Minimum portfolio token reduction percentage gate"
+        required: false
+        default: "40.0"
+      max_regression:
+        description: "Maximum allowable quality regression vs baseline"
+        required: false
+        default: "0.05"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ai-benchmark-live
+  cancel-in-progress: false
+
+jobs:
+  live-provider-benchmark:
+    name: Phase 00 — Live Provider Measurement & Quality Evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      OPENAI_API_KEY: ${{ secrets.BENCHMARK_OPENAI_API_KEY || secrets.OPENAI_API_KEY || '' }}
+      GEMINI_API_KEY: ${{ secrets.BENCHMARK_GEMINI_API_KEY || secrets.GEMINI_API_KEY || '' }}
+      FINNAPIGO_SECRET_KEY: "scheduled-benchmark-secret-key-min-32-chars-long"
+      FINNAPIGO_JWT_SECRET: "scheduled-benchmark-secret-key-min-32-chars-long"
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Execute Multi-Workload Portfolio Benchmark (Live & Offline Measurement)
+        run: |
+          cd backend
+          python scripts/run_ai_evaluation.py \
+            --output-dir benchmark-results \
+            --min-reduction ${{ github.event.inputs.min_reduction || '40.0' }} \
+            --max-regression ${{ github.event.inputs.max_regression || '0.05' }}
+
+      - name: Run Pytest Multi-Workload Assertion Suite
+        run: |
+          cd backend
+          pytest tests/evals/test_portfolio_benchmark.py -v -s
+
+      - name: Archive Benchmark Reports and Machine-Readable Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-ai-benchmark-results-${{ github.sha }}
+          path: |
+            backend/benchmark-results/summary.json
+            backend/benchmark-results/raw-results.json
+            backend/benchmark-results/quality-results.json
+            backend/benchmark-results/cost-results.json
+          retention-days: 90

@@ -237,6 +237,20 @@ jobs:
           cd backend
           pytest tests/evals/test_token_benchmark.py -v -s
 
+      - name: Phase 00 AI Evaluation Benchmark Gate (Multi-Workload Portfolio >= 40%)
+        run: |
+          cd backend
+          python scripts/run_ai_evaluation.py --output-dir benchmark-results
+          pytest tests/evals/test_portfolio_benchmark.py -v -s
+
+      - name: Archive AI Evaluation Benchmark Artifacts
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai-evaluation-benchmark-results
+          path: backend/benchmark-results/
+          retention-days: 30
+
       - name: Internal Mutual Auth Contract Gate (Invariant 4 Perimeter Authentication)
         run: |
           cd backend
