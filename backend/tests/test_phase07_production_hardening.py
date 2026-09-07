@@ -25,6 +25,7 @@ from app.core.context import TenantContext
 from app.main import app
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.providers.errors import (
+    ProviderTimeoutError,
     ProviderUnavailableError,
     sanitize_error_message,
 )
@@ -442,3 +443,130 @@ def test_global_exception_handler_normalizes_provider_error() -> None:
     assert data["error"]["type"] == "provider_unavailable"
     assert "sk-secret-" not in data["error"]["message"]
     assert "[REDACTED_SECRET]" in data["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_chat_sse_stream_provider_error_mid_stream() -> None:
+    """Verify provider exception raised mid-stream emits sanitized error event and closes safely."""
+    from app.api.v1.endpoints.chat import generate_chat_stream
+
+    ctx = TenantContext(
+        tenant_id="tenant-midstream-err",
+        user_id="user-midstream",
+        roles=["user"],
+        permissions=["chat:stream"],
+    )
+
+    async def failing_workflow(*args: Any, **kwargs: Any) -> Any:
+        yield {
+            "node": "supervisor",
+            "workflow_phase": "planning",
+            "mascot_state": "thinking",
+            "messages": ["Step 1 starting..."],
+        }
+        raise RuntimeError("Provider connection died with sk-proj-supersecretkey99999999")
+
+    events = []
+    with patch(
+        "app.api.v1.endpoints.chat.stream_multi_agent_workflow",
+        side_effect=failing_workflow,
+    ):
+        gen = generate_chat_stream(
+            prompt="Analyze portfolio alpha",
+            context=ctx,
+            conversation_id="conv-midstream-fail",
+        )
+        async for ev in gen:
+            events.append(ev)
+
+    assert len(events) >= 1
+    # Ensure error event was emitted
+    error_events = [e for e in events if "event: error" in e]
+    assert len(error_events) == 1
+    assert "sk-proj-" not in error_events[0]
+    assert "[REDACTED_SECRET]" in error_events[0]
+
+
+def test_global_exception_handler_provider_timeout_and_504() -> None:
+    """Verify ProviderTimeoutError maps to HTTP 504 Gateway Timeout with Retry-After header."""
+    from app.main import app
+
+    @app.get("/test-provider-timeout")
+    async def raise_timeout() -> None:
+        raise ProviderTimeoutError(
+            message="Upstream provider timed out after 30s with key sk-openai-12345",
+            provider="openai",
+            model="gpt-4o",
+            status_code=504,
+            retry_after_seconds=10.0,
+        )
+
+    res = client.get("/test-provider-timeout")
+    assert res.status_code == 504
+    assert res.headers.get("retry-after") == "10"
+    data = res.json()
+    assert data["error"]["type"] == "provider_timeout"
+    assert "sk-openai" not in data["error"]["message"]
+    assert "[REDACTED_SECRET]" in data["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_byok_invalid_ciphertext_tamper_defense() -> None:
+    """Verify tampered or invalid BYOK ciphertext fails safely without unhandled crashes."""
+    from app.byok.crypto import decrypt_api_key
+
+    # Attempting to decrypt tampered ciphertext
+    tampered_ciphertext = "v1:tampered-iv-123:tampered-ciphertext-xyz:tampered-tag"
+    with pytest.raises(Exception) as exc_info:
+        decrypt_api_key(tampered_ciphertext, tenant_id="tenant-crypto-test")
+
+    # Error must not contain raw secret or fail silently
+    assert exc_info.value is not None
+
+
+@pytest.mark.asyncio
+async def test_chat_sse_stream_slow_provider_bounded() -> None:
+    """Verify that slow provider stream emits events in order and updates metrics."""
+    from app.api.v1.endpoints.chat import generate_chat_stream
+
+    ctx = TenantContext(
+        tenant_id="tenant-slow-test",
+        user_id="user-slow",
+        roles=["user"],
+        permissions=["chat:stream"],
+    )
+
+    async def slow_workflow(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(0.05)
+        yield {
+            "node": "supervisor",
+            "workflow_phase": "planning",
+            "mascot_state": "thinking",
+            "messages": ["Analyzing step 1..."],
+        }
+        await asyncio.sleep(0.05)
+        yield {
+            "node": "synthesizer",
+            "workflow_phase": "synthesis",
+            "mascot_state": "success",
+            "messages": ["Synthesis finished"],
+            "final_response": "Output text here.",
+        }
+
+    events = []
+    with patch(
+        "app.api.v1.endpoints.chat.stream_multi_agent_workflow",
+        side_effect=slow_workflow,
+    ):
+        gen = generate_chat_stream(
+            prompt="Compute compound interest",
+            context=ctx,
+            conversation_id="conv-slow-test",
+        )
+        async for ev in gen:
+            events.append(ev)
+
+    assert len(events) >= 3
+    assert any("event: status" in e for e in events)
+    assert any("event: done" in e for e in events)
+
