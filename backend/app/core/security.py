@@ -162,7 +162,7 @@ def verify_internal_perimeter_secret(request: Request | None) -> bool:
     Enforces Invariant 4: Mutual Perimeter Authentication & Network Isolation.
     Accepts either static X-Internal-Secret or timestamped HMAC X-Internal-Sig.
     """
-    if request is None:
+    if request is None or not hasattr(request, "headers"):
         return False
 
     forwarded_by = request.headers.get("x-forwarded-by", "").strip().lower()

@@ -996,6 +996,280 @@
         ]
       }
     },
+    "/api/v1/finops/summary": {
+      "get": {
+        "tags": [
+          "AI FinOps"
+        ],
+        "summary": "Get Finops Summary",
+        "description": "Retrieve tenant FinOps summary: baseline vs actual costs, non-double-counted savings, and quota health.",
+        "operationId": "get_finops_summary_api_v1_finops_summary_get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Billing period formatted as YYYY-MM (defaults to current month)",
+              "title": "Period"
+            },
+            "description": "Billing period formatted as YYYY-MM (defaults to current month)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinOpsSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/finops/transactions": {
+      "get": {
+        "tags": [
+          "AI FinOps"
+        ],
+        "summary": "List Finops Transactions",
+        "description": "Retrieve paginated per-request accounting records with separate token and cost metrics.",
+        "operationId": "list_finops_transactions_api_v1_finops_transactions_get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Billing period filter (YYYY-MM)",
+              "title": "Period"
+            },
+            "description": "Billing period filter (YYYY-MM)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Max records to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max records to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Pagination offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FinOpsRecord"
+                  },
+                  "title": "Response List Finops Transactions Api V1 Finops Transactions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/finops/budget": {
+      "get": {
+        "tags": [
+          "AI FinOps"
+        ],
+        "summary": "Get Tenant Budget",
+        "description": "Retrieve active tenant token quota and dollar budget status.",
+        "operationId": "get_tenant_budget_api_v1_finops_budget_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantBudget"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "AI FinOps"
+        ],
+        "summary": "Configure Tenant Budget",
+        "description": "Configure tenant token quota limit, monthly dollar budget ceiling, and warning threshold.",
+        "operationId": "configure_tenant_budget_api_v1_finops_budget_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantBudget"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/finops/reconciliation": {
+      "get": {
+        "tags": [
+          "AI FinOps"
+        ],
+        "summary": "Get Reconciliation Report",
+        "description": "Retrieve reconciliation report comparing local planning estimates against authoritative provider truth.",
+        "operationId": "get_reconciliation_report_api_v1_finops_reconciliation_get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Billing period filter (YYYY-MM)",
+              "title": "Period"
+            },
+            "description": "Billing period filter (YYYY-MM)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/coding/tool-result": {
       "post": {
         "tags": [
@@ -1981,6 +2255,301 @@
         "title": "DocumentIngestResponse",
         "description": "Outcome metadata of document ingestion pipeline execution."
       },
+      "FinOpsRecord": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "timestamp": {
+            "type": "number",
+            "title": "Timestamp"
+          },
+          "estimated_local_tokens": {
+            "type": "integer",
+            "title": "Estimated Local Tokens",
+            "description": "Local planning estimate before upstream execution (raw prompt + estimated completion)"
+          },
+          "raw_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Raw Tokens",
+            "description": "Baseline raw input prompt tokens before any optimization"
+          },
+          "optimized_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Optimized Tokens",
+            "description": "Actual input tokens sent upstream after physical pruning and compilation"
+          },
+          "physical_tokens_removed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Physical Tokens Removed",
+            "description": "Physical tokens pruned: max(0, raw_tokens - optimized_tokens)",
+            "default": 0
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cached Tokens",
+            "description": "Input tokens served from upstream prompt cache (or raw tokens on JakeAI cache hit)",
+            "default": 0
+          },
+          "uncached_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Uncached Tokens",
+            "description": "Input tokens processed normally without upstream cache hit",
+            "default": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "description": "Completion / output tokens generated by the provider",
+            "default": 0
+          },
+          "provider_reported_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reported Total",
+            "description": "Authoritative total tokens reported by upstream provider usage API (if returned)"
+          },
+          "baseline_cost_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Baseline Cost Usd",
+            "description": "Baseline cost if unoptimized prompt & requested model were processed with zero cache"
+          },
+          "estimated_cost_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Estimated Cost Usd",
+            "description": "Planning cost estimate computed before or without provider usage"
+          },
+          "actual_billed_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Billed Cost Usd",
+            "description": "Authoritative billed cost incurred from provider-reported usage"
+          },
+          "effective_cost_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Effective Cost Usd",
+            "description": "Effective cost: actual_billed_cost_usd if available, else estimated_cost_usd"
+          },
+          "total_savings_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Savings Usd",
+            "description": "Total cost saved: max(0.0, baseline_cost_usd - effective_cost_usd)",
+            "default": 0.0
+          },
+          "savings_percentage": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Savings Percentage",
+            "description": "Percentage of cost saved relative to baseline cost",
+            "default": 0.0
+          },
+          "savings_attribution": {
+            "$ref": "#/components/schemas/SavingsAttribution"
+          },
+          "reconciliation_status": {
+            "$ref": "#/components/schemas/ReconciliationStatus",
+            "default": "estimated"
+          },
+          "variance_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variance Tokens",
+            "description": "Variance between provider reported total and local estimate: provider - local"
+          },
+          "variance_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variance Cost Usd",
+            "description": "Variance between actual billed cost and estimated cost: actual - estimated"
+          },
+          "is_cache_hit": {
+            "type": "boolean",
+            "title": "Is Cache Hit",
+            "description": "True if JakeAI Tier 1 or Tier 2 response cache hit occurred",
+            "default": false
+          },
+          "cache_type": {
+            "type": "string",
+            "title": "Cache Type",
+            "description": "'none', 'exact', 'semantic'",
+            "default": "none"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "description": "Sanitized contextual metadata (workload type, route tags)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "tenant_id",
+          "provider",
+          "model",
+          "estimated_local_tokens",
+          "raw_tokens",
+          "optimized_tokens",
+          "baseline_cost_usd",
+          "estimated_cost_usd",
+          "effective_cost_usd"
+        ],
+        "title": "FinOpsRecord",
+        "description": "Immutable per-request token & cost accounting record.\n\nPhase 05 Section 1 Mandate: Never collapse these metrics:\n- estimated_local_tokens\n- physical_tokens_removed\n- provider_cached_tokens\n- provider_uncached_tokens\n- output_tokens\n- provider_reported_total\n- actual_billed_cost_usd\n- estimated_cost_usd"
+      },
+      "FinOpsSummary": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "period": {
+            "type": "string",
+            "title": "Period"
+          },
+          "total_requests": {
+            "type": "integer",
+            "title": "Total Requests"
+          },
+          "reconciled_requests": {
+            "type": "integer",
+            "title": "Reconciled Requests"
+          },
+          "reconciliation_rate": {
+            "type": "number",
+            "title": "Reconciliation Rate",
+            "description": "Percentage of requests with authoritative provider reconciliation"
+          },
+          "total_raw_tokens": {
+            "type": "integer",
+            "title": "Total Raw Tokens"
+          },
+          "total_optimized_tokens": {
+            "type": "integer",
+            "title": "Total Optimized Tokens"
+          },
+          "total_physical_tokens_removed": {
+            "type": "integer",
+            "title": "Total Physical Tokens Removed"
+          },
+          "total_cached_tokens": {
+            "type": "integer",
+            "title": "Total Cached Tokens"
+          },
+          "total_uncached_tokens": {
+            "type": "integer",
+            "title": "Total Uncached Tokens"
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens"
+          },
+          "total_baseline_cost_usd": {
+            "type": "number",
+            "title": "Total Baseline Cost Usd"
+          },
+          "total_actual_cost_usd": {
+            "type": "number",
+            "title": "Total Actual Cost Usd"
+          },
+          "total_savings_usd": {
+            "type": "number",
+            "title": "Total Savings Usd"
+          },
+          "overall_savings_percentage": {
+            "type": "number",
+            "title": "Overall Savings Percentage"
+          },
+          "savings_attribution": {
+            "$ref": "#/components/schemas/SavingsAttribution"
+          },
+          "budget_status": {
+            "$ref": "#/components/schemas/TenantBudget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "period",
+          "total_requests",
+          "reconciled_requests",
+          "reconciliation_rate",
+          "total_raw_tokens",
+          "total_optimized_tokens",
+          "total_physical_tokens_removed",
+          "total_cached_tokens",
+          "total_uncached_tokens",
+          "total_output_tokens",
+          "total_baseline_cost_usd",
+          "total_actual_cost_usd",
+          "total_savings_usd",
+          "overall_savings_percentage",
+          "savings_attribution",
+          "budget_status"
+        ],
+        "title": "FinOpsSummary",
+        "description": "Aggregated FinOps analytics and cost efficiency summary for a tenant."
+      },
       "GatewayChatRequest": {
         "properties": {
           "model": {
@@ -2010,6 +2579,12 @@
             "minimum": 1.0,
             "title": "Max Tokens",
             "default": 1024
+          },
+          "stream": {
+            "type": "boolean",
+            "title": "Stream",
+            "description": "Whether to stream back partial progress via Server-Sent Events",
+            "default": false
           }
         },
         "type": "object",
@@ -2798,6 +3373,68 @@
         "title": "RAGQueryResponse",
         "description": "Response returning retrieved document chunks and latency."
       },
+      "ReconciliationReport": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "period": {
+            "type": "string",
+            "title": "Period"
+          },
+          "total_reconciled": {
+            "type": "integer",
+            "title": "Total Reconciled"
+          },
+          "total_estimated_only": {
+            "type": "integer",
+            "title": "Total Estimated Only"
+          },
+          "net_token_variance": {
+            "type": "integer",
+            "title": "Net Token Variance",
+            "description": "Net tokens delta: sum(provider_reported - estimated_local)"
+          },
+          "net_cost_variance_usd": {
+            "type": "number",
+            "title": "Net Cost Variance Usd",
+            "description": "Net cost delta: sum(actual_billed - estimated_cost)"
+          },
+          "avg_token_variance_pct": {
+            "type": "number",
+            "title": "Avg Token Variance Pct",
+            "description": "Average percentage variance between estimates and authoritative usage"
+          },
+          "anomalous_requests_count": {
+            "type": "integer",
+            "title": "Anomalous Requests Count",
+            "description": "Number of requests where variance exceeded 25%",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "period",
+          "total_reconciled",
+          "total_estimated_only",
+          "net_token_variance",
+          "net_cost_variance_usd",
+          "avg_token_variance_pct"
+        ],
+        "title": "ReconciliationReport",
+        "description": "Telemetry report comparing local planning estimates with authoritative provider truth."
+      },
+      "ReconciliationStatus": {
+        "type": "string",
+        "enum": [
+          "authoritative",
+          "estimated"
+        ],
+        "title": "ReconciliationStatus",
+        "description": "Reconciliation state of an inference transaction."
+      },
       "ResumedExecutionResult": {
         "properties": {
           "call_id": {
@@ -2842,6 +3479,54 @@
         ],
         "title": "ResumedExecutionResult",
         "description": "Outcome of rehydrated execution after tool result processing."
+      },
+      "SavingsAttribution": {
+        "properties": {
+          "cache_hit_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Cache Hit Usd",
+            "description": "Savings from JakeAI exact or semantic response cache hit (100% baseline saved)",
+            "default": 0.0
+          },
+          "physical_reduction_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Physical Reduction Usd",
+            "description": "Savings from physical token pruning before sending upstream",
+            "default": 0.0
+          },
+          "provider_cache_usd": {
+            "type": "number",
+            "title": "Provider Cache Usd",
+            "description": "Savings from upstream KV prompt cache discounts net of write surcharges",
+            "default": 0.0
+          },
+          "model_routing_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Model Routing Usd",
+            "description": "Savings achieved by intelligent model routing to a lower-tier model",
+            "default": 0.0
+          },
+          "avoided_retries_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Avoided Retries Usd",
+            "description": "Savings from circuit breaker preventing cascading retry expenditures",
+            "default": 0.0
+          },
+          "total_savings_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Savings Usd",
+            "description": "Authoritative non-overlapping sum of all savings categories",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "title": "SavingsAttribution",
+        "description": "Attribution breakdown of dollar savings per request.\n\nGuarantees no double-counting by strictly partitioning savings sources:\n- cache_hit_usd: Savings from JakeAI Tier 1 (exact Redis) or Tier 2 (semantic Qdrant)\n  avoiding upstream inference completely.\n- physical_reduction_usd: Savings from pre-inference token pruning, two-zone compilation,\n  or RAG context selection reducing input tokens sent to the provider.\n- provider_cache_usd: Savings from upstream prompt KV cache discounts (Anthropic/OpenAI/DeepSeek)\n  net of cache creation surcharges.\n- model_routing_usd: Savings when ModelRouter routes to a lower-cost model fulfilling the task\n  compared to the user's requested model.\n- avoided_retries_usd: Estimated cost avoided by circuit-breaker / failover avoidance."
       },
       "SecurityFinding": {
         "properties": {
@@ -2950,6 +3635,124 @@
         "title": "SuggestedTestScaffold",
         "description": "Automated test scaffold recommendation."
       },
+      "TenantBudget": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "period": {
+            "type": "string",
+            "title": "Period",
+            "description": "Billing period formatted as YYYY-MM"
+          },
+          "token_quota": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Token Quota",
+            "description": "Monthly allocated token quota limit",
+            "default": 1000000
+          },
+          "tokens_used": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tokens Used",
+            "description": "Authoritative tokens consumed in active period",
+            "default": 0
+          },
+          "tokens_remaining": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tokens Remaining",
+            "description": "Remaining token quota: max(0, token_quota - tokens_used)",
+            "default": 1000000
+          },
+          "percentage_tokens_used": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Percentage Tokens Used",
+            "description": "Percentage of token quota consumed",
+            "default": 0.0
+          },
+          "dollar_budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dollar Budget Usd",
+            "description": "Optional monthly dollar budget ceiling in USD"
+          },
+          "dollar_spent_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Dollar Spent Usd",
+            "description": "Total actual USD expenditure incurred in active period",
+            "default": 0.0
+          },
+          "dollar_remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dollar Remaining Usd",
+            "description": "Remaining USD budget: max(0.0, dollar_budget_usd - dollar_spent_usd)"
+          },
+          "percentage_dollars_used": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage Dollars Used",
+            "description": "Percentage of dollar budget consumed (if configured)"
+          },
+          "warning_threshold": {
+            "type": "number",
+            "maximum": 0.99,
+            "minimum": 0.1,
+            "title": "Warning Threshold",
+            "description": "Soft alert threshold ratio (default: 0.80 = 80%)",
+            "default": 0.8
+          },
+          "is_suspended": {
+            "type": "boolean",
+            "title": "Is Suspended",
+            "description": "True if token quota or dollar budget is exhausted (>= 100%)",
+            "default": false
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning",
+            "description": "Actionable warning message if nearing or exceeding budget limits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "period"
+        ],
+        "title": "TenantBudget",
+        "description": "Tenant token quota and dollar budget status."
+      },
       "ToolResultSubmission": {
         "properties": {
           "call_id": {
@@ -2999,6 +3802,53 @@
         ],
         "title": "ToolResultSubmission",
         "description": "Payload submitted by client application upon completing a local tool execution."
+      },
+      "UpdateBudgetRequest": {
+        "properties": {
+          "token_quota": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 10000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Quota",
+            "description": "New monthly token quota limit"
+          },
+          "dollar_budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dollar Budget Usd",
+            "description": "New monthly dollar budget limit in USD (or None to unset)"
+          },
+          "warning_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.99,
+                "minimum": 0.1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Threshold",
+            "description": "Soft warning threshold ratio (e.g. 0.8 for 80%)"
+          }
+        },
+        "type": "object",
+        "title": "UpdateBudgetRequest",
+        "description": "Payload to configure tenant budget and quotas."
       },
       "UpdateQuotaRequest": {
         "properties": {
