@@ -69,10 +69,7 @@ async def list_available_models(
     catalog = ModelCapabilityCatalog.list_all()
     return ModelListResponse(
         object="list",
-        data=[
-            ModelItem(id=cap.model, owned_by=cap.provider)
-            for cap in catalog
-        ],
+        data=[ModelItem(id=cap.model, owned_by=cap.provider) for cap in catalog],
     )
 
 

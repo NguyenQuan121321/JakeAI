@@ -55,7 +55,9 @@ class OpenRouterAdapter(LLMProvider):
         if key:
             return key
         settings = get_settings()
-        platform_key = getattr(settings, "OPENROUTER_API_KEY", None) or os.environ.get("OPENROUTER_API_KEY")
+        platform_key = getattr(settings, "OPENROUTER_API_KEY", None) or os.environ.get(
+            "OPENROUTER_API_KEY"
+        )
         if platform_key:
             return platform_key
         raise ProviderAuthenticationError(
@@ -90,13 +92,17 @@ class OpenRouterAdapter(LLMProvider):
         if request.extra_headers:
             headers.update(request.extra_headers)
 
-        openrouter_model = request.model if "/" in request.model else f"openai/{request.model}"
+        openrouter_model = (
+            request.model if "/" in request.model else f"openai/{request.model}"
+        )
 
         messages: list[dict[str, str]] = []
         static_sys = compiled.static_prefix or default_system
         if static_sys.strip():
             messages.append({"role": "system", "content": static_sys.strip()})
-        messages.append({"role": "user", "content": compiled.dynamic_suffix or request.prompt})
+        messages.append(
+            {"role": "user", "content": compiled.dynamic_suffix or request.prompt}
+        )
 
         payload: dict[str, Any] = {
             "model": openrouter_model,
@@ -122,7 +128,7 @@ class OpenRouterAdapter(LLMProvider):
         headers["Authorization"] = f"Bearer {api_key}"
 
         compiled = request.compiled_prompt or get_two_zone_compiler().compile(
-            system_instruction=request.system_instruction,
+            system_instruction=request.system_instruction or "",
             tools=request.tools,
             user_query=request.prompt,
         )
@@ -148,8 +154,12 @@ class OpenRouterAdapter(LLMProvider):
 
             data = res.json()
             choices = data.get("choices", [])
-            text_output = choices[0].get("message", {}).get("content", "") if choices else ""
-            tool_calls = choices[0].get("message", {}).get("tool_calls") if choices else None
+            text_output = (
+                choices[0].get("message", {}).get("content", "") if choices else ""
+            )
+            tool_calls = (
+                choices[0].get("message", {}).get("tool_calls") if choices else None
+            )
 
             usage = data.get("usage", {})
             prompt_tokens = usage.get("prompt_tokens", 0)
@@ -170,7 +180,9 @@ class OpenRouterAdapter(LLMProvider):
                 uncached_input_tokens=prompt_tokens,
                 cache_write_tokens=0,
                 output_tokens=completion_tokens,
-                prefix_hash=compiled.static_prefix_hash if compiled.static_prefix else None,
+                prefix_hash=compiled.static_prefix_hash
+                if compiled.static_prefix
+                else None,
                 miss_reason=CacheMissReason.PROVIDER_UNSUPPORTED.value,
                 provider=self.provider_name,
                 model=payload["model"],

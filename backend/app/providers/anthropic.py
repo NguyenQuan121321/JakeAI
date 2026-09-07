@@ -140,7 +140,7 @@ class AnthropicAdapter(LLMProvider):
         headers["x-api-key"] = api_key
 
         compiled = request.compiled_prompt or get_two_zone_compiler().compile(
-            system_instruction=request.system_instruction,
+            system_instruction=request.system_instruction or "",
             tools=request.tools,
             user_query=request.prompt,
         )
@@ -271,7 +271,9 @@ class AnthropicAdapter(LLMProvider):
                                         provider=self.provider_name,
                                     )
                             elif etype == "message_delta":
-                                stop_reason = event_data.get("delta", {}).get("stop_reason")
+                                stop_reason = event_data.get("delta", {}).get(
+                                    "stop_reason"
+                                )
                                 yield StreamChunk(
                                     delta_text="",
                                     model=payload["model"],

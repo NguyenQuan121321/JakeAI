@@ -93,7 +93,9 @@ def test_provider_registry_resolution() -> None:
     assert reg.resolve_provider_name_for_model("gemini-1.5-pro") == "gemini"
     assert reg.resolve_provider_name_for_model("llama-3.3-70b-versatile") == "groq"
     assert reg.resolve_provider_name_for_model("deepseek-chat") == "deepseek"
-    assert reg.resolve_provider_name_for_model("meta-llama/llama-3.1-70b") == "openrouter"
+    assert (
+        reg.resolve_provider_name_for_model("meta-llama/llama-3.1-70b") == "openrouter"
+    )
 
 
 # ==============================================================================
@@ -147,44 +149,60 @@ def test_model_capabilities_explicit_catalog() -> None:
 def test_error_normalization_classification() -> None:
     """Verify exact categorization across all required error classes."""
     # 1. Authentication (401/403)
-    e1 = normalize_provider_error("anthropic", 401, {"error": {"message": "invalid x-api-key"}})
+    e1 = normalize_provider_error(
+        "anthropic", 401, {"error": {"message": "invalid x-api-key"}}
+    )
     assert isinstance(e1, ProviderAuthenticationError)
     assert e1.category == ErrorCategory.AUTHENTICATION
     assert e1.is_retryable is False
 
     # 2. Quota / Billing Exceeded (402 or 429 quota)
-    e2 = normalize_provider_error("openai", 429, {"error": {"message": "You exceeded your current quota"}})
+    e2 = normalize_provider_error(
+        "openai", 429, {"error": {"message": "You exceeded your current quota"}}
+    )
     assert isinstance(e2, ProviderQuotaError)
     assert e2.category == ErrorCategory.QUOTA
     assert e2.is_retryable is False
 
     # 3. Rate Limit (429 with retry_after)
-    e3 = normalize_provider_error("openai", 429, {"error": {"message": "Rate limit reached"}}, retry_after=2.5)
+    e3 = normalize_provider_error(
+        "openai", 429, {"error": {"message": "Rate limit reached"}}, retry_after=2.5
+    )
     assert isinstance(e3, ProviderRateLimitError)
     assert e3.category == ErrorCategory.RETRYABLE
     assert e3.is_retryable is True
     assert e3.retry_after_seconds == 2.5
 
     # 4. Context Limit Exceeded (400 token length)
-    e4 = normalize_provider_error("gemini", 400, {"error": {"message": "Maximum context length exceeded: 130000 > 128000"}})
+    e4 = normalize_provider_error(
+        "gemini",
+        400,
+        {"error": {"message": "Maximum context length exceeded: 130000 > 128000"}},
+    )
     assert isinstance(e4, ProviderContextLimitError)
     assert e4.category == ErrorCategory.CONTEXT_LIMIT
     assert e4.is_retryable is False
 
     # 5. Provider Unavailable (503 / 502 / 529)
-    e5 = normalize_provider_error("anthropic", 529, {"error": {"message": "Overloaded"}})
+    e5 = normalize_provider_error(
+        "anthropic", 529, {"error": {"message": "Overloaded"}}
+    )
     assert isinstance(e5, ProviderUnavailableError)
     assert e5.category == ErrorCategory.PROVIDER_UNAVAILABLE
     assert e5.is_retryable is True
 
     # 6. Policy / Safety Rejection (400 safety)
-    e6 = normalize_provider_error("gemini", 400, {"error": {"message": "Blocked due to safety harm_category"}})
+    e6 = normalize_provider_error(
+        "gemini", 400, {"error": {"message": "Blocked due to safety harm_category"}}
+    )
     assert isinstance(e6, ProviderPolicyError)
     assert e6.category == ErrorCategory.POLICY_REJECTED
     assert e6.is_retryable is False
 
     # 7. Network / Timeout
-    e7 = normalize_provider_error("groq", 408, {"error": {"message": "Request timeout"}})
+    e7 = normalize_provider_error(
+        "groq", 408, {"error": {"message": "Request timeout"}}
+    )
     assert isinstance(e7, ProviderTimeoutError)
     assert e7.category == ErrorCategory.RETRYABLE
     assert e7.is_retryable is True
@@ -294,7 +312,9 @@ async def test_failover_non_retryable_aborts_retries() -> None:
     attempt_count = 0
 
     class MockFailingAuthAdapter(AnthropicAdapter):
-        async def complete(self, request: ProviderRequest, client: httpx.AsyncClient | None = None) -> ProviderResponse:
+        async def complete(
+            self, request: ProviderRequest, client: httpx.AsyncClient | None = None
+        ) -> ProviderResponse:
             nonlocal attempt_count
             attempt_count += 1
             raise ProviderAuthenticationError(
@@ -335,18 +355,24 @@ async def test_failover_retryable_recovers_with_backoff() -> None:
     calls = 0
 
     class MockTransientFailAdapter(OpenAIAdapter):
-        async def complete(self, request: ProviderRequest, client: httpx.AsyncClient | None = None) -> ProviderResponse:
+        async def complete(
+            self, request: ProviderRequest, client: httpx.AsyncClient | None = None
+        ) -> ProviderResponse:
             nonlocal calls
             calls += 1
             if calls == 1:
                 raise ProviderUnavailableError(
-                    message="Service overloaded (503)", provider="openai", status_code=503
+                    message="Service overloaded (503)",
+                    provider="openai",
+                    status_code=503,
                 )
             return ProviderResponse(
                 text="Success on retry",
                 model=request.model,
                 provider="openai",
-                telemetry=ProviderCacheTelemetry(provider="openai", model=request.model),
+                telemetry=ProviderCacheTelemetry(
+                    provider="openai", model=request.model
+                ),
             )
 
     registry = get_provider_registry()
@@ -379,16 +405,24 @@ async def test_failover_cross_provider_fallback_chain() -> None:
     failover_mgr = FailoverManager(config=config)
 
     class FailingPrimaryAdapter(AnthropicAdapter):
-        async def complete(self, request: ProviderRequest, client: httpx.AsyncClient | None = None) -> ProviderResponse:
-            raise ProviderUnavailableError("Anthropic endpoint down", provider="anthropic")
+        async def complete(
+            self, request: ProviderRequest, client: httpx.AsyncClient | None = None
+        ) -> ProviderResponse:
+            raise ProviderUnavailableError(
+                "Anthropic endpoint down", provider="anthropic"
+            )
 
     class WorkingSecondaryAdapter(OpenAIAdapter):
-        async def complete(self, request: ProviderRequest, client: httpx.AsyncClient | None = None) -> ProviderResponse:
+        async def complete(
+            self, request: ProviderRequest, client: httpx.AsyncClient | None = None
+        ) -> ProviderResponse:
             return ProviderResponse(
                 text="Response from secondary fallback",
                 model=request.model,
                 provider="openai",
-                telemetry=ProviderCacheTelemetry(provider="openai", model=request.model),
+                telemetry=ProviderCacheTelemetry(
+                    provider="openai", model=request.model
+                ),
             )
 
     registry = get_provider_registry()

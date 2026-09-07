@@ -97,7 +97,8 @@ class ModelCapabilities(BaseModel):
         default=True, description="Whether model supports function calling / tool use"
     )
     supports_json: bool = Field(
-        default=True, description="Whether model supports JSON mode / structured outputs"
+        default=True,
+        description="Whether model supports JSON mode / structured outputs",
     )
     supports_prompt_cache: bool = Field(
         default=False,
@@ -107,7 +108,8 @@ class ModelCapabilities(BaseModel):
         default=False, description="Whether model can produce dense vector embeddings"
     )
     supports_reasoning: bool = Field(
-        default=False, description="Whether model has extended thinking / chain-of-thought"
+        default=False,
+        description="Whether model has extended thinking / chain-of-thought",
     )
     input_pricing: float = Field(
         default=0.0, description="USD rate per 1,000,000 input tokens"
@@ -122,7 +124,8 @@ class ModelCapabilities(BaseModel):
         default=0.0, description="USD rate per 1,000,000 cache write tokens"
     )
     min_cache_tokens: int = Field(
-        default=1024, description="Minimum tokens required for prompt caching eligibility"
+        default=1024,
+        description="Minimum tokens required for prompt caching eligibility",
     )
 
 
@@ -167,7 +170,9 @@ class ProviderResponse(BaseModel):
     text: str
     model: str
     provider: str
-    telemetry: ProviderCacheTelemetry = Field(..., description="ProviderCacheTelemetry object")
+    telemetry: ProviderCacheTelemetry = Field(
+        ..., description="ProviderCacheTelemetry object"
+    )
     finish_reason: str | None = Field(default="stop")
     raw_usage: dict[str, Any] = Field(default_factory=dict)
     tool_calls: list[dict[str, Any]] | None = Field(default=None)
@@ -200,12 +205,10 @@ class LLMProvider(Protocol):
         """Execute a non-streaming completion."""
         ...
 
-    async def stream(
-        self,
-        request: ProviderRequest,
-        client: httpx.AsyncClient | None = None,
+    def stream(
+        self, request: ProviderRequest, client: httpx.AsyncClient | None = None
     ) -> AsyncIterator[StreamChunk]:
-        """Execute a token-streaming completion."""
+        """Stream completion tokens asynchronously with continuous TTFT tracking."""
         ...
 
     def capabilities(self, model: str) -> ModelCapabilities:
@@ -498,7 +501,9 @@ class ModelCapabilityCatalog:
             supports_json=True,
             supports_prompt_cache=policy.enabled,
             supports_embeddings=False,
-            supports_reasoning="o1" in m_lower or "o3" in m_lower or "reasoner" in m_lower,
+            supports_reasoning="o1" in m_lower
+            or "o3" in m_lower
+            or "reasoner" in m_lower,
             input_pricing=pricing.input_per_million,
             output_pricing=pricing.output_per_million,
             cache_pricing=pricing.cache_read_per_million,
@@ -512,6 +517,8 @@ class ModelCapabilityCatalog:
         return list(cls._CATALOG.values())
 
 
-def get_model_capabilities(model: str, provider: str | None = None) -> ModelCapabilities:
+def get_model_capabilities(
+    model: str, provider: str | None = None
+) -> ModelCapabilities:
     """Helper to retrieve explicit ModelCapabilities for a model."""
     return ModelCapabilityCatalog.get(model, provider=provider)

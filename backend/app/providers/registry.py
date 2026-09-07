@@ -52,7 +52,9 @@ class ProviderRegistry:
             return "deepseek"
         return "gemini"
 
-    def resolve_for_model(self, model: str, preferred_provider: str | None = None) -> LLMProvider:
+    def resolve_for_model(
+        self, model: str, preferred_provider: str | None = None
+    ) -> LLMProvider:
         if preferred_provider:
             p = self.get(preferred_provider)
             if p:
@@ -64,7 +66,11 @@ class ProviderRegistry:
             return adapter
 
         # Fallback to OpenAI or Gemini
-        return self._providers.get("openai") or self._providers.get("gemini") or next(iter(self._providers.values()))
+        return (
+            self._providers.get("openai")
+            or self._providers.get("gemini")
+            or next(iter(self._providers.values()))
+        )
 
     def list_providers(self) -> list[str]:
         return list(self._providers.keys())

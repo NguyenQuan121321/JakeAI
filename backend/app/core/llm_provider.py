@@ -18,7 +18,7 @@ from app.core.byok import get_byok_manager
 from app.core.config import get_settings
 from app.optimizer.two_zone_compiler import CompiledPrompt, get_two_zone_compiler
 from app.providers.base import (
-    ProviderCacheTelemetry,
+    ProviderCacheTelemetry,  # noqa: F401
     ProviderRequest,
     UpstreamLLMResponse,
 )
@@ -70,19 +70,16 @@ async def call_upstream_llm_detailed(
     # Determine explicit key from settings or BYOK if available to support mocked settings tests
     explicit_key: str | None = None
     if is_anthropic:
-        explicit_key = (
-            await byok_mgr.get_decrypted_key(tenant_id, "anthropic")
-            or getattr(settings, "ANTHROPIC_API_KEY", None)
-        )
+        explicit_key = await byok_mgr.get_decrypted_key(
+            tenant_id, "anthropic"
+        ) or getattr(settings, "ANTHROPIC_API_KEY", None)
     elif is_openai:
-        explicit_key = (
-            await byok_mgr.get_decrypted_key(tenant_id, "openai")
-            or getattr(settings, "OPENAI_API_KEY", None)
+        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "openai") or getattr(
+            settings, "OPENAI_API_KEY", None
         )
     elif is_gemini:
-        explicit_key = (
-            await byok_mgr.get_decrypted_key(tenant_id, "gemini")
-            or getattr(settings, "GEMINI_API_KEY", None)
+        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "gemini") or getattr(
+            settings, "GEMINI_API_KEY", None
         )
 
     provider_req = ProviderRequest(
@@ -119,23 +116,11 @@ async def call_upstream_llm_detailed(
                 client=client,
             )
 
-            # Ensure telemetry is typed as ProviderCacheTelemetry
-            telemetry_data = resp.telemetry
-            if not isinstance(telemetry_data, ProviderCacheTelemetry):
-                telemetry_dict = (
-                    telemetry_data.model_dump()
-                    if hasattr(telemetry_data, "model_dump")
-                    else dict(telemetry_data)
-                )
-                telemetry_obj = ProviderCacheTelemetry(**telemetry_dict)
-            else:
-                telemetry_obj = telemetry_data
-
             return UpstreamLLMResponse(
                 text=resp.text,
                 model=resp.model,
                 provider=resp.provider,
-                telemetry=telemetry_obj,
+                telemetry=resp.telemetry,
             )
     except Exception as exc:
         logger.debug("Provider dispatch failed via failover manager: %s", exc)

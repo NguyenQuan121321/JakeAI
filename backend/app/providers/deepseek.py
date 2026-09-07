@@ -56,7 +56,9 @@ class DeepSeekAdapter(LLMProvider):
         if key:
             return key
         settings = get_settings()
-        platform_key = getattr(settings, "DEEPSEEK_API_KEY", None) or os.environ.get("DEEPSEEK_API_KEY")
+        platform_key = getattr(settings, "DEEPSEEK_API_KEY", None) or os.environ.get(
+            "DEEPSEEK_API_KEY"
+        )
         if platform_key:
             return platform_key
         raise ProviderAuthenticationError(
@@ -97,7 +99,9 @@ class DeepSeekAdapter(LLMProvider):
         static_sys = compiled.static_prefix or default_system
         if static_sys.strip():
             messages.append({"role": "system", "content": static_sys.strip()})
-        messages.append({"role": "user", "content": compiled.dynamic_suffix or request.prompt})
+        messages.append(
+            {"role": "user", "content": compiled.dynamic_suffix or request.prompt}
+        )
 
         payload: dict[str, Any] = {
             "model": deepseek_model,
@@ -125,7 +129,7 @@ class DeepSeekAdapter(LLMProvider):
         headers["Authorization"] = f"Bearer {api_key}"
 
         compiled = request.compiled_prompt or get_two_zone_compiler().compile(
-            system_instruction=request.system_instruction,
+            system_instruction=request.system_instruction or "",
             tools=request.tools,
             user_query=request.prompt,
         )
@@ -151,8 +155,12 @@ class DeepSeekAdapter(LLMProvider):
 
             data = res.json()
             choices = data.get("choices", [])
-            text_output = choices[0].get("message", {}).get("content", "") if choices else ""
-            tool_calls = choices[0].get("message", {}).get("tool_calls") if choices else None
+            text_output = (
+                choices[0].get("message", {}).get("content", "") if choices else ""
+            )
+            tool_calls = (
+                choices[0].get("message", {}).get("tool_calls") if choices else None
+            )
 
             usage = data.get("usage", {})
             total_prompt_tokens = usage.get("prompt_tokens", 0)
@@ -184,7 +192,9 @@ class DeepSeekAdapter(LLMProvider):
                 uncached_input_tokens=uncached,
                 cache_write_tokens=0,
                 output_tokens=out_tokens,
-                prefix_hash=compiled.static_prefix_hash if compiled.static_prefix else None,
+                prefix_hash=compiled.static_prefix_hash
+                if compiled.static_prefix
+                else None,
                 miss_reason=miss_reason,
                 provider=self.provider_name,
                 model=payload["model"],

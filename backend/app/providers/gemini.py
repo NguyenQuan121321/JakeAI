@@ -66,9 +66,7 @@ class GeminiAdapter(LLMProvider):
             model=request.model,
         )
 
-    def _prepare_payload(
-        self, request: ProviderRequest
-    ) -> tuple[str, dict[str, Any]]:
+    def _prepare_payload(self, request: ProviderRequest) -> tuple[str, dict[str, Any]]:
         default_system = (
             request.system_instruction
             or "You are JakeAI, an enterprise financial and operational AI companion. "
@@ -114,7 +112,7 @@ class GeminiAdapter(LLMProvider):
         model_name, payload = self._prepare_payload(request)
 
         compiled = request.compiled_prompt or get_two_zone_compiler().compile(
-            system_instruction=request.system_instruction,
+            system_instruction=request.system_instruction or "",
             tools=request.tools,
             user_query=request.prompt,
         )
@@ -241,7 +239,9 @@ class GeminiAdapter(LLMProvider):
                             event_data = json.loads(data_str)
                             candidates = event_data.get("candidates", [])
                             if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
+                                parts = (
+                                    candidates[0].get("content", {}).get("parts", [])
+                                )
                                 if parts:
                                     text_chunk = parts[0].get("text", "")
                                     finish = candidates[0].get("finishReason")

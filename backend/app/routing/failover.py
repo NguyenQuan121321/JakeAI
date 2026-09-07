@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
+import secrets
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
@@ -56,13 +56,15 @@ class FailoverManager:
         self.config = config or FailoverConfig()
         self.registry = get_provider_registry()
 
-    def _calculate_backoff(self, attempt: int, retry_after: float | None = None) -> float:
+    def _calculate_backoff(
+        self, attempt: int, retry_after: float | None = None
+    ) -> float:
         """Calculate exponential backoff delay with random jitter, respecting retry_after."""
         if retry_after is not None and retry_after > 0:
             return min(retry_after, self.config.max_delay_seconds)
 
-        delay = self.config.base_delay_seconds * (self.config.backoff_factor ** attempt)
-        jitter = random.uniform(0.0, 0.1 * delay)
+        delay = self.config.base_delay_seconds * (self.config.backoff_factor**attempt)
+        jitter = secrets.SystemRandom().uniform(0.0, 0.1 * delay)  # nosec B311
         return min(delay + jitter, self.config.max_delay_seconds)
 
     async def execute_with_failover(
@@ -90,12 +92,12 @@ class FailoverManager:
 
             adapter = self.registry.get(provider_name)
             if adapter is None:
-                logger.debug("Provider adapter '%s' not registered, skipping", provider_name)
+                logger.debug(
+                    "Provider adapter '%s' not registered, skipping", provider_name
+                )
                 continue
 
-            current_request = request.model_copy(
-                update={"model": model_name}
-            )
+            current_request = request.model_copy(update={"model": model_name})
 
             provider_retries = 0
             while provider_retries <= self.config.max_retries_per_provider:
@@ -150,7 +152,11 @@ class FailoverManager:
                         model=model_name,
                         raw_error=exc,
                     )
-                    logger.warning("Unexpected non-ProviderError from [%s]: %s", provider_name, sanitized_msg)
+                    logger.warning(
+                        "Unexpected non-ProviderError from [%s]: %s",
+                        provider_name,
+                        sanitized_msg,
+                    )
                     break
 
         if last_error:

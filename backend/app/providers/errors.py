@@ -282,41 +282,128 @@ def normalize_provider_error(
         body_msg = str(response_body)
 
     exc_msg = str(exc) if exc is not None else ""
-    raw_msg = (body_msg or exc_msg or f"Provider error with status {status_code}").strip()
+    raw_msg = (
+        body_msg or exc_msg or f"Provider error with status {status_code}"
+    ).strip()
     msg_lower = raw_msg.lower()
 
     # Context length exceeded checks
-    if any(k in msg_lower for k in ("context length", "maximum context", "token limit", "too many tokens", "prompt is too long")):
-        return ProviderContextLimitError(raw_msg, provider, model=model, status_code=status_code, raw_error=response_body or exc)
+    if any(
+        k in msg_lower
+        for k in (
+            "context length",
+            "maximum context",
+            "token limit",
+            "too many tokens",
+            "prompt is too long",
+        )
+    ):
+        return ProviderContextLimitError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=status_code,
+            raw_error=response_body or exc,
+        )
 
     # Policy / safety violation checks
-    if any(k in msg_lower for k in ("safety", "blocked", "policy", "content violation", "harm_category", "moderation")):
-        return ProviderPolicyError(raw_msg, provider, model=model, status_code=status_code, raw_error=response_body or exc)
+    if any(
+        k in msg_lower
+        for k in (
+            "safety",
+            "blocked",
+            "policy",
+            "content violation",
+            "harm_category",
+            "moderation",
+        )
+    ):
+        return ProviderPolicyError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=status_code,
+            raw_error=response_body or exc,
+        )
 
     # Status-code based normalization
     if status_code in (401, 403):
-        return ProviderAuthenticationError(raw_msg, provider, model=model, status_code=status_code, raw_error=response_body or exc)
+        return ProviderAuthenticationError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=status_code,
+            raw_error=response_body or exc,
+        )
 
     if status_code == 429:
-        if any(k in msg_lower for k in ("quota", "insufficient_quota", "credit", "billing", "exceeded your current quota")):
-            return ProviderQuotaError(raw_msg, provider, model=model, status_code=429, raw_error=response_body or exc)
-        return ProviderRateLimitError(raw_msg, provider, model=model, status_code=429, retry_after_seconds=retry_after, raw_error=response_body or exc)
+        if any(
+            k in msg_lower
+            for k in (
+                "quota",
+                "insufficient_quota",
+                "credit",
+                "billing",
+                "exceeded your current quota",
+            )
+        ):
+            return ProviderQuotaError(
+                raw_msg,
+                provider,
+                model=model,
+                status_code=429,
+                raw_error=response_body or exc,
+            )
+        return ProviderRateLimitError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=429,
+            retry_after_seconds=retry_after,
+            raw_error=response_body or exc,
+        )
 
     if status_code == 402:
-        return ProviderQuotaError(raw_msg, provider, model=model, status_code=402, raw_error=response_body or exc)
+        return ProviderQuotaError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=402,
+            raw_error=response_body or exc,
+        )
 
     if status_code in (502, 503, 504, 529):
-        return ProviderUnavailableError(raw_msg, provider, model=model, status_code=status_code, retry_after_seconds=retry_after, raw_error=response_body or exc)
+        return ProviderUnavailableError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=status_code,
+            retry_after_seconds=retry_after,
+            raw_error=response_body or exc,
+        )
 
     if status_code == 408 or "timeout" in msg_lower:
-        return ProviderTimeoutError(raw_msg, provider, model=model, raw_error=response_body or exc)
+        return ProviderTimeoutError(
+            raw_msg, provider, model=model, raw_error=response_body or exc
+        )
 
     if status_code == 400:
-        return ProviderInvalidRequestError(raw_msg, provider, model=model, status_code=status_code, raw_error=response_body or exc)
+        return ProviderInvalidRequestError(
+            raw_msg,
+            provider,
+            model=model,
+            status_code=status_code,
+            raw_error=response_body or exc,
+        )
 
     # General network / connection exceptions
-    if exc is not None and any(k in type(exc).__name__.lower() for k in ("connect", "network", "dns", "transport")):
-        return ProviderUnavailableError(raw_msg, provider, model=model, status_code=None, raw_error=exc)
+    if exc is not None and any(
+        k in type(exc).__name__.lower()
+        for k in ("connect", "network", "dns", "transport")
+    ):
+        return ProviderUnavailableError(
+            raw_msg, provider, model=model, status_code=None, raw_error=exc
+        )
 
     return ProviderError(
         message=raw_msg,
