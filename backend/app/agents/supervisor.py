@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.agents.state import AgentState
+from app.rag.context_selector import get_context_selector
 from app.rag.retriever import get_hybrid_retriever
 
 FINANCIAL_PATTERNS = [
@@ -35,6 +36,7 @@ def classify_intent(prompt: str) -> str:
 
 
 _retriever = get_hybrid_retriever()
+_context_selector = get_context_selector()
 
 
 async def supervisor_node(state: AgentState) -> dict[str, Any]:
@@ -44,15 +46,21 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
     revision_count = state.get("revision_count", 0)
     retrieved_chunks = state.get("retrieved_chunks", [])
 
-    # Populate contextual chunks from hybrid retriever if not already provided
+    # Populate contextual chunks from hybrid retriever & context selector if not already provided
     if not retrieved_chunks and prompt.strip():
         try:
             retrieval_res = await _retriever.retrieve(
                 query=prompt,
                 tenant_id=tenant_id,
-                top_k=3,
+                top_k=5,
             )
-            retrieved_chunks = [c.model_dump() for c in retrieval_res.chunks]
+            selection_res = _context_selector.select_context(
+                candidates=retrieval_res.chunks,
+                query=prompt,
+                tenant_id=tenant_id,
+                max_tokens=600,
+            )
+            retrieved_chunks = [c.model_dump() for c in selection_res.selected_chunks]
         except Exception:
             retrieved_chunks = []
 

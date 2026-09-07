@@ -69,14 +69,18 @@ class CitationGenerator:
                     citation_index += 1
 
                 idx = cited_chunks[cid]
-                annotated_sentences.append(f"{sentence} [^{idx}]")
+                # Avoid duplicate footnote tags if already annotated
+                if f"[^{idx}]" not in sentence:
+                    annotated_sentences.append(f"{sentence} [^{idx}]")
+                else:
+                    annotated_sentences.append(sentence)
             else:
                 annotated_sentences.append(sentence)
 
         annotated_text = " ".join(annotated_sentences)
 
-        # Build citation metadata cards
-        if citations:
+        # Build citation metadata cards (only if not already appended)
+        if citations and "#### 📚 Verifiable Citations & Sources" not in annotated_text:
             cards_section = ["\n\n---\n#### 📚 Verifiable Citations & Sources\n"]
             for cite in citations:
                 cards_section.append(

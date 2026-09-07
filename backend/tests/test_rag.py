@@ -5,13 +5,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.agents.verifier import verifier_node
+from app.core.config import get_settings
 from app.rag.bm25 import BM25Retriever
 from app.rag.citations import CitationGenerator
+from app.rag.context_selector import ContextSelector
 from app.rag.ingestion import (
     DocumentIngestionPipeline,
     DocumentIngestRequest,
 )
 from app.rag.models import DocumentChunk
+from app.rag.pipeline import RAGPipeline
 from app.rag.reranker import CrossEncoderReranker
 from app.rag.retriever import HybridRetriever
 from app.rag.vector_store import QdrantVectorStore
@@ -281,3 +284,148 @@ async def test_document_ingestion_pipeline_end_to_end() -> None:
     assert len(retrieved.chunks) >= 1
     assert retrieved.chunks[0].tenant_id == "tenant-ingest-test"
     assert "tenant-ingest-test" in retrieved.chunks[0].tenant_id
+
+
+def test_context_selector_deduplication_and_budget() -> None:
+    """Verify ContextSelector drops low-score chunks and formats structured context."""
+    chunks = [
+        DocumentChunk(
+            chunk_id="chk-1",
+            content="Alpha Corporation Q3 revenue was $100M with profit $30M.",
+            tenant_id="tenant-cs-test",
+            source="Alpha 10-Q",
+            score=0.95,
+        ),
+        DocumentChunk(
+            chunk_id="chk-2",
+            content="Alpha Corporation Q3 revenue was $100M with profit $30M.",
+            tenant_id="tenant-cs-test",
+            source="Alpha Press Release",
+            score=0.90,
+        ),
+        DocumentChunk(
+            chunk_id="chk-3",
+            content="Random irrelevant cafeteria menu notice for lunch.",
+            tenant_id="tenant-cs-test",
+            source="Cafeteria Notice",
+            score=0.10,
+        ),
+    ]
+
+    selector = ContextSelector(min_relative_score=0.30, redundancy_threshold=0.60)
+    res = selector.select_context(
+        candidates=chunks, query="revenue profit", tenant_id="tenant-cs-test"
+    )
+
+    assert (
+        len(res.selected_chunks) == 1
+    )  # chk-2 is redundant, chk-3 is low-scoring distractor
+    assert res.selected_chunks[0].chunk_id == "chk-1"
+    assert res.tokens_saved > 0
+    assert res.reduction_ratio > 0.30
+    assert "$100M" in res.formatted_context
+    assert "[1] Source: Alpha 10-Q" in res.formatted_context
+
+
+@pytest.mark.asyncio
+async def test_rag_pipeline_retrieve_and_select() -> None:
+    """Verify RAGPipeline retrieve_and_select_context returns candidate and context result."""
+    pipeline = RAGPipeline()
+    req = DocumentIngestRequest(
+        content="Enterprise software ARR reached $250,000,000 with 115% net dollar retention.",
+        source="ARR Report 2026",
+    )
+    await pipeline.ingest_document(request=req, tenant_id="tenant-pipe-test")
+
+    retrieval, selection = await pipeline.retrieve_and_select_context(
+        query="ARR net dollar retention",
+        tenant_id="tenant-pipe-test",
+        max_context_tokens=500,
+    )
+
+    assert retrieval.tenant_id == "tenant-pipe-test"
+    assert len(selection.selected_chunks) >= 1
+    assert "$250,000,000" in selection.formatted_context
+    assert selection.selected_chunks[0].tenant_id == "tenant-pipe-test"
+
+
+@pytest.mark.asyncio
+async def test_rag_pipeline_generate_grounded_answer() -> None:
+    """Verify RAGPipeline generate_grounded_answer synthesizes answer with citations."""
+    pipeline = RAGPipeline()
+    req = DocumentIngestRequest(
+        content="Quarterly dividend declared at $0.85 per share payable on October 15, 2026.",
+        source="Dividend Notice",
+    )
+    await pipeline.ingest_document(request=req, tenant_id="tenant-gen-test")
+
+    gen_res = await pipeline.generate_grounded_answer(
+        query="What is the dividend declared per share and payment date?",
+        tenant_id="tenant-gen-test",
+    )
+
+    assert gen_res.tenant_id == "tenant-gen-test"
+    assert len(gen_res.answer) > 0
+    assert "$0.85" in gen_res.answer or "0.85" in gen_res.answer
+    assert gen_res.context_selection.selected_tokens > 0
+    assert gen_res.latency_ms >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_rag_api_endpoints_integration() -> None:
+    """Verify /api/v1/rag/query and /api/v1/rag/generate endpoints with HTTP client."""
+    import jwt
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    settings = get_settings()
+    token = jwt.encode(
+        {"sub": "test-user", "tenant_id": "tenant-api-rag", "roles": ["admin"]},
+        settings.JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Ingest document
+        ingest_payload = {
+            "content": "Cloud division achieved $75,000,000 in Q3 revenue with 48% gross margin.",
+            "source": "Cloud Division Report",
+        }
+        ingest_resp = await client.post(
+            "/api/v1/rag/ingest", json=ingest_payload, headers=headers
+        )
+        assert ingest_resp.status_code == 201
+        assert ingest_resp.json()["indexed_chunks"] >= 1
+
+        # 2. Query with select_context=True
+        query_payload = {
+            "query": "Cloud revenue gross margin",
+            "select_context": True,
+            "max_context_tokens": 600,
+        }
+        query_resp = await client.post(
+            "/api/v1/rag/query", json=query_payload, headers=headers
+        )
+        assert query_resp.status_code == 200
+        query_data = query_resp.json()
+        assert query_data["tenant_id"] == "tenant-api-rag"
+        assert len(query_data["chunks"]) >= 1
+        assert query_data["selected_context"] is not None
+        assert "$75,000,000" in query_data["selected_context"]
+
+        # 3. Generate grounded answer
+        gen_payload = {
+            "query": "What was Cloud revenue and gross margin?",
+            "max_context_tokens": 600,
+        }
+        gen_resp = await client.post(
+            "/api/v1/rag/generate", json=gen_payload, headers=headers
+        )
+        assert gen_resp.status_code == 200
+        gen_data = gen_resp.json()
+        assert gen_data["tenant_id"] == "tenant-api-rag"
+        assert len(gen_data["answer"]) > 0
+        assert gen_data["context_tokens"] > 0
