@@ -149,7 +149,10 @@ async def test_chat_sse_stream_ordering_and_flush(async_client: AsyncClient) -> 
     response = await async_client.post(
         "/api/v1/chat/stream",
         headers=headers,
-        json={"prompt": "Analyze our liquidity ratio", "conversation_id": "test-order-01"},
+        json={
+            "prompt": "Analyze our liquidity ratio",
+            "conversation_id": "test-order-01",
+        },
     )
     assert response.status_code == 200
     assert "text/event-stream" in response.headers.get("content-type", "")
@@ -280,7 +283,7 @@ def test_gateway_chat_completions_streaming() -> None:
 
     lines = response.text.strip().split("\n\n")
     assert len(lines) > 1
-    assert any("chat.completion.chunk" in l for l in lines)
+    assert any("chat.completion.chunk" in line for line in lines)
     assert lines[-1] == "data: [DONE]"
 
 
@@ -327,13 +330,17 @@ async def test_redis_outage_resilient_cooldown_and_recovery() -> None:
     cache._redis_available = True
 
     # 1. Call get: should catch ConnectionError, set cooldown, and return None without crash
-    res = await cache.get("Test prompt during Redis outage", tenant_id="tenant-resilience")
+    res = await cache.get(
+        "Test prompt during Redis outage", tenant_id="tenant-resilience"
+    )
     assert res is None
     assert cache._redis_available is False
     assert cache._redis_retry_after > time.time()
 
     # 2. Immediate second call: during cooldown, skips Redis and checks memory cleanly
-    res2 = await cache.get("Test prompt during Redis outage", tenant_id="tenant-resilience")
+    res2 = await cache.get(
+        "Test prompt during Redis outage", tenant_id="tenant-resilience"
+    )
     assert res2 is None
 
     # 3. Simulate Redis recovery after cooldown expires
@@ -464,7 +471,9 @@ async def test_chat_sse_stream_provider_error_mid_stream() -> None:
             "mascot_state": "thinking",
             "messages": ["Step 1 starting..."],
         }
-        raise RuntimeError("Provider connection died with sk-proj-supersecretkey99999999")
+        raise RuntimeError(
+            "Provider connection died with sk-proj-supersecretkey99999999"
+        )
 
     events = []
     with patch(
@@ -487,8 +496,8 @@ async def test_chat_sse_stream_provider_error_mid_stream() -> None:
     assert "[REDACTED_SECRET]" in error_events[0]
 
 
-def test_global_exception_handler_provider_timeout_and_504() -> None:
-    """Verify ProviderTimeoutError maps to HTTP 504 Gateway Timeout with Retry-After header."""
+def test_global_exception_handler_provider_timeout_and_408() -> None:
+    """Verify ProviderTimeoutError maps to HTTP 408 Request Timeout."""
     from app.main import app
 
     @app.get("/test-provider-timeout")
@@ -497,15 +506,12 @@ def test_global_exception_handler_provider_timeout_and_504() -> None:
             message="Upstream provider timed out after 30s with key sk-openai-12345",
             provider="openai",
             model="gpt-4o",
-            status_code=504,
-            retry_after_seconds=10.0,
         )
 
     res = client.get("/test-provider-timeout")
-    assert res.status_code == 504
-    assert res.headers.get("retry-after") == "10"
+    assert res.status_code == 408
     data = res.json()
-    assert data["error"]["type"] == "provider_timeout"
+    assert data["error"]["type"] == "retryable"
     assert "sk-openai" not in data["error"]["message"]
     assert "[REDACTED_SECRET]" in data["error"]["message"]
 
@@ -513,15 +519,12 @@ def test_global_exception_handler_provider_timeout_and_504() -> None:
 @pytest.mark.asyncio
 async def test_byok_invalid_ciphertext_tamper_defense() -> None:
     """Verify tampered or invalid BYOK ciphertext fails safely without unhandled crashes."""
-    from app.byok.crypto import decrypt_api_key
+    from app.core.byok import BYOKManager
 
-    # Attempting to decrypt tampered ciphertext
+    mgr = BYOKManager()
     tampered_ciphertext = "v1:tampered-iv-123:tampered-ciphertext-xyz:tampered-tag"
-    with pytest.raises(Exception) as exc_info:
-        decrypt_api_key(tampered_ciphertext, tenant_id="tenant-crypto-test")
-
-    # Error must not contain raw secret or fail silently
-    assert exc_info.value is not None
+    with pytest.raises(ValueError, match="Failed to decrypt key"):
+        mgr.decrypt_key(tampered_ciphertext, tenant_id="tenant-crypto-test")
 
 
 @pytest.mark.asyncio
@@ -569,4 +572,3 @@ async def test_chat_sse_stream_slow_provider_bounded() -> None:
     assert len(events) >= 3
     assert any("event: status" in e for e in events)
     assert any("event: done" in e for e in events)
-

@@ -232,7 +232,9 @@ async def generate_chat_stream(
                     "/api/v1/chat/stream", reason="client_disconnect"
                 )
                 if not accounting_recorded:
-                    comp_tokens = max(1, estimate_tokens(final_response)) if final_response else 0
+                    comp_tokens = (
+                        max(1, estimate_tokens(final_response)) if final_response else 0
+                    )
                     TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
@@ -370,7 +372,9 @@ async def generate_chat_stream(
             "/api/v1/chat/stream", reason="client_disconnect"
         )
         if not accounting_recorded:
-            comp_tokens = max(1, estimate_tokens(final_response)) if final_response else 1
+            comp_tokens = (
+                max(1, estimate_tokens(final_response)) if final_response else 1
+            )
             TokenAccounting.record_transaction(
                 request_id=f"stream-{conversation_id}",
                 tenant_id=context.tenant_id,

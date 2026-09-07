@@ -139,7 +139,9 @@ class MetricsCollector:
             if len(self._stream_durations) > 500:
                 del self._stream_durations[:250]
 
-    def record_stream_cancellation(self, endpoint: str, reason: str = "client_disconnect") -> None:
+    def record_stream_cancellation(
+        self, endpoint: str, reason: str = "client_disconnect"
+    ) -> None:
         """Record a stream cancellation or client disconnect."""
         norm_endpoint = normalize_metric_path(endpoint)
         with self._lock:
@@ -151,11 +153,17 @@ class MetricsCollector:
         with self._lock:
             self._cache_operations[(str(tier).lower(), str(outcome).lower())] += 1
 
-    def record_failover(self, from_provider: str, to_provider: str, reason: str) -> None:
+    def record_failover(
+        self, from_provider: str, to_provider: str, reason: str
+    ) -> None:
         """Record provider failover event."""
         with self._lock:
             self._failover_events[
-                (str(from_provider).lower(), str(to_provider).lower(), str(reason).lower())
+                (
+                    str(from_provider).lower(),
+                    str(to_provider).lower(),
+                    str(reason).lower(),
+                )
             ] += 1
 
     def get_snapshot(self) -> MetricsSnapshot:
@@ -183,8 +191,7 @@ class MetricsCollector:
                 if d
             }
             prov_errs = {
-                f"{p}:{c}": count
-                for (p, c), count in self._provider_errors.items()
+                f"{p}:{c}": count for (p, c), count in self._provider_errors.items()
             }
             stream_dur_avg = (
                 round(sum(self._stream_durations) / len(self._stream_durations), 2)
