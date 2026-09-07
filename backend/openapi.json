@@ -270,6 +270,53 @@
         ]
       }
     },
+    "/api/v1/rag/generate": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Generate grounded answer via 10-step RAG pipeline",
+        "description": "Execute full 10-step RAG: hybrid search, rerank, context select, grounded synthesis, and citation mapping.",
+        "operationId": "generate_rag_answer_api_v1_rag_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RAGGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RAGGenerateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/byok/keys": {
       "get": {
         "tags": [
@@ -1755,6 +1802,45 @@
         "title": "ChatStreamRequest",
         "description": "Payload model for chat streaming requests supporting both prompt and query aliases."
       },
+      "Citation": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index",
+            "description": "Citation index footnote reference (e.g. 1)"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Origin source name or document path"
+          },
+          "snippet": {
+            "type": "string",
+            "title": "Snippet",
+            "description": "Verbatim excerpt from context supporting claim"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Tenant boundary verification"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "description": "Groundedness confidence score",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "source",
+          "snippet",
+          "tenant_id"
+        ],
+        "title": "Citation",
+        "description": "Verifiable citation linking generated response claims to source passages."
+      },
       "DocumentChunk": {
         "properties": {
           "chunk_id": {
@@ -2492,6 +2578,102 @@
         "title": "QuotaStatus",
         "description": "Current tenant quota consumption and status."
       },
+      "RAGGenerateRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query",
+            "description": "Query or question to answer using grounded tenant context"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "description": "Number of candidate chunks to retrieve",
+            "default": 5
+          },
+          "max_context_tokens": {
+            "type": "integer",
+            "maximum": 4000.0,
+            "minimum": 100.0,
+            "title": "Max Context Tokens",
+            "description": "Maximum tokens allocated for selected context",
+            "default": 800
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "Optional provider model override"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "RAGGenerateRequest",
+        "description": "Payload for full 10-step RAG grounded generation."
+      },
+      "RAGGenerateResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "context_tokens": {
+            "type": "integer",
+            "title": "Context Tokens"
+          },
+          "tokens_saved": {
+            "type": "integer",
+            "title": "Tokens Saved"
+          },
+          "reduction_ratio": {
+            "type": "number",
+            "title": "Reduction Ratio"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "tenant_id",
+          "answer",
+          "context_tokens",
+          "tokens_saved",
+          "reduction_ratio",
+          "latency_ms"
+        ],
+        "title": "RAGGenerateResponse",
+        "description": "Outcome of full 10-step RAG grounded generation."
+      },
       "RAGQueryRequest": {
         "properties": {
           "query": {
@@ -2508,6 +2690,20 @@
             "title": "Top K",
             "description": "Maximum number of chunks to return",
             "default": 5
+          },
+          "select_context": {
+            "type": "boolean",
+            "title": "Select Context",
+            "description": "Whether to apply context selection, deduplication, and budget packing",
+            "default": false
+          },
+          "max_context_tokens": {
+            "type": "integer",
+            "maximum": 4000.0,
+            "minimum": 100.0,
+            "title": "Max Context Tokens",
+            "description": "Maximum context tokens ceiling for selection",
+            "default": 800
           }
         },
         "type": "object",
@@ -2541,6 +2737,54 @@
           "total_candidates": {
             "type": "integer",
             "title": "Total Candidates"
+          },
+          "selected_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Context",
+            "description": "Structured context string with citation markers if select_context=True"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens",
+            "description": "Tokens in selected context"
+          },
+          "tokens_saved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens Saved",
+            "description": "Tokens eliminated through relevance filtering and redundancy pruning"
+          },
+          "reduction_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reduction Ratio",
+            "description": "Token reduction ratio: tokens_saved / raw_candidate_tokens"
           }
         },
         "type": "object",

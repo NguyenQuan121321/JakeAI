@@ -29,6 +29,22 @@ class RAGEvalResult(BaseModel):
     passed: bool = Field(
         description="True if all critical quality gates meet required thresholds",
     )
+    citation_precision: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Ratio of verifiable and accurate citations",
+    )
+    context_reduction_ratio: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Ratio of tokens pruned by context selection",
+    )
+    tenant_isolation_verified: bool = Field(
+        default=True,
+        description="True if no cross-tenant documents or metadata entered context/response",
+    )
 
 
 # Patterns indicative of prompt leakage or sensitive key leakage
@@ -123,12 +139,17 @@ def evaluate_rag_case(case: dict[str, Any]) -> RAGEvalResult:
             break
 
     # Check for foreign tenant data leakage
+    tenant_isolation_verified = True
     if (
         foreign_tenant_id
         and foreign_tenant_id.lower() != tenant_id.lower()
-        and foreign_tenant_id.lower() in response.lower()
+        and (
+            foreign_tenant_id.lower() in response.lower()
+            or foreign_tenant_id.lower() in context.lower()
+        )
     ):
         leakage = True
+        tenant_isolation_verified = False
 
     # 2. Anti-Hallucination: Verify numerical claims
     resp_numbers = _extract_numerical_tokens(response)
@@ -159,13 +180,36 @@ def evaluate_rag_case(case: dict[str, Any]) -> RAGEvalResult:
 
     context_relevancy = round(min(1.0, max(0.0, context_relevancy)), 2)
 
+    # 5. Citation Precision Evaluation
+    citations_data = case.get("citations", [])
+    if citations_data:
+        valid_cites = [
+            c
+            for c in citations_data
+            if (isinstance(c, dict) and c.get("tenant_id", tenant_id) == tenant_id)
+            or (hasattr(c, "tenant_id") and c.tenant_id == tenant_id)
+        ]
+        citation_precision = round(len(valid_cites) / len(citations_data), 2)
+    else:
+        citation_precision = 1.0
+
+    # 6. Context Reduction Measurement
+    raw_tokens = case.get("raw_tokens", 0)
+    selected_tokens = case.get("selected_tokens", 0)
+    if raw_tokens > 0 and selected_tokens >= 0:
+        tokens_saved = max(0, raw_tokens - selected_tokens)
+        context_reduction = round(tokens_saved / raw_tokens, 2)
+    else:
+        context_reduction = float(case.get("context_reduction_ratio", 0.0))
+
     # Strict Quality Gate Thresholds
-    # Groundedness >= 0.80, Relevancy >= 0.75, No Hallucination, Zero Leakage
+    # Groundedness >= 0.80, Relevancy >= 0.70, No Hallucination, Zero Leakage, Strict Isolation
     passed = (
         faithfulness >= 0.80
         and context_relevancy >= 0.70
         and anti_hallucination_passed
         and not leakage
+        and tenant_isolation_verified
     )
 
     return RAGEvalResult(
@@ -175,4 +219,7 @@ def evaluate_rag_case(case: dict[str, Any]) -> RAGEvalResult:
         anti_hallucination_passed=anti_hallucination_passed,
         data_leakage_detected=leakage,
         passed=passed,
+        citation_precision=citation_precision,
+        context_reduction_ratio=context_reduction,
+        tenant_isolation_verified=tenant_isolation_verified,
     )
