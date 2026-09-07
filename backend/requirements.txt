@@ -21,6 +21,9 @@ qdrant-client==1.19.0
 # HTTP Client
 httpx==0.28.1
 
+# Optimization & Tokenization
+tiktoken==0.14.0
+
 # Development & Testing
 pytest==9.1.1
 pytest-asyncio==1.4.0

@@ -1,5 +1,31 @@
-"""Cost optimization layer including semantic caching, heuristic token pruning, provider prompt caching, and accounting."""
+"""Cost optimization layer including semantic caching, heuristic token pruning, provider prompt caching, AST skeletonization, BPE tokenization, and cross-tier pipeline."""
 
+from app.optimizer.ast_skeletonizer import (
+    ASTSkeletonTransformResult,
+    CodeSkeletonizer,
+    get_code_skeletonizer,
+)
+from app.optimizer.bpe_tokenizer import (
+    BPETokenizer,
+    ContextBudgetExceededError,
+    get_bpe_tokenizer,
+)
+from app.optimizer.context_optimizer import (
+    ContextOptimizer,
+    get_context_optimizer,
+)
+from app.optimizer.contracts import (
+    ContextArtifact,
+    CrossTierResult,
+    OptimizationLevel,
+    OptimizedContext,
+    ProviderCacheMetrics,
+    TokenMetrics,
+)
+from app.optimizer.cross_tier_pipeline import (
+    CrossTierPipeline,
+    get_cross_tier_pipeline,
+)
 from app.optimizer.prompt_compiler import (
     ContaminationError,
     PromptCompiler,
@@ -50,19 +76,30 @@ from app.optimizer.two_zone_compiler import (
 )
 
 __all__ = [
+    "ASTSkeletonTransformResult",
     "AnthropicPromptCacheAdapter",
+    "BPETokenizer",
     "CacheMissReason",
+    "CodeSkeletonizer",
     "CompiledPrompt",
     "ContaminationError",
+    "ContextArtifact",
+    "ContextBudgetExceededError",
+    "ContextOptimizer",
+    "CrossTierPipeline",
+    "CrossTierResult",
     "DeepSeekPromptCacheAdapter",
     "GeminiPromptCacheAdapter",
     "GroqPromptCacheAdapter",
     "HeuristicTokenPruner",
     "ModelPricing",
     "OpenAIPromptCacheAdapter",
+    "OptimizationLevel",
+    "OptimizedContext",
     "PromptCachePolicy",
     "PromptCompiler",
     "PromptEnvelope",
+    "ProviderCacheMetrics",
     "ProviderCachePolicy",
     "ProviderCacheStatus",
     "ProviderCostBreakdown",
@@ -72,11 +109,16 @@ __all__ = [
     "SemanticCacheManager",
     "TokenAccounting",
     "TokenBenchmarkSummary",
+    "TokenMetrics",
     "TokenUsageRecord",
     "TwoZonePromptCompiler",
     "calculate_provider_costs",
     "estimate_tokens",
     "evaluate_cache_eligibility",
+    "get_bpe_tokenizer",
+    "get_code_skeletonizer",
+    "get_context_optimizer",
+    "get_cross_tier_pipeline",
     "get_model_pricing",
     "get_prompt_compiler",
     "get_provider_adapter",

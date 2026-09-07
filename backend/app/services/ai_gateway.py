@@ -24,9 +24,10 @@ from app.core.llm_provider import (
     call_upstream_llm,
     call_upstream_llm_detailed,
 )
+from app.optimizer.context_optimizer import get_context_optimizer
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
-from app.optimizer.token_pruner import estimate_tokens, get_token_pruner
+from app.optimizer.token_pruner import estimate_tokens
 from app.optimizer.two_zone_compiler import get_two_zone_compiler
 
 logger = logging.getLogger(__name__)
@@ -319,10 +320,13 @@ class GatewayInferenceProxy:
         byok_mgr = get_byok_manager()
         byok_key = await byok_mgr.get_decrypted_key(tenant_id, provider)
 
-        # 4. Context Pruning via HeuristicTokenPruner on dynamic input
-        pruner = get_token_pruner()
-        pruned_result = pruner.prune_context(last_user_msg)
-        effective_query = pruned_result.pruned_text or last_user_msg
+        # 4. Context Optimization via Tier 6 ContextOptimizer on dynamic input
+        optimizer = get_context_optimizer()
+        optimized_result = optimizer.optimize_dynamic_context(
+            dynamic_context=last_user_msg,
+            user_query=last_user_msg,
+        )
+        effective_query = optimized_result.content or last_user_msg
 
         # Tier 5: Two-Zone Prompt Compilation
         compiler = get_two_zone_compiler()
@@ -332,6 +336,7 @@ class GatewayInferenceProxy:
                 system_instruction=compiled.static_prefix,
                 user_query=effective_query,
                 prompt_version=compiled.version,
+                tenant_id=tenant_id,
             )
 
         # 5. Model Generation (Wrapped in CircuitBreaker)
@@ -392,8 +397,10 @@ class GatewayInferenceProxy:
             request_id=req_id,
             tenant_id=tenant_id,
             model=request.model,
-            raw_prompt_tokens=pruned_result.original_tokens,
-            pruned_prompt_tokens=pruned_result.pruned_tokens,
+            raw_prompt_tokens=optimized_result.raw_tokens
+            or estimate_tokens(last_user_msg),
+            pruned_prompt_tokens=optimized_result.optimized_tokens
+            or estimate_tokens(effective_query),
             completion_tokens=completion_tokens,
             cache_hit=False,
             cache_type="none",
