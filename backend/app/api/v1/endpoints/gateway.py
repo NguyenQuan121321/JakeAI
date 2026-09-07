@@ -64,14 +64,14 @@ async def list_available_models(
     _context: TenantContext = Depends(get_current_tenant),
 ) -> Any:
     """Return catalog of available models supported by the AI Gateway."""
+    from app.providers.base import ModelCapabilityCatalog
+
+    catalog = ModelCapabilityCatalog.list_all()
     return ModelListResponse(
         object="list",
         data=[
-            ModelItem(id="gemini-1.5-flash", owned_by="google"),
-            ModelItem(id="gemini-2.0-flash", owned_by="google"),
-            ModelItem(id="gpt-4o", owned_by="openai"),
-            ModelItem(id="gpt-4o-mini", owned_by="openai"),
-            ModelItem(id="claude-3-5-sonnet", owned_by="anthropic"),
+            ModelItem(id=cap.model, owned_by=cap.provider)
+            for cap in catalog
         ],
     )
 
