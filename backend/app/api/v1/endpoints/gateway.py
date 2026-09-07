@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.context import TenantContext
@@ -40,13 +41,43 @@ class ModelListResponse(BaseModel):
     data: list[ModelItem]
 
 
-@router.post("/chat/completions", response_model=GatewayChatResponse)
+@router.post(
+    "/chat/completions",
+    response_model=GatewayChatResponse,
+    responses={
+        200: {
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+            "description": "OpenAI-compatible chat completion JSON object or Server-Sent Events stream",
+        }
+    },
+)
 async def proxy_chat_completions(
     request: GatewayChatRequest,
+    raw_request: Request,
     context: TenantContext = Depends(get_current_tenant),
 ) -> Any:
     """OpenAI-compatible inference proxy with Tier 1 Redis exact caching and quota deduction."""
     proxy = get_gateway_proxy()
+    if request.stream:
+        return StreamingResponse(
+            proxy.chat_completions_stream(
+                tenant_id=context.tenant_id,
+                request=request,
+                raw_request=raw_request,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "X-Tenant-ID": context.tenant_id,
+                "X-Correlation-ID": context.correlation_id,
+            },
+        )
+
     try:
         return await proxy.chat_completions(
             tenant_id=context.tenant_id,

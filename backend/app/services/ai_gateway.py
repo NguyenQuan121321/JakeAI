@@ -112,12 +112,11 @@ class QuotaManager:
             from redis import asyncio as aioredis
 
             settings = get_settings()
-            timeout = float(getattr(settings, "REDIS_CONNECT_TIMEOUT_SECONDS", 0.2))
             client = aioredis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=timeout,
-                socket_timeout=timeout,
+                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+                socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
             )
             await client.ping()
             self.redis_client = client
@@ -127,8 +126,7 @@ class QuotaManager:
         except Exception:
             settings = get_settings()
             self._redis_available = False
-            cooldown = float(getattr(settings, "REDIS_COOLDOWN_SECONDS", 5.0))
-            self._redis_retry_after = time.time() + cooldown
+            self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
             self.redis_client = None
             return None
 

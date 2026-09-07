@@ -81,12 +81,14 @@ class IngestionTaskManager:
         self._memory_queue: list[str] = []
         self.redis_client: Any | None = None
         self._redis_available = True
+        self._redis_retry_after: float = 0.0
 
     async def _get_redis(self) -> Any | None:
-        """Lazily initialize Redis connection with fast ping check."""
+        """Lazily initialize Redis connection with fast ping check and cooldown."""
         if self.redis_client is not None:
             return self.redis_client
-        if not self._redis_available:
+        now = time.time()
+        if not self._redis_available and now < self._redis_retry_after:
             return None
         try:
             from redis import asyncio as aioredis
@@ -95,14 +97,19 @@ class IngestionTaskManager:
             client = aioredis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
+                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+                socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
             )
             await client.ping()
             self.redis_client = client
+            self._redis_available = True
+            self._redis_retry_after = 0.0
             return self.redis_client
         except Exception:
+            settings = get_settings()
             self._redis_available = False
+            self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
+            self.redis_client = None
             return None
 
     async def enqueue(
