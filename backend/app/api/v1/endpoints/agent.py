@@ -199,3 +199,24 @@ async def decide_approval(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/approvals/pending", response_model=list[ApprovalRequest])
+async def list_pending_approvals(
+    context: TenantContext = Depends(get_current_tenant),
+) -> list[ApprovalRequest]:
+    """List all pending dangerous action approval requests for the calling tenant."""
+    manager = get_agent_manager()
+    return manager.approval_manager.get_pending_approvals(context.tenant_id)
+
+
+@router.get("/metrics")
+async def get_agent_metrics(
+    context: TenantContext = Depends(get_current_tenant),
+) -> dict[str, Any]:
+    """Retrieve runtime telemetry snapshot for the agent platform."""
+    _ = context
+    from app.agent.telemetry import agent_telemetry
+
+    return agent_telemetry.get_snapshot().model_dump()
+
