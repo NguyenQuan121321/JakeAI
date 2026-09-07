@@ -149,8 +149,8 @@ class BYOKManager:
                 data = json.loads(raw_val)
                 if isinstance(data, dict) and "ciphertext" in data:
                     return data
-            except Exception:
-                pass
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.debug("Failed parsing structured BYOK record JSON: %s", exc)
 
         # Legacy plain ciphertext backward compatibility or corrupt payload
         try:
