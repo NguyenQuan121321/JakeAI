@@ -1478,6 +1478,462 @@
         }
       }
     },
+    "/api/v1/agent/tasks": {
+      "post": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Create Task",
+        "description": "Create a new Agent Task within the authenticated tenant boundary.",
+        "operationId": "create_task_api_v1_agent_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Get Task",
+        "description": "Retrieve an existing Agent Task by identifier.",
+        "operationId": "get_task_api_v1_agent_tasks__task_id__get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs": {
+      "post": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Start Run",
+        "description": "Create and start an execution run for a task.",
+        "operationId": "start_run_api_v1_agent_tasks__task_id__runs_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Get Run",
+        "description": "Retrieve run execution status, current iteration, and step history.",
+        "operationId": "get_run_api_v1_agent_tasks__task_id__runs__run_id__get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs/{run_id}/events": {
+      "get": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Stream Run Events",
+        "description": "Stream real-time Server-Sent Events (SSE) for an active agent run.",
+        "operationId": "stream_run_events_api_v1_agent_tasks__task_id__runs__run_id__events_get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Real-time Server-Sent Events stream of agent execution progress",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Cancel Run",
+        "description": "Cooperatively cancel an in-flight execution run.",
+        "operationId": "cancel_run_api_v1_agent_tasks__task_id__runs__run_id__cancel_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}": {
+      "post": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Decide Approval",
+        "description": "Approve or reject a pending dangerous action approval gate.",
+        "operationId": "decide_approval_api_v1_agent_tasks__task_id__runs__run_id__approvals__approval_id__post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRequest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/approvals/pending": {
+      "get": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "List Pending Approvals",
+        "description": "List all pending dangerous action approval requests for the calling tenant.",
+        "operationId": "list_pending_approvals_api_v1_agent_approvals_pending_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalRequest"
+                  },
+                  "type": "array",
+                  "title": "Response List Pending Approvals Api V1 Agent Approvals Pending Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/metrics": {
+      "get": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Get Agent Metrics",
+        "description": "Retrieve runtime telemetry snapshot for the agent platform.",
+        "operationId": "get_agent_metrics_api_v1_agent_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Agent Metrics Api V1 Agent Metrics Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
     "/v1/chat/completions": {
       "post": {
         "tags": [
@@ -1789,6 +2245,141 @@
         ],
         "title": "AnalyticsDashboard",
         "description": "Telemetry metrics dashboard visualizing token efficiency and performance."
+      },
+      "ApprovalDecision": {
+        "properties": {
+          "approved": {
+            "type": "boolean",
+            "title": "Approved",
+            "description": "Whether the dangerous action is approved to proceed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Optional explanation or rejection rationale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "approved"
+        ],
+        "title": "ApprovalDecision",
+        "description": "Payload submitted by authorized human user to resolve an approval gate."
+      },
+      "ApprovalRequest": {
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "title": "Approval Id",
+            "description": "Unique approval identifier"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Target task identifier"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Target execution run identifier"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Tenant boundary identifier"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name",
+            "description": "Dangerous tool pending execution"
+          },
+          "tool_args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Tool Args",
+            "description": "Proposed tool arguments"
+          },
+          "risk_level": {
+            "type": "string",
+            "title": "Risk Level",
+            "description": "Tool risk classification",
+            "default": "dangerous"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Explanation of why approval is required"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApprovalStatus",
+            "default": "pending"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "approval_id",
+          "task_id",
+          "run_id",
+          "tenant_id",
+          "tool_name",
+          "reason"
+        ],
+        "title": "ApprovalRequest",
+        "description": "Server-persisted approval gate record."
+      },
+      "ApprovalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "title": "ApprovalStatus",
+        "description": "Status of a dangerous action approval request."
       },
       "BYOKKeyResponse": {
         "properties": {
@@ -2233,6 +2824,56 @@
         ],
         "title": "Citation",
         "description": "Verifiable citation linking generated response claims to source passages."
+      },
+      "CreateRunRequest": {
+        "properties": {
+          "max_iterations": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Iterations",
+            "description": "Optional iteration ceiling"
+          },
+          "async_execution": {
+            "type": "boolean",
+            "title": "Async Execution",
+            "description": "Whether to execute in background",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "CreateRunRequest",
+        "description": "Payload to instantiate an execution run for an existing task."
+      },
+      "CreateTaskRequest": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Goal",
+            "description": "Target objective or problem statement"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "description": "Arbitrary task context metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal"
+        ],
+        "title": "CreateTaskRequest",
+        "description": "Payload to create a new autonomous agent task."
       },
       "DocumentChunk": {
         "properties": {
@@ -3701,6 +4342,140 @@
         "title": "ResumedExecutionResult",
         "description": "Outcome of rehydrated execution after tool result processing."
       },
+      "RunState": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Unique execution run identifier"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Associated parent task identifier"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Tenant boundary identifier"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "User ownership identifier"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus",
+            "default": "created"
+          },
+          "current_iteration": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Current Iteration",
+            "default": 0
+          },
+          "max_iterations": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Iterations",
+            "default": 10
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StepExecutionRecord"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "pending_approval_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Approval Id"
+          },
+          "final_output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Output"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "tokens_consumed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tokens Consumed",
+            "default": 0
+          },
+          "cost_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Cost Usd",
+            "default": 0.0
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "task_id",
+          "tenant_id",
+          "user_id"
+        ],
+        "title": "RunState",
+        "description": "Persistent and checkpointable state of an active Agent Run."
+      },
+      "RunStatus": {
+        "type": "string",
+        "enum": [
+          "created",
+          "running",
+          "paused_approval",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "RunStatus",
+        "description": "Lifecycle states of an individual execution run for a task."
+      },
       "SavingsAttribution": {
         "properties": {
           "cache_hit_usd": {
@@ -3777,6 +4552,73 @@
         ],
         "title": "SecurityFinding",
         "description": "Identified security risk in PR diff."
+      },
+      "StepExecutionRecord": {
+        "properties": {
+          "step_number": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Step Number"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "action_type": {
+            "type": "string",
+            "title": "Action Type",
+            "description": "Action: tool_call, direct_response, approval_request, finish"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name"
+          },
+          "tool_args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Tool Args"
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "completed"
+          },
+          "execution_time_ms": {
+            "type": "number",
+            "title": "Execution Time Ms",
+            "default": 0.0
+          },
+          "timestamp": {
+            "type": "number",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step_number",
+          "action_type"
+        ],
+        "title": "StepExecutionRecord",
+        "description": "Observable record of an individual step executed in an agent run."
       },
       "SubscriptionInfo": {
         "properties": {
@@ -3855,6 +4697,80 @@
         ],
         "title": "SuggestedTestScaffold",
         "description": "Automated test scaffold recommendation."
+      },
+      "TaskState": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Unique task identifier"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Tenant boundary identifier"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "User ownership identifier"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal",
+            "description": "Target objective or problem statement"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "default": "pending"
+          },
+          "active_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Run Id"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "number",
+            "title": "Updated At"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_id",
+          "user_id",
+          "goal"
+        ],
+        "title": "TaskState",
+        "description": "Persistent representation of an Agent Task."
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "paused_approval",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "description": "Lifecycle states of an overarching Agent task."
       },
       "TenantBudget": {
         "properties": {
