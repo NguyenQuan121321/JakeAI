@@ -106,6 +106,7 @@ class BenchmarkRunner:
             user_query=user_query,
             dynamic_context=dynamic_context,
             model=model,
+            workload_type=workload_type,
         )
 
         optimized_input_tokens = pipeline_res.token_metrics.input_tokens

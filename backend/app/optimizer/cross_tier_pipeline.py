@@ -79,6 +79,7 @@ class CrossTierPipeline:
         call_llm: bool = False,
         llm_caller: Callable[..., Any] | None = None,
         request_id: str = "cross-tier-test",
+        workload_type: str | None = None,
     ) -> CrossTierResult:
         """Execute complete cross-tier pipeline with full observability."""
         _ = provider
@@ -115,6 +116,7 @@ class CrossTierPipeline:
             user_query=user_query,
             optimization_level=optimization_level,
             preserve_symbols=preserve_symbols,
+            workload_type=workload_type,
         )
         latencies["tier6_optimization_ms"] = (time.perf_counter() - t1) * 1000.0
 
