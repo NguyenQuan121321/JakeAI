@@ -342,6 +342,207 @@
         ]
       }
     },
+    "/api/v1/byok/keys/validate": {
+      "post": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "Validate Candidate Key",
+        "description": "Validate candidate LLM provider key via minimal quota-safe probe.",
+        "operationId": "validate_candidate_key_api_v1_byok_keys_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BYOKValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BYOKValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/byok/keys/{provider}/validate": {
+      "post": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "Validate Existing Key",
+        "description": "Validate an existing stored key for this tenant without burning generation quota.",
+        "operationId": "validate_existing_key_api_v1_byok_keys__provider__validate_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BYOKValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/byok/keys/{provider}/rotate": {
+      "post": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "Rotate Provider Key",
+        "description": "Rotate an existing provider key for this tenant.",
+        "operationId": "rotate_provider_key_api_v1_byok_keys__provider__rotate_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BYOKRotateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BYOKKeyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/byok/keys/{provider}/revoke": {
+      "post": {
+        "tags": [
+          "BYOK"
+        ],
+        "summary": "Revoke Provider Key",
+        "description": "Revoke an existing provider key, preventing runtime inference without wiping metadata.",
+        "operationId": "revoke_provider_key_api_v1_byok_keys__provider__revoke_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BYOKKeyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/byok/keys/{provider}": {
       "delete": {
         "tags": [
@@ -1166,6 +1367,50 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "last_validated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Validated At"
+          },
+          "validation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Status"
           }
         },
         "type": "object",
@@ -1176,7 +1421,7 @@
           "status"
         ],
         "title": "BYOKKeyResponse",
-        "description": "Response returning masked key information."
+        "description": "Response returning masked key information and lifecycle status."
       },
       "BYOKListResponse": {
         "properties": {
@@ -1220,6 +1465,55 @@
           "configured": {
             "type": "boolean",
             "title": "Configured"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "active"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "last_validated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Validated At"
+          },
+          "validation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Status"
           }
         },
         "type": "object",
@@ -1231,18 +1525,46 @@
         "title": "BYOKProviderItem",
         "description": "Provider key status item."
       },
+      "BYOKRotateRequest": {
+        "properties": {
+          "new_api_key": {
+            "type": "string",
+            "minLength": 8,
+            "title": "New Api Key",
+            "description": "New raw provider API key to encrypt"
+          },
+          "validate_key": {
+            "type": "boolean",
+            "title": "Validate Key",
+            "description": "Whether to perform live probe validation before rotating",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_api_key"
+        ],
+        "title": "BYOKRotateRequest",
+        "description": "Request payload to rotate an existing provider API key."
+      },
       "BYOKStoreRequest": {
         "properties": {
           "provider": {
             "type": "string",
             "title": "Provider",
-            "description": "LLM provider: openai, gemini, anthropic, or openrouter"
+            "description": "LLM provider: openai, gemini, anthropic, groq, deepseek, or openrouter"
           },
           "api_key": {
             "type": "string",
             "minLength": 8,
             "title": "Api Key",
             "description": "Raw provider API key to encrypt"
+          },
+          "validate_key": {
+            "type": "boolean",
+            "title": "Validate Key",
+            "description": "Whether to perform live probe validation before storing",
+            "default": false
           }
         },
         "type": "object",
@@ -1252,6 +1574,58 @@
         ],
         "title": "BYOKStoreRequest",
         "description": "Request payload to register or update an LLM provider API key."
+      },
+      "BYOKValidateRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "Target LLM provider"
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 8,
+            "title": "Api Key",
+            "description": "Raw API key to validate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "api_key"
+        ],
+        "title": "BYOKValidateRequest",
+        "description": "Request payload to validate a candidate provider API key."
+      },
+      "BYOKValidationResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "is_valid": {
+            "type": "boolean",
+            "title": "Is Valid"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "is_valid"
+        ],
+        "title": "BYOKValidationResponse",
+        "description": "Response returning provider key validation verdict."
       },
       "ChangelogRequest": {
         "properties": {
