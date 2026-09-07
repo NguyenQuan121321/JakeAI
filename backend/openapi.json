@@ -1117,6 +1117,21 @@
           "subscription_tier": {
             "type": "string",
             "title": "Subscription Tier"
+          },
+          "tokens_saved_provider_cache": {
+            "type": "integer",
+            "title": "Tokens Saved Provider Cache",
+            "default": 0
+          },
+          "provider_cache_savings_usd": {
+            "type": "number",
+            "title": "Provider Cache Savings Usd",
+            "default": 0.0
+          },
+          "provider_cache_hit_rate": {
+            "type": "number",
+            "title": "Provider Cache Hit Rate",
+            "default": 0.0
           }
         },
         "type": "object",
@@ -1590,6 +1605,18 @@
             "type": "number",
             "title": "Reduction Percentage",
             "default": 0.0
+          },
+          "provider_cache": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Cache"
           }
         },
         "type": "object",

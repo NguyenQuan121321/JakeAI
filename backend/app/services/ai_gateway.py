@@ -19,10 +19,15 @@ from pydantic import BaseModel, Field
 from app.core.byok import get_byok_manager
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.config import get_settings
-from app.core.llm_provider import call_upstream_llm
+from app.core.llm_provider import (
+    UpstreamLLMResponse,
+    call_upstream_llm,
+    call_upstream_llm_detailed,
+)
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens, get_token_pruner
+from app.optimizer.two_zone_compiler import get_two_zone_compiler
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,7 @@ class GatewayChatResponse(BaseModel):
     cached: bool
     tokens_saved: int
     reduction_percentage: float = 0.0
+    provider_cache: dict[str, Any] | None = None
 
 
 class QuotaManager:
@@ -313,22 +319,49 @@ class GatewayInferenceProxy:
         byok_mgr = get_byok_manager()
         byok_key = await byok_mgr.get_decrypted_key(tenant_id, provider)
 
-        # 4. Context Pruning via HeuristicTokenPruner
+        # 4. Context Pruning via HeuristicTokenPruner on dynamic input
         pruner = get_token_pruner()
         pruned_result = pruner.prune_context(last_user_msg)
         effective_query = pruned_result.pruned_text or last_user_msg
 
+        # Tier 5: Two-Zone Prompt Compilation
+        compiler = get_two_zone_compiler()
+        compiled = compiler.partition_messages(request.messages)
+        if effective_query and effective_query != last_user_msg:
+            compiled = compiler.compile(
+                system_instruction=compiled.static_prefix,
+                user_query=effective_query,
+                prompt_version=compiled.version,
+            )
+
         # 5. Model Generation (Wrapped in CircuitBreaker)
+        upstream_response: UpstreamLLMResponse | None = None
+
         async def call_model() -> str:
-            upstream_text = await call_upstream_llm(
+            nonlocal upstream_response
+            upstream_res = await call_upstream_llm_detailed(
                 prompt=effective_query,
                 tenant_id=tenant_id,
                 model=request.model,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
+                compiled_prompt=compiled,
             )
-            if upstream_text:
-                return upstream_text
+            if upstream_res:
+                upstream_response = upstream_res
+                return upstream_res.text
+
+            # Check legacy call_upstream_llm for backward-compatible mock overrides
+            legacy_text = await call_upstream_llm(
+                prompt=effective_query,
+                tenant_id=tenant_id,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                compiled_prompt=compiled,
+            )
+            if legacy_text:
+                return legacy_text
 
             # Deterministic generator for gateway requests with BYOK provenance
             key_tag = " [BYOK active]" if byok_key else ""
@@ -341,6 +374,20 @@ class GatewayInferenceProxy:
 
         completion_tokens = max(1, estimate_tokens(output_text))
         req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+
+        telemetry = upstream_response.telemetry if upstream_response else None
+        provider_cache_meta = (
+            telemetry.model_dump()
+            if telemetry
+            else {
+                "is_cache_eligible": compiled.is_cache_eligible,
+                "cache_hit": False,
+                "cached_tokens": 0,
+                "miss_reason": "offline_fallback",
+                "prefix_hash": compiled.static_prefix_hash,
+            }
+        )
+
         record = TokenAccounting.record_transaction(
             request_id=req_id,
             tenant_id=tenant_id,
@@ -350,6 +397,22 @@ class GatewayInferenceProxy:
             completion_tokens=completion_tokens,
             cache_hit=False,
             cache_type="none",
+            provider_cache_hit=telemetry.cache_hit if telemetry else False,
+            provider_cached_tokens=telemetry.cached_tokens if telemetry else 0,
+            provider_uncached_tokens=telemetry.uncached_input_tokens
+            if telemetry
+            else 0,
+            provider_cache_write_tokens=telemetry.cache_write_tokens
+            if telemetry
+            else 0,
+            provider_miss_reason=telemetry.miss_reason
+            if telemetry
+            else "offline_fallback",
+            provider_cost_savings_usd=telemetry.estimated_savings_usd
+            if telemetry
+            else 0.0,
+            provider_actual_cost_usd=telemetry.actual_cost_usd if telemetry else 0.0,
+            provider_name=telemetry.provider if telemetry else provider,
         )
 
         # 6. Populate Tier 1 Cache for future hits
@@ -387,6 +450,7 @@ class GatewayInferenceProxy:
             cached=False,
             tokens_saved=record.tokens_saved,
             reduction_percentage=record.reduction_percentage,
+            provider_cache=provider_cache_meta,
         )
 
 

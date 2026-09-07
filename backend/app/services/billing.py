@@ -85,6 +85,9 @@ class AnalyticsDashboard(BaseModel):
     avg_ttft_ms: float
     model_distribution: dict[str, float]
     subscription_tier: str
+    tokens_saved_provider_cache: int = 0
+    provider_cache_savings_usd: float = 0.0
+    provider_cache_hit_rate: float = 0.0
 
 
 class PayOSBillingService:

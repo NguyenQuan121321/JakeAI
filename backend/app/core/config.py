@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Model Provider API Keys
     GEMINI_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
+
+    # Tier 5: Provider Prompt Caching Feature Flag
+    PROVIDER_PROMPT_CACHE_ENABLED: bool = True
 
     # Commercial SaaS & Security Settings
     BYOK_MASTER_KEY: str = "jakeai-enterprise-master-encryption-key-32b"
