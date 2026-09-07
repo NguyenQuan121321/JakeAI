@@ -126,7 +126,9 @@ class AgentRuntimeManager:
         self._runs[run_id] = run
         task.active_run_id = run_id
         task.updated_at = time.time()
-        logger.info("Created agent run %s for task %s (tenant %s)", run_id, task_id, tenant_id)
+        logger.info(
+            "Created agent run %s for task %s (tenant %s)", run_id, task_id, tenant_id
+        )
         return run
 
     def get_run(self, run_id: str, tenant_id: str) -> RunState:
@@ -208,6 +210,7 @@ class AgentRuntimeManager:
             # Inform short-term memory that action was rejected by operator
             short_term = self.memory_manager.get_run_memory(run_id)
             from app.agent.backends.base import AgentMessage
+
             short_term.add_message(
                 AgentMessage(
                     role="system",

@@ -81,7 +81,9 @@ class ApprovalManager:
         req = self.get_request(approval_id, tenant_id)
 
         if req.status != ApprovalStatus.PENDING:
-            raise ValueError(f"Approval '{approval_id}' is already finalized as '{req.status}'.")
+            raise ValueError(
+                f"Approval '{approval_id}' is already finalized as '{req.status}'."
+            )
 
         now = time.time()
         req.decided_at = now
@@ -101,7 +103,9 @@ class ApprovalManager:
         )
         return req
 
-    def list_pending(self, tenant_id: str, run_id: str | None = None) -> list[ApprovalRequest]:
+    def list_pending(
+        self, tenant_id: str, run_id: str | None = None
+    ) -> list[ApprovalRequest]:
         """List pending approval requests within tenant boundary."""
         results: list[ApprovalRequest] = []
         for req in self._approvals.values():

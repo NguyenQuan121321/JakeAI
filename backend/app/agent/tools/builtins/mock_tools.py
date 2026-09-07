@@ -105,7 +105,10 @@ class MockDangerousShellTool(Tool):
             input_schema={
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Shell command to execute"},
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute",
+                    },
                 },
                 "required": ["command"],
             },
@@ -124,7 +127,11 @@ class MockDangerousShellTool(Tool):
         # Emulate safe execution of an approved command
         return ToolResult(
             success=True,
-            output={"command": cmd, "stdout": f"[simulated output for: {cmd}]", "returncode": 0},
+            output={
+                "command": cmd,
+                "stdout": f"[simulated output for: {cmd}]",
+                "returncode": 0,
+            },
             risk_level=ToolRiskLevel.DANGEROUS,
             execution_time_ms=(time.time() - start_ts) * 1000.0,
         )

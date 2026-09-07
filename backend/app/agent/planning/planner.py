@@ -185,8 +185,8 @@ class BoundedPlanner:
                 data = json.loads(text)
                 if isinstance(data, dict) and "action" in data:
                     return data
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.debug("Failed direct JSON parsing for action: %s", exc)
 
         # Try markdown codeblock extract
         if "```json" in text:
@@ -195,6 +195,6 @@ class BoundedPlanner:
                 data = json.loads(sub)
                 if isinstance(data, dict) and "action" in data:
                     return data
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, IndexError) as exc:
+                logger.debug("Failed codeblock JSON parsing for action: %s", exc)
         return None

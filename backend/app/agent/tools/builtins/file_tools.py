@@ -24,8 +24,15 @@ class ReadFileTool(Tool):
             input_schema={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative file path to read"},
-                    "max_bytes": {"type": "integer", "description": "Max bytes to read", "default": 10000},
+                    "path": {
+                        "type": "string",
+                        "description": "Relative file path to read",
+                    },
+                    "max_bytes": {
+                        "type": "integer",
+                        "description": "Max bytes to read",
+                        "default": 10000,
+                    },
                 },
                 "required": ["path"],
             },
@@ -68,7 +75,11 @@ class ReadFileTool(Tool):
                 content = f.read(max_bytes)
             return ToolResult(
                 success=True,
-                output={"path": raw_path, "content": content, "bytes_read": len(content)},
+                output={
+                    "path": raw_path,
+                    "content": content,
+                    "bytes_read": len(content),
+                },
                 risk_level=ToolRiskLevel.READ_ONLY,
                 execution_time_ms=(time.time() - start_ts) * 1000.0,
             )

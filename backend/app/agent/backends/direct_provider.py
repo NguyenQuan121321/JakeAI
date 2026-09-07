@@ -153,17 +153,21 @@ class DirectProviderBackend(AgentBackendInterface):
                     raw_tool_calls = choice_msg.get("tool_calls", [])
                     for tc in raw_tool_calls:
                         func = tc.get("function", {})
-                        call_id = tc.get("id") or f"call_{int(time.time()*1000)}"
+                        call_id = tc.get("id") or f"call_{int(time.time() * 1000)}"
                         tool_name = func.get("name") or "unknown"
                         raw_args = func.get("arguments") or "{}"
                         parsed_args = (
-                            json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                            json.loads(raw_args)
+                            if isinstance(raw_args, str)
+                            else raw_args
                         )
                         tool_calls.append(
                             AgentToolCall(
                                 call_id=call_id,
                                 tool_name=tool_name,
-                                arguments=parsed_args if isinstance(parsed_args, dict) else {},
+                                arguments=parsed_args
+                                if isinstance(parsed_args, dict)
+                                else {},
                             )
                         )
 

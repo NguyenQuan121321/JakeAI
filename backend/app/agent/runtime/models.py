@@ -14,20 +14,29 @@ class AgentConfig(BaseModel):
 
     agent_id: str = Field(default="default-agent")
     name: str = Field(default="JakeAI General Agent")
-    description: str = Field(default="Autonomous agent with bounded planning and tool execution")
+    description: str = Field(
+        default="Autonomous agent with bounded planning and tool execution"
+    )
     system_instructions: str | None = None
     default_model: str = Field(default="gemini-1.5-flash")
-    backend_type: str = Field(default="jakeai", description="jakeai | direct_provider | external_agent")
+    backend_type: str = Field(
+        default="jakeai", description="jakeai | direct_provider | external_agent"
+    )
     max_iterations: int = Field(default=10, ge=1, le=50)
     timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
-    allowed_tools: list[str] = Field(default_factory=list, description="Empty = all authorized tools")
+    allowed_tools: list[str] = Field(
+        default_factory=list, description="Empty = all authorized tools"
+    )
     require_human_approval_for_dangerous: bool = Field(default=True)
 
 
 class AgentRunEvent(BaseModel):
     """Normalized event frame emitted during Agent run streaming."""
 
-    event_type: str = Field(..., description="step | tool_call | observation | approval_required | completed | failed | cancelled")
+    event_type: str = Field(
+        ...,
+        description="step | tool_call | observation | approval_required | completed | failed | cancelled",
+    )
     task_id: str
     run_id: str
     timestamp: float = Field(default_factory=time.time)

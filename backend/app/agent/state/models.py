@@ -36,7 +36,9 @@ class StepExecutionRecord(BaseModel):
 
     step_number: int = Field(..., ge=0)
     description: str = Field(default="")
-    action_type: str = Field(..., description="Action: tool_call, direct_response, approval_request, finish")
+    action_type: str = Field(
+        ..., description="Action: tool_call, direct_response, approval_request, finish"
+    )
     tool_name: str | None = None
     tool_args: dict[str, Any] = Field(default_factory=dict)
     observation: str | None = None

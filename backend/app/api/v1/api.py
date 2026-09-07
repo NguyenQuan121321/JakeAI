@@ -29,6 +29,4 @@ api_router.include_router(finops.router, prefix="/finops", tags=["AI FinOps"])
 api_router.include_router(
     coding.router, prefix="/coding", tags=["Coding Agent & Tool Bridge"]
 )
-api_router.include_router(
-    agent.router, prefix="/agent", tags=["JakeAI-Agent Platform"]
-)
+api_router.include_router(agent.router, prefix="/agent", tags=["JakeAI-Agent Platform"])

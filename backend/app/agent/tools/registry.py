@@ -22,7 +22,9 @@ class ToolRegistry:
         """Register a tool instance."""
         name = tool.metadata.name
         self._tools[name] = tool
-        logger.debug("Registered agent tool: %s (risk: %s)", name, tool.metadata.risk_level)
+        logger.debug(
+            "Registered agent tool: %s (risk: %s)", name, tool.metadata.risk_level
+        )
 
     def unregister(self, name: str) -> None:
         """Remove a tool from the registry."""

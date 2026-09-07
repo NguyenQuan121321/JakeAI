@@ -22,15 +22,26 @@ router = APIRouter()
 class CreateTaskRequest(BaseModel):
     """Payload to create a new autonomous agent task."""
 
-    goal: str = Field(..., min_length=1, max_length=10000, description="Target objective or problem statement")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary task context metadata")
+    goal: str = Field(
+        ...,
+        min_length=1,
+        max_length=10000,
+        description="Target objective or problem statement",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Arbitrary task context metadata"
+    )
 
 
 class CreateRunRequest(BaseModel):
     """Payload to instantiate an execution run for an existing task."""
 
-    max_iterations: int | None = Field(default=None, ge=1, le=50, description="Optional iteration ceiling")
-    async_execution: bool = Field(default=True, description="Whether to execute in background")
+    max_iterations: int | None = Field(
+        default=None, ge=1, le=50, description="Optional iteration ceiling"
+    )
+    async_execution: bool = Field(
+        default=True, description="Whether to execute in background"
+    )
 
 
 @router.post("/tasks", response_model=TaskState, status_code=status.HTTP_201_CREATED)
@@ -58,12 +69,20 @@ async def get_task(
     try:
         return manager.get_task(task_id, context.tenant_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
 
-@router.post("/tasks/{task_id}/runs", response_model=RunState, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/tasks/{task_id}/runs",
+    response_model=RunState,
+    status_code=status.HTTP_201_CREATED,
+)
 async def start_run(
     task_id: str,
     payload: CreateRunRequest,
@@ -100,9 +119,13 @@ async def start_run(
 
         return run
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
 
 @router.get("/tasks/{task_id}/runs/{run_id}", response_model=RunState)
@@ -118,9 +141,13 @@ async def get_run(
         manager.get_task(task_id, context.tenant_id)
         return manager.get_run(run_id, context.tenant_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
 
 @router.get(
@@ -144,9 +171,13 @@ async def stream_run_events(
         manager.get_task(task_id, context.tenant_id)
         manager.get_run(run_id, context.tenant_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
     generator = manager.runner.stream_run_events(run_id)
     return StreamingResponse(generator, media_type="text/event-stream")
@@ -163,9 +194,13 @@ async def cancel_run(
     try:
         return manager.cancel_run(task_id, run_id, context.tenant_id)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
 
 @router.post(
@@ -194,11 +229,17 @@ async def decide_approval(
         )
         return appr
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 @router.get("/approvals/pending", response_model=list[ApprovalRequest])
@@ -219,4 +260,3 @@ async def get_agent_metrics(
     from app.agent.telemetry import agent_telemetry
 
     return agent_telemetry.get_snapshot().model_dump()
-

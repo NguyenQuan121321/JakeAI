@@ -61,7 +61,11 @@ class ToolPolicyEngine:
 
         # 2. Path Traversal and Argument Injection Safeguards
         args_str = str(arguments)
-        if ".." in args_str or "/etc/passwd" in args_str or "C:\\Windows\\System32" in args_str:
+        if (
+            ".." in args_str
+            or "/etc/passwd" in args_str
+            or "C:\\Windows\\System32" in args_str
+        ):
             return ToolPolicyDecision(
                 allowed=False,
                 requires_approval=False,
@@ -84,4 +88,6 @@ class ToolPolicyEngine:
                 reason=f"Action '{meta.name}' is classified as DANGEROUS and requires human approval",
             )
 
-        return ToolPolicyDecision(allowed=True, requires_approval=False, reason="Authorized")
+        return ToolPolicyDecision(
+            allowed=True, requires_approval=False, reason="Authorized"
+        )

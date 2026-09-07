@@ -12,17 +12,23 @@ from pydantic import BaseModel, Field
 class ToolRiskLevel(StrEnum):
     """Categorization of operational risk associated with tool execution."""
 
-    READ_ONLY = "read_only"      # Zero mutation, safe inspection (e.g. read file, search)
-    SAFE_WRITE = "safe_write"    # Controlled scratchpad mutation (e.g. write scratch file)
-    DANGEROUS = "dangerous"      # High-impact operations requiring human approval (e.g. terminal, git push)
+    READ_ONLY = "read_only"  # Zero mutation, safe inspection (e.g. read file, search)
+    SAFE_WRITE = (
+        "safe_write"  # Controlled scratchpad mutation (e.g. write scratch file)
+    )
+    DANGEROUS = "dangerous"  # High-impact operations requiring human approval (e.g. terminal, git push)
 
 
 class ToolMetadata(BaseModel):
     """Comprehensive tool specification."""
 
     name: str = Field(..., description="Unique tool invocation name")
-    description: str = Field(..., description="Human and model-readable description of tool capability")
-    input_schema: dict[str, Any] = Field(..., description="JSON Schema defining expected arguments")
+    description: str = Field(
+        ..., description="Human and model-readable description of tool capability"
+    )
+    input_schema: dict[str, Any] = Field(
+        ..., description="JSON Schema defining expected arguments"
+    )
     permissions: list[str] = Field(
         default_factory=list, description="Required tenant permissions/capabilities"
     )

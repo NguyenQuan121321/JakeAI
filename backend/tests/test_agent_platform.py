@@ -69,6 +69,7 @@ from app.core.config import get_settings
 # Test Auth Helpers
 # ---------------------------------------------------------------------------
 
+
 def generate_agent_jwt(
     sub: str = "user-agent-tester",
     tenant_id: str = "tenant-agent-alpha",
@@ -93,6 +94,7 @@ def generate_agent_jwt(
 # ===========================================================================
 # 1. Agent Backends Tests
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_jakeai_backend_text_response() -> None:
@@ -172,7 +174,9 @@ async def test_jakeai_backend_streaming() -> None:
             messages=[AgentMessage(role="user", content="Stream this")],
             tenant_id="tenant-alpha",
         )
-        stream_chunks = [chunk.delta_content async for chunk in backend.generate_stream(req)]
+        stream_chunks = [
+            chunk.delta_content async for chunk in backend.generate_stream(req)
+        ]
         assert len(stream_chunks) > 0
         assert "".join(stream_chunks) == "Chunk1 Chunk2 Chunk3"
 
@@ -252,6 +256,7 @@ async def test_external_agent_backend_dispatch() -> None:
 # 2. Tool Registry, Risk Policies & Sandbox Tests
 # ===========================================================================
 
+
 def test_tool_registry_and_policy() -> None:
     registry = get_tool_registry()
 
@@ -306,6 +311,7 @@ async def test_local_safe_sandbox_file_and_commands(tmp_path: Any) -> None:
 # 3. State & Checkpoint Tenant Isolation Tests
 # ===========================================================================
 
+
 @pytest.mark.asyncio
 async def test_state_and_checkpoint_tenant_isolation() -> None:
     ckpt_mgr = CheckpointManager()
@@ -328,7 +334,9 @@ async def test_state_and_checkpoint_tenant_isolation() -> None:
     assert restored is not None
     assert restored.tenant_id == "tenant-alpha"
     assert restored.current_iteration == 3
-    assert restored.short_term_memory_snapshot[0]["content"] == "Alpha confidential prompt"
+    assert (
+        restored.short_term_memory_snapshot[0]["content"] == "Alpha confidential prompt"
+    )
 
     # Negative test: Beta cannot access Alpha's checkpoint
     with pytest.raises(PermissionError, match=r"Tenant mismatch"):
@@ -338,6 +346,7 @@ async def test_state_and_checkpoint_tenant_isolation() -> None:
 # ===========================================================================
 # 4. Multi-Tenant Memory Architecture Tests
 # ===========================================================================
+
 
 def test_short_term_memory_sliding_window() -> None:
     stm = ShortTermMemory(max_entries=3)
@@ -389,6 +398,7 @@ async def test_long_term_memory_tenant_isolation() -> None:
 # ===========================================================================
 # 5. Human-in-the-Loop Approvals Tests
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_approval_manager_flow_and_isolation() -> None:
@@ -450,6 +460,7 @@ async def test_approval_manager_flow_and_isolation() -> None:
 # 6. Bounded Planner & Workflow Engine Tests
 # ===========================================================================
 
+
 class MockFinishingBackend(AgentBackendInterface):
     """Backend that directly finishes with a final result."""
 
@@ -466,7 +477,9 @@ class MockFinishingBackend(AgentBackendInterface):
     async def generate_stream(
         self, request: BackendRequest
     ) -> AsyncIterator[BackendStreamChunk]:
-        yield BackendStreamChunk(delta_content="Task achieved successfully.", is_complete=True)
+        yield BackendStreamChunk(
+            delta_content="Task achieved successfully.", is_complete=True
+        )
 
 
 class MockToolUsingBackend(AgentBackendInterface):
@@ -561,6 +574,7 @@ async def test_workflow_engine_execution() -> None:
 # 7. Autonomous Execution Loop Tests
 # ===========================================================================
 
+
 @pytest.mark.asyncio
 async def test_agent_execution_loop_normal_finish() -> None:
     backend = MockFinishingBackend()
@@ -579,8 +593,12 @@ async def test_agent_execution_loop_normal_finish() -> None:
         config=AgentConfig(max_iterations=5),
     )
 
-    task = TaskState(task_id="t_norm", tenant_id="tenant-alpha", user_id="u1", goal="Simple task")
-    run = RunState(run_id="r_norm", task_id="t_norm", tenant_id="tenant-alpha", user_id="u1")
+    task = TaskState(
+        task_id="t_norm", tenant_id="tenant-alpha", user_id="u1", goal="Simple task"
+    )
+    run = RunState(
+        run_id="r_norm", task_id="t_norm", tenant_id="tenant-alpha", user_id="u1"
+    )
 
     events: list[AgentRunEvent] = []
     async for ev in loop.execute(task, run):
@@ -588,7 +606,10 @@ async def test_agent_execution_loop_normal_finish() -> None:
 
     assert run.status == RunStatus.COMPLETED
     assert task.status == TaskStatus.COMPLETED
-    assert run.final_output is not None and "Task achieved successfully." in run.final_output
+    assert (
+        run.final_output is not None
+        and "Task achieved successfully." in run.final_output
+    )
     assert any(ev.event_type == "completed" for ev in events)
 
 
@@ -610,8 +631,15 @@ async def test_agent_execution_loop_approval_gate_and_resume() -> None:
         config=AgentConfig(max_iterations=5),
     )
 
-    task = TaskState(task_id="t_appr", tenant_id="tenant-alpha", user_id="u1", goal="Run dangerous command")
-    run = RunState(run_id="r_appr", task_id="t_appr", tenant_id="tenant-alpha", user_id="u1")
+    task = TaskState(
+        task_id="t_appr",
+        tenant_id="tenant-alpha",
+        user_id="u1",
+        goal="Run dangerous command",
+    )
+    run = RunState(
+        run_id="r_appr", task_id="t_appr", tenant_id="tenant-alpha", user_id="u1"
+    )
 
     # First pass: hits dangerous tool approval requirement
     events_1: list[AgentRunEvent] = []
@@ -661,8 +689,12 @@ async def test_agent_execution_loop_cancellation() -> None:
         config=AgentConfig(max_iterations=5),
     )
 
-    task = TaskState(task_id="t_cancel", tenant_id="tenant-alpha", user_id="u1", goal="Cancel task")
-    run = RunState(run_id="r_cancel", task_id="t_cancel", tenant_id="tenant-alpha", user_id="u1")
+    task = TaskState(
+        task_id="t_cancel", tenant_id="tenant-alpha", user_id="u1", goal="Cancel task"
+    )
+    run = RunState(
+        run_id="r_cancel", task_id="t_cancel", tenant_id="tenant-alpha", user_id="u1"
+    )
 
     events: list[AgentRunEvent] = []
     async for ev in loop.execute(task, run, cancellation_requested=lambda: True):
@@ -675,6 +707,7 @@ async def test_agent_execution_loop_cancellation() -> None:
 # ===========================================================================
 # 8. REST & SSE Endpoints Integration Tests
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_api_create_task_and_get_task(async_client: AsyncClient) -> None:
@@ -701,8 +734,13 @@ async def test_api_create_task_and_get_task(async_client: AsyncClient) -> None:
     # 3. Multi-tenant negative isolation: Other tenant cannot access
     other_token = generate_agent_jwt(tenant_id="tenant-other")
     other_headers = {"Authorization": f"Bearer {other_token}"}
-    res_forbidden = await async_client.get(f"/api/v1/agent/tasks/{task_id}", headers=other_headers)
-    assert res_forbidden.status_code in [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND]
+    res_forbidden = await async_client.get(
+        f"/api/v1/agent/tasks/{task_id}", headers=other_headers
+    )
+    assert res_forbidden.status_code in [
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ]
 
 
 @pytest.mark.asyncio
@@ -750,7 +788,9 @@ async def test_api_approvals_and_metrics_endpoints(async_client: AsyncClient) ->
     headers = {"Authorization": f"Bearer {token}"}
 
     # Check pending approvals endpoint
-    res_appr = await async_client.get("/api/v1/agent/approvals/pending", headers=headers)
+    res_appr = await async_client.get(
+        "/api/v1/agent/approvals/pending", headers=headers
+    )
     assert res_appr.status_code == status.HTTP_200_OK
     assert isinstance(res_appr.json(), list)
 

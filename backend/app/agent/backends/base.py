@@ -20,8 +20,12 @@ class AgentMessage(BaseModel):
 
     role: str = Field(..., description="Role: system, user, assistant, tool")
     content: str = Field(default="", description="Message content")
-    name: str | None = Field(default=None, description="Optional name/identifier for tool messages")
-    tool_call_id: str | None = Field(default=None, description="Associated tool call identifier")
+    name: str | None = Field(
+        default=None, description="Optional name/identifier for tool messages"
+    )
+    tool_call_id: str | None = Field(
+        default=None, description="Associated tool call identifier"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -30,22 +34,32 @@ class AgentToolCall(BaseModel):
 
     call_id: str = Field(..., description="Unique tool call invocation ID")
     tool_name: str = Field(..., description="Target tool name")
-    arguments: dict[str, Any] = Field(default_factory=dict, description="Parsed tool input arguments")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict, description="Parsed tool input arguments"
+    )
 
 
 class BackendRequest(BaseModel):
     """Normalized inference request dispatched from the Agent runtime to a backend."""
 
-    messages: list[AgentMessage] = Field(..., min_length=1, description="Conversation history")
+    messages: list[AgentMessage] = Field(
+        ..., min_length=1, description="Conversation history"
+    )
     tools: list[dict[str, Any]] | None = Field(
         default=None, description="Optional tool schemas presented to the model"
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1)
     tenant_id: str = Field(default="default", description="Tenant context identifier")
-    user_id: str = Field(default="anonymous", description="Authenticated user identifier")
-    model: str | None = Field(default=None, description="Optional specific model target")
-    system_instruction: str | None = Field(default=None, description="Optional system instruction override")
+    user_id: str = Field(
+        default="anonymous", description="Authenticated user identifier"
+    )
+    model: str | None = Field(
+        default=None, description="Optional specific model target"
+    )
+    system_instruction: str | None = Field(
+        default=None, description="Optional system instruction override"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -57,13 +71,17 @@ class BackendResponse(BaseModel):
         default_factory=list, description="Tool calls requested by the model"
     )
     model: str = Field(default="unknown", description="Model used for generation")
-    provider: str = Field(default="unknown", description="Upstream provider or backend identifier")
+    provider: str = Field(
+        default="unknown", description="Upstream provider or backend identifier"
+    )
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cached_tokens: int = Field(default=0, ge=0)
     cost_usd: float = Field(default=0.0, ge=0.0)
     latency_ms: float = Field(default=0.0, ge=0.0)
-    finish_reason: str = Field(default="stop", description="Generation completion reason")
+    finish_reason: str = Field(
+        default="stop", description="Generation completion reason"
+    )
 
 
 class BackendStreamChunk(BaseModel):

@@ -102,7 +102,9 @@ class WorkflowEngine:
 
                 elif step.step_type == StepType.MODEL_CALL:
                     if self.backend is None:
-                        raise ValueError("Workflow requires backend for MODEL_CALL step.")
+                        raise ValueError(
+                            "Workflow requires backend for MODEL_CALL step."
+                        )
 
                     prompt_text = step.prompt_template or "Perform step"
                     for k, v in context_vars.items():
@@ -122,7 +124,12 @@ class WorkflowEngine:
             except Exception as exc:
                 execution.status = WorkflowExecutionStatus.FAILED
                 execution.error = str(exc)
-                logger.error("Workflow '%s' crashed at step '%s': %s", workflow.workflow_id, step.name, exc)
+                logger.error(
+                    "Workflow '%s' crashed at step '%s': %s",
+                    workflow.workflow_id,
+                    step.name,
+                    exc,
+                )
                 return execution
 
         execution.status = WorkflowExecutionStatus.COMPLETED

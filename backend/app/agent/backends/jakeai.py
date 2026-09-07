@@ -57,7 +57,9 @@ class JakeAIBackend(AgentBackendInterface):
                     f"Tool[{msg.name or 'tool'}]: {msg.content}"
                 )
 
-        combined_prompt = "\n".join(conversation_history) if conversation_history else "Hello"
+        combined_prompt = (
+            "\n".join(conversation_history) if conversation_history else "Hello"
+        )
 
         # Dispatch via JakeAI Provider Platform
         upstream_resp = await call_upstream_llm_detailed(
@@ -86,8 +88,12 @@ class JakeAIBackend(AgentBackendInterface):
             content_text = raw_resp.get("content") or raw_resp.get("text") or ""
             model = raw_resp.get("model", model_target)
             provider = raw_resp.get("provider", "jakeai")
-            input_tokens = raw_resp.get("prompt_tokens") or raw_resp.get("input_tokens", 0)
-            output_tokens = raw_resp.get("completion_tokens") or raw_resp.get("output_tokens", 0)
+            input_tokens = raw_resp.get("prompt_tokens") or raw_resp.get(
+                "input_tokens", 0
+            )
+            output_tokens = raw_resp.get("completion_tokens") or raw_resp.get(
+                "output_tokens", 0
+            )
             cached_tokens = raw_resp.get("cached_tokens", 0)
             cost_usd = raw_resp.get("cost_usd") or raw_resp.get("actual_cost_usd", 0.0)
         else:
@@ -95,7 +101,11 @@ class JakeAIBackend(AgentBackendInterface):
             content_text = getattr(upstream_resp, "text", "") or ""
             model = getattr(upstream_resp, "model", model_target)
             provider = f"jakeai:{getattr(upstream_resp, 'provider', 'default')}"
-            input_tokens = (telemetry.uncached_input_tokens + telemetry.cached_tokens) if telemetry else 0
+            input_tokens = (
+                (telemetry.uncached_input_tokens + telemetry.cached_tokens)
+                if telemetry
+                else 0
+            )
             output_tokens = telemetry.output_tokens if telemetry else 0
             cached_tokens = telemetry.cached_tokens if telemetry else 0
             cost_usd = telemetry.actual_cost_usd if telemetry else 0.0
@@ -153,8 +163,12 @@ class JakeAIBackend(AgentBackendInterface):
             try:
                 data = json.loads(cleaned)
                 if isinstance(data, dict):
-                    tool_name = data.get("tool_name") or data.get("tool") or data.get("name")
-                    if tool_name and (data.get("action") == "tool_call" or "arguments" in data):
+                    tool_name = (
+                        data.get("tool_name") or data.get("tool") or data.get("name")
+                    )
+                    if tool_name and (
+                        data.get("action") == "tool_call" or "arguments" in data
+                    ):
                         tool_calls.append(
                             AgentToolCall(
                                 call_id=f"call_{int(time.time() * 1000)}",
@@ -162,6 +176,10 @@ class JakeAIBackend(AgentBackendInterface):
                                 arguments=data.get("arguments") or {},
                             )
                         )
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.debug(
+                    "Failed to parse tool call JSON block from model output: %s", exc
+                )
+            except (KeyError, TypeError) as exc:
+                logger.warning("Malformed tool call structure in model output: %s", exc)
         return tool_calls

@@ -130,16 +130,17 @@ class LocalSafeSandbox(ExecutionInterface):
             )
 
         binary = Path(command[0]).name.lower().replace(".exe", "")
-        if binary not in self.ALLOWED_COMMANDS and not self.limits.allow_arbitrary_shell:
+        if (
+            binary not in self.ALLOWED_COMMANDS
+            and not self.limits.allow_arbitrary_shell
+        ):
             return ExecutionResult(
                 success=False,
                 error=f"Command '{binary}' is not permitted by safe sandbox policy.",
                 returncode=126,
             )
 
-        work_dir = (
-            self._resolve_safe_path(cwd) if cwd else self.sandbox_root
-        )
+        work_dir = self._resolve_safe_path(cwd) if cwd else self.sandbox_root
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -159,8 +160,15 @@ class LocalSafeSandbox(ExecutionInterface):
                 try:
                     proc.kill()
                     await proc.wait()
-                except Exception:
-                    pass
+                except ProcessLookupError:
+                    # Process already terminated; cleanup is idempotent
+                    logger.debug(
+                        "Process %s already exited before kill attempt.", proc.pid
+                    )
+                except OSError as exc:
+                    logger.warning(
+                        "OS error during termination of process %s: %s", proc.pid, exc
+                    )
                 return ExecutionResult(
                     success=False,
                     error=f"Command timed out after {self.limits.timeout_seconds} seconds.",
@@ -169,8 +177,12 @@ class LocalSafeSandbox(ExecutionInterface):
                 )
 
             duration = (time.time() - start_ts) * 1000.0
-            out_str = stdout_bytes.decode("utf-8", errors="replace")[: self.limits.max_output_bytes]
-            err_str = stderr_bytes.decode("utf-8", errors="replace")[: self.limits.max_output_bytes]
+            out_str = stdout_bytes.decode("utf-8", errors="replace")[
+                : self.limits.max_output_bytes
+            ]
+            err_str = stderr_bytes.decode("utf-8", errors="replace")[
+                : self.limits.max_output_bytes
+            ]
 
             return ExecutionResult(
                 success=(proc.returncode == 0),

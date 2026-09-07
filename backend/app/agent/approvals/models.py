@@ -20,8 +20,12 @@ class ApprovalStatus(StrEnum):
 class ApprovalDecision(BaseModel):
     """Payload submitted by authorized human user to resolve an approval gate."""
 
-    approved: bool = Field(..., description="Whether the dangerous action is approved to proceed")
-    reason: str | None = Field(default=None, description="Optional explanation or rejection rationale")
+    approved: bool = Field(
+        ..., description="Whether the dangerous action is approved to proceed"
+    )
+    reason: str | None = Field(
+        default=None, description="Optional explanation or rejection rationale"
+    )
 
 
 class ApprovalRequest(BaseModel):
@@ -32,7 +36,9 @@ class ApprovalRequest(BaseModel):
     run_id: str = Field(..., description="Target execution run identifier")
     tenant_id: str = Field(..., description="Tenant boundary identifier")
     tool_name: str = Field(..., description="Dangerous tool pending execution")
-    tool_args: dict[str, Any] = Field(default_factory=dict, description="Proposed tool arguments")
+    tool_args: dict[str, Any] = Field(
+        default_factory=dict, description="Proposed tool arguments"
+    )
     risk_level: str = Field(default="dangerous", description="Tool risk classification")
     reason: str = Field(..., description="Explanation of why approval is required")
     status: ApprovalStatus = Field(default=ApprovalStatus.PENDING)

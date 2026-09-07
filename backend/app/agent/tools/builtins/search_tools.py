@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import ast
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any
 
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
+
+logger = logging.getLogger(__name__)
 
 
 class SearchSymbolsTool(Tool):
@@ -25,8 +28,15 @@ class SearchSymbolsTool(Tool):
             input_schema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Symbol name or substring to search for"},
-                    "max_results": {"type": "integer", "description": "Maximum matches to return", "default": 10},
+                    "query": {
+                        "type": "string",
+                        "description": "Symbol name or substring to search for",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum matches to return",
+                        "default": 10,
+                    },
                 },
                 "required": ["query"],
             },
@@ -69,16 +79,28 @@ class SearchSymbolsTool(Tool):
                                 )
                                 and query in node.name.lower()
                             ):
-                                matches.append({
-                                    "file": rel_path,
-                                    "name": node.name,
-                                    "type": "class" if isinstance(node, ast.ClassDef) else "function",
-                                    "lineno": node.lineno,
-                                })
+                                matches.append(
+                                    {
+                                        "file": rel_path,
+                                        "name": node.name,
+                                        "type": "class"
+                                        if isinstance(node, ast.ClassDef)
+                                        else "function",
+                                        "lineno": node.lineno,
+                                    }
+                                )
                                 if len(matches) >= max_results:
                                     break
-                    except Exception:
-                        pass
+                    except (
+                        SyntaxError,
+                        ValueError,
+                        OSError,
+                        UnicodeDecodeError,
+                        RecursionError,
+                    ) as exc:
+                        logger.debug(
+                            "Skipping unparseable Python file %s: %s", full_path, exc
+                        )
                 if len(matches) >= max_results:
                     break
             if len(matches) >= max_results:

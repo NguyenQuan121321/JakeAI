@@ -47,7 +47,9 @@ class AgentRunner:
             config=config,
         )
         # Event queues per run: run_id -> list[asyncio.Queue[AgentRunEvent | None]]
-        self._event_subscribers: dict[str, list[asyncio.Queue[AgentRunEvent | None]]] = {}
+        self._event_subscribers: dict[
+            str, list[asyncio.Queue[AgentRunEvent | None]]
+        ] = {}
         # Cancellation flags: run_id -> bool
         self._cancellation_flags: dict[str, bool] = {}
         # In-flight asyncio tasks: run_id -> asyncio.Task
@@ -59,7 +61,9 @@ class AgentRunner:
         self._event_subscribers.setdefault(run_id, []).append(q)
         return q
 
-    def unsubscribe_events(self, run_id: str, q: asyncio.Queue[AgentRunEvent | None]) -> None:
+    def unsubscribe_events(
+        self, run_id: str, q: asyncio.Queue[AgentRunEvent | None]
+    ) -> None:
         """Remove subscriber queue."""
         if run_id in self._event_subscribers:
             with contextlib.suppress(ValueError):
@@ -87,13 +91,17 @@ class AgentRunner:
     ) -> None:
         """Execute run loop synchronously or via background task."""
         self._cancellation_flags[run.run_id] = False
-        agent_telemetry.record_run_started(task.tenant_id, self.loop.config.backend_type)
+        agent_telemetry.record_run_started(
+            task.tenant_id, self.loop.config.backend_type
+        )
 
         try:
             async for event in self.loop.execute(
                 task=task,
                 run=run,
-                cancellation_requested=lambda: self._cancellation_flags.get(run.run_id, False),
+                cancellation_requested=lambda: self._cancellation_flags.get(
+                    run.run_id, False
+                ),
                 user_roles=user_roles,
                 user_permissions=user_permissions,
             ):
@@ -115,7 +123,9 @@ class AgentRunner:
         """Resume an execution run that was paused awaiting approval."""
         appr = self.loop.approval_manager.get_request(approval_id, task.tenant_id)
         if appr.status != ApprovalStatus.APPROVED:
-            raise ValueError(f"Approval '{approval_id}' is not in approved state (status: {appr.status}).")
+            raise ValueError(
+                f"Approval '{approval_id}' is not in approved state (status: {appr.status})."
+            )
 
         # Execute the approved dangerous tool directly, record observation, and continue loop
         short_term_mem = self.loop.memory_manager.get_run_memory(run.run_id)
@@ -144,7 +154,9 @@ class AgentRunner:
         run.current_iteration += 1
 
         # Continue execution loop
-        await self.start_run(task, run, user_roles=user_roles, user_permissions=user_permissions)
+        await self.start_run(
+            task, run, user_roles=user_roles, user_permissions=user_permissions
+        )
 
     async def stream_run_events(
         self,

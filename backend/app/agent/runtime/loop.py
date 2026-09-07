@@ -72,7 +72,9 @@ class AgentExecutionLoop:
             user_permissions=user_permissions,
         )
         if self.config.allowed_tools:
-            available_tools = [t for t in available_tools if t.name in self.config.allowed_tools]
+            available_tools = [
+                t for t in available_tools if t.name in self.config.allowed_tools
+            ]
 
         # Initialize or retrieve plan
         plan = self.planner.create_initial_plan(task.goal, available_tools)
@@ -91,14 +93,18 @@ class AgentExecutionLoop:
             is_cancelled = False
             if callable(cancellation_requested):
                 is_cancelled = cancellation_requested()
-            elif cancellation_requested is not None and getattr(cancellation_requested, "is_set", None):
+            elif cancellation_requested is not None and getattr(
+                cancellation_requested, "is_set", None
+            ):
                 is_cancelled = cancellation_requested.is_set()
 
             if is_cancelled or run.status == RunStatus.CANCELLED:
                 run.status = RunStatus.CANCELLED
                 task.status = TaskStatus.CANCELLED
                 run.completed_at = time.time()
-                await self.checkpoint_manager.save_checkpoint(run, short_term_mem.snapshot())
+                await self.checkpoint_manager.save_checkpoint(
+                    run, short_term_mem.snapshot()
+                )
                 agent_telemetry.record_run_cancelled(task.tenant_id)
                 yield AgentRunEvent(
                     event_type="cancelled",
@@ -127,7 +133,9 @@ class AgentExecutionLoop:
                 task.status = TaskStatus.COMPLETED
                 run.final_output = action.final_output
                 run.completed_at = time.time()
-                await self.checkpoint_manager.save_checkpoint(run, short_term_mem.snapshot())
+                await self.checkpoint_manager.save_checkpoint(
+                    run, short_term_mem.snapshot()
+                )
                 agent_telemetry.record_run_completed(
                     tenant_id=task.tenant_id,
                     duration_ms=(time.time() - start_ts) * 1000.0,
@@ -138,7 +146,10 @@ class AgentExecutionLoop:
                     event_type="completed",
                     task_id=task.task_id,
                     run_id=run.run_id,
-                    data={"output": run.final_output, "iterations": run.current_iteration + 1},
+                    data={
+                        "output": run.final_output,
+                        "iterations": run.current_iteration + 1,
+                    },
                 )
                 return
 
@@ -148,7 +159,9 @@ class AgentExecutionLoop:
                 task.status = TaskStatus.FAILED
                 run.error = action.error or "Goal failed by planner decision."
                 run.completed_at = time.time()
-                await self.checkpoint_manager.save_checkpoint(run, short_term_mem.snapshot())
+                await self.checkpoint_manager.save_checkpoint(
+                    run, short_term_mem.snapshot()
+                )
                 agent_telemetry.record_run_failed(task.tenant_id, run.error)
                 yield AgentRunEvent(
                     event_type="failed",
@@ -187,7 +200,9 @@ class AgentExecutionLoop:
                     run.pending_approval_id = appr_req.approval_id
 
                     # Save checkpoint for resumption
-                    await self.checkpoint_manager.save_checkpoint(run, short_term_mem.snapshot())
+                    await self.checkpoint_manager.save_checkpoint(
+                        run, short_term_mem.snapshot()
+                    )
                     agent_telemetry.record_approval_requested(tool_name, task.tenant_id)
 
                     yield AgentRunEvent(
@@ -210,7 +225,11 @@ class AgentExecutionLoop:
                     event_type="tool_call",
                     task_id=task.task_id,
                     run_id=run.run_id,
-                    data={"tool_name": tool_name, "arguments": tool_args, "thought": action.thought},
+                    data={
+                        "tool_name": tool_name,
+                        "arguments": tool_args,
+                        "thought": action.thought,
+                    },
                 )
 
                 tool_res = await self.tool_registry.execute(
@@ -270,7 +289,9 @@ class AgentExecutionLoop:
                 )
 
             run.current_iteration += 1
-            await self.checkpoint_manager.save_checkpoint(run, short_term_mem.snapshot())
+            await self.checkpoint_manager.save_checkpoint(
+                run, short_term_mem.snapshot()
+            )
 
         # If loop exited naturally due to iteration ceiling
         run.status = RunStatus.FAILED
