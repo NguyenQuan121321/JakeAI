@@ -32,10 +32,13 @@ from app.providers.base import (
     ProviderResponse,
     get_model_capabilities,
 )
+from app.providers.deepseek import DeepSeekAdapter
 from app.providers.errors import (
     ErrorCategory,
     ProviderAuthenticationError,
     ProviderContextLimitError,
+    ProviderError,
+    ProviderInvalidRequestError,
     ProviderPolicyError,
     ProviderQuotaError,
     ProviderRateLimitError,
@@ -44,7 +47,10 @@ from app.providers.errors import (
     normalize_provider_error,
     sanitize_error_message,
 )
+from app.providers.gemini import GeminiAdapter
+from app.providers.groq import GroqAdapter
 from app.providers.openai import OpenAIAdapter
+from app.providers.openrouter import OpenRouterAdapter
 from app.providers.registry import get_provider_registry
 from app.routing.failover import (
     FailoverConfig,
@@ -527,3 +533,616 @@ async def test_call_upstream_llm_convenience_wrapper() -> None:
         text = await call_upstream_llm(prompt="Hello", model="gpt-4o")
 
     assert text == "Simple text response."
+
+
+# ==============================================================================
+# 7. Comprehensive Provider Adapter Execution & Streaming Coverage
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_anthropic_adapter_complete_and_stream() -> None:
+    """Test AnthropicAdapter execution, caching metrics, and streaming."""
+    adapter = AnthropicAdapter()
+
+    # 1. Complete Success with Cache Write & Read
+    resp_body = {
+        "content": [{"type": "text", "text": "Anthropic response"}],
+        "model": "claude-3-5-sonnet-20241022",
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 25,
+            "cache_read_input_tokens": 80,
+            "cache_creation_input_tokens": 20,
+        },
+        "stop_reason": "end_turn",
+    }
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json=resp_body))
+    )
+    req = ProviderRequest(
+        model="claude-3-5-sonnet",
+        prompt="Hi Claude",
+        system_instruction="You are Claude.",
+        api_key="sk-ant-test",
+    )
+    res = await adapter.complete(req, client=client)
+    assert res.text == "Anthropic response"
+    assert res.provider == "anthropic"
+    assert res.telemetry.cache_hit is True
+    assert res.telemetry.cached_tokens == 80
+    assert res.telemetry.cache_write_tokens == 20
+
+    # 2. Complete Failure -> Raises Normalized Error
+    err_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                401, json={"error": {"message": "invalid api key"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderAuthenticationError):
+        await adapter.complete(req, client=err_client)
+
+    # 3. Streaming Success
+    sse_data = (
+        'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello "}}\n\n'
+        'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "streaming!"}}\n\n'
+        'data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}\n\n'
+        "data: [DONE]\n\n"
+    )
+    stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=sse_data))
+    )
+    chunks = []
+    async for chunk in adapter.stream(req, client=stream_client):
+        chunks.append(chunk.delta_text)
+    assert "".join(chunks) == "Hello streaming!"
+
+    # 4. Streaming Failure
+    err_stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(529, json={"error": {"message": "overloaded"}})
+        )
+    )
+    with pytest.raises(ProviderUnavailableError):
+        async for _ in adapter.stream(req, client=err_stream_client):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_complete_and_stream() -> None:
+    """Test OpenAIAdapter execution, structured tools, and streaming."""
+    adapter = OpenAIAdapter()
+
+    # 1. Complete Success with Tool Calls
+    resp_body = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "Using a tool",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "query"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "model": "gpt-4o",
+        "usage": {
+            "prompt_tokens": 120,
+            "completion_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 60},
+        },
+    }
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json=resp_body))
+    )
+    req = ProviderRequest(
+        model="gpt-4o",
+        prompt="Execute query",
+        api_key="sk-proj-test",
+        tools=[{"type": "function", "function": {"name": "query"}}],
+    )
+    res = await adapter.complete(req, client=client)
+    assert res.text == "Using a tool"
+    assert res.finish_reason == "tool_calls"
+    assert res.tool_calls is not None
+    assert res.telemetry.cached_tokens == 60
+
+    # 2. Complete Failure -> Raises Normalized Error
+    err_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                429, json={"error": {"message": "quota exceeded"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderQuotaError):
+        await adapter.complete(req, client=err_client)
+
+    # 3. Streaming Success
+    sse_data = (
+        'data: {"choices": [{"delta": {"content": "Chunk 1 "}}]}\n\n'
+        'data: {"choices": [{"delta": {"content": "Chunk 2"}, "finish_reason": "stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=sse_data))
+    )
+    chunks = []
+    async for chunk in adapter.stream(req, client=stream_client):
+        chunks.append(chunk.delta_text)
+    assert "".join(chunks) == "Chunk 1 Chunk 2"
+
+    # 4. Streaming Failure
+    err_stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                401, json={"error": {"message": "invalid token"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderAuthenticationError):
+        async for _ in adapter.stream(req, client=err_stream_client):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_gemini_adapter_complete_and_stream() -> None:
+    """Test GeminiAdapter execution, cached content telemetry, and streaming."""
+    adapter = GeminiAdapter()
+
+    # 1. Complete Success with Context Caching
+    resp_body = {
+        "candidates": [
+            {
+                "content": {"parts": [{"text": "Gemini response text"}]},
+                "finishReason": "STOP",
+            }
+        ],
+        "usageMetadata": {
+            "promptTokenCount": 2048,
+            "cachedContentTokenCount": 1024,
+            "candidatesTokenCount": 50,
+        },
+    }
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json=resp_body))
+    )
+    req = ProviderRequest(
+        model="gemini-1.5-pro",
+        prompt="Tell me about AI",
+        api_key="AIzaSyTestKey",
+    )
+    res = await adapter.complete(req, client=client)
+    assert res.text == "Gemini response text"
+    assert res.telemetry.cached_tokens == 1024
+    assert res.telemetry.cache_hit is True
+
+    # 2. Complete Failure -> Raises Normalized Error
+    err_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "maximum context length exceeded: 200000 > 128000"
+                    }
+                },
+            )
+        )
+    )
+    with pytest.raises(ProviderContextLimitError):
+        await adapter.complete(req, client=err_client)
+
+    # 3. Streaming Success
+    sse_data = (
+        'data: {"candidates": [{"content": {"parts": [{"text": "Streaming "}]}}]}\n\n'
+        'data: {"candidates": [{"content": {"parts": [{"text": "Gemini!"}]}, "finishReason": "STOP"}]}\n\n'
+    )
+    stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=sse_data))
+    )
+    chunks = []
+    async for chunk in adapter.stream(req, client=stream_client):
+        chunks.append(chunk.delta_text)
+    assert "".join(chunks) == "Streaming Gemini!"
+
+    # 4. Streaming Failure
+    err_stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                400, json={"error": {"message": "harm category blocked"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderPolicyError):
+        async for _ in adapter.stream(req, client=err_stream_client):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_groq_adapter_complete_and_stream() -> None:
+    """Test GroqAdapter LPU inference and streaming."""
+    adapter = GroqAdapter()
+
+    # 1. Complete Success (Zero Prompt-Cache Policy)
+    resp_body = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "Fast LPU response"},
+                "finish_reason": "stop",
+            }
+        ],
+        "model": "llama-3.3-70b-versatile",
+        "usage": {"prompt_tokens": 50, "completion_tokens": 12},
+    }
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json=resp_body))
+    )
+    req = ProviderRequest(
+        model="llama-3.3-70b-versatile",
+        prompt="Speed test",
+        api_key="gsk_test_groq_key",
+    )
+    res = await adapter.complete(req, client=client)
+    assert res.text == "Fast LPU response"
+    assert res.telemetry.is_cache_eligible is False
+    assert res.telemetry.cached_tokens == 0
+
+    # 2. Complete Failure -> Raises Normalized Error
+    err_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                429,
+                json={"error": {"message": "Rate limit reached"}},
+                headers={"retry-after": "5"},
+            )
+        )
+    )
+    with pytest.raises(ProviderRateLimitError) as exc_info:
+        await adapter.complete(req, client=err_client)
+    assert exc_info.value.retry_after_seconds == 5.0
+
+    # 3. Streaming Success
+    sse_data = (
+        'data: {"choices": [{"delta": {"content": "Fast "}}]}\n\n'
+        'data: {"choices": [{"delta": {"content": "Groq"}, "finish_reason": "stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=sse_data))
+    )
+    chunks = []
+    async for chunk in adapter.stream(req, client=stream_client):
+        chunks.append(chunk.delta_text)
+    assert "".join(chunks) == "Fast Groq"
+
+    # 4. Streaming Failure
+    err_stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(503, text="Service Unavailable")
+        )
+    )
+    with pytest.raises(ProviderUnavailableError):
+        async for _ in adapter.stream(req, client=err_stream_client):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_deepseek_adapter_complete_and_stream() -> None:
+    """Test DeepSeekAdapter 64-token prefix cache handling and streaming."""
+    adapter = DeepSeekAdapter()
+
+    # 1. Complete Success with 64-token cache hit
+    resp_body = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "DeepSeek answer"},
+                "finish_reason": "stop",
+            }
+        ],
+        "model": "deepseek-chat",
+        "usage": {
+            "prompt_tokens": 128,
+            "completion_tokens": 20,
+            "prompt_tokens_details": {"cached_tokens": 64},
+        },
+    }
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json=resp_body))
+    )
+    req = ProviderRequest(
+        model="deepseek-chat",
+        prompt="Explain KV caching",
+        api_key="sk-deepseek-test",
+    )
+    res = await adapter.complete(req, client=client)
+    assert res.text == "DeepSeek answer"
+    assert res.telemetry.cached_tokens == 64
+    assert res.telemetry.cache_hit is True
+
+    # 2. Complete Failure -> Raises Normalized Error
+    err_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                402, json={"error": {"message": "Insufficient balance"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderQuotaError):
+        await adapter.complete(req, client=err_client)
+
+    # 3. Streaming Success
+    sse_data = (
+        'data: {"choices": [{"delta": {"content": "Deep"}}]}\n\n'
+        'data: {"choices": [{"delta": {"content": "Seek"}, "finish_reason": "stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=sse_data))
+    )
+    chunks = []
+    async for chunk in adapter.stream(req, client=stream_client):
+        chunks.append(chunk.delta_text)
+    assert "".join(chunks) == "DeepSeek"
+
+    # 4. Streaming Failure
+    err_stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(503, text="Service Overloaded")
+        )
+    )
+    with pytest.raises(ProviderUnavailableError):
+        async for _ in adapter.stream(req, client=err_stream_client):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_openrouter_adapter_complete_and_stream() -> None:
+    """Test OpenRouterAdapter headers, routing, and streaming."""
+    adapter = OpenRouterAdapter()
+
+    captured_headers: dict[str, str] = {}
+
+    def mock_handler(req: httpx.Request) -> httpx.Response:
+        nonlocal captured_headers
+        captured_headers = dict(req.headers)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "OpenRouter output",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "model": "meta-llama/llama-3.1-70b-instruct",
+                "usage": {"prompt_tokens": 40, "completion_tokens": 10},
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(mock_handler))
+    req = ProviderRequest(
+        model="meta-llama/llama-3.1-70b-instruct",
+        prompt="Hi OpenRouter",
+        api_key="sk-or-v1-test",
+    )
+    res = await adapter.complete(req, client=client)
+    assert res.text == "OpenRouter output"
+    assert "http-referer" in captured_headers
+    assert "x-title" in captured_headers
+
+    # 2. Complete Failure -> Raises Normalized Error
+    err_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                408, json={"error": {"message": "Upstream timeout"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderTimeoutError):
+        await adapter.complete(req, client=err_client)
+
+    # 3. Streaming Success
+    sse_data = (
+        'data: {"choices": [{"delta": {"content": "Open"}}]}\n\n'
+        'data: {"choices": [{"delta": {"content": "Router"}, "finish_reason": "stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=sse_data))
+    )
+    chunks = []
+    async for chunk in adapter.stream(req, client=stream_client):
+        chunks.append(chunk.delta_text)
+    assert "".join(chunks) == "OpenRouter"
+
+    # 4. Streaming Failure
+    err_stream_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                400, json={"error": {"message": "context length 200000 > 128000"}}
+            )
+        )
+    )
+    with pytest.raises(ProviderContextLimitError):
+        async for _ in adapter.stream(req, client=err_stream_client):
+            pass
+
+
+def test_registry_methods_extended() -> None:
+    """Verify registry provider listing, capability retrieval, and fallback resolution."""
+    reg = get_provider_registry()
+
+    providers = reg.list_providers()
+    assert "anthropic" in providers
+    assert "openai" in providers
+    assert "gemini" in providers
+    assert "groq" in providers
+    assert "deepseek" in providers
+    assert "openrouter" in providers
+
+    caps = reg.list_capabilities()
+    assert len(caps) >= 14
+
+    # Preferred provider override
+    adapter = reg.resolve_for_model("gpt-4o", preferred_provider="gemini")
+    assert isinstance(adapter, GeminiAdapter)
+
+    # Unknown model fallback
+    unknown_adapter = reg.resolve_for_model("some-unrecognized-model-name")
+    assert unknown_adapter is not None
+
+
+def test_router_constraints_and_downgrades_extended() -> None:
+    """Verify router constraint enforcement, reasoning rerouting, and cost downgrading."""
+    router = get_model_router()
+
+    # 1. Allowed providers constraint (forces fallback to allowed provider)
+    policy_allowed = RoutingPolicy(
+        requested_model="gpt-4o",
+        allowed_providers=["gemini", "groq"],
+    )
+    decision = router.route(policy_allowed)
+    assert decision.selected_provider in ("gemini", "groq")
+
+    # 2. Disallowed providers constraint (forces alternative)
+    policy_disallowed = RoutingPolicy(
+        requested_model="gpt-4o",
+        disallowed_providers=["openai", "anthropic"],
+    )
+    decision = router.route(policy_disallowed)
+    assert decision.selected_provider not in ("openai", "anthropic")
+
+    # 3. Reasoning requirement with DeepSeek
+    policy_deepseek_reason = RoutingPolicy(
+        requested_model="deepseek-chat",
+        required_capabilities=["supports_reasoning"],
+    )
+    decision = router.route(policy_deepseek_reason)
+    assert decision.selected_model == "deepseek-reasoner"
+
+    # 4. Reasoning requirement with non-reasoning provider (reroutes to o3-mini)
+    policy_gemini_reason = RoutingPolicy(
+        requested_model="gemini-1.5-flash",
+        required_capabilities=["supports_reasoning"],
+    )
+    decision = router.route(policy_gemini_reason)
+    assert decision.selected_model == "o3-mini"
+    assert decision.selected_provider == "openai"
+
+    # 5. Cost budget downgrade for Anthropic
+    policy_cost_anthropic = RoutingPolicy(
+        requested_model="claude-3-5-sonnet",
+        max_input_cost_per_million=1.0,  # Below $3.0
+    )
+    decision = router.route(policy_cost_anthropic)
+    assert decision.selected_model == "claude-3-haiku"
+
+    # 6. Cost budget downgrade for Gemini
+    policy_cost_gemini = RoutingPolicy(
+        requested_model="gemini-1.5-pro",
+        max_input_cost_per_million=0.5,  # Below $1.25
+    )
+    decision = router.route(policy_cost_gemini)
+    assert decision.selected_model == "gemini-1.5-flash"
+
+    # 7. Fallback chains for Gemini, Groq, DeepSeek
+    decision_gem = router.route(
+        RoutingPolicy(requested_model="gemini-1.5-pro", allow_fallback=True)
+    )
+    assert any(p == "openai" for p, m in decision_gem.fallback_chain)
+
+    decision_groq = router.route(
+        RoutingPolicy(requested_model="llama-3.3-70b-versatile", allow_fallback=True)
+    )
+    assert any(p == "openai" for p, m in decision_groq.fallback_chain)
+
+    decision_deepseek = router.route(
+        RoutingPolicy(requested_model="deepseek-chat", allow_fallback=True)
+    )
+    assert any(p == "openai" for p, m in decision_deepseek.fallback_chain)
+
+
+@pytest.mark.asyncio
+async def test_failover_limits_and_unexpected_errors() -> None:
+    """Test skipping unregistered providers, unexpected crash wrapping, and total fallback exhaustion."""
+    req = ProviderRequest(model="model_x", prompt="hi", api_key="test-key")
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}}
+            )
+        )
+    )
+
+    # 1. Unknown provider in decision chain is skipped to next candidate
+    decision = RoutingDecision(
+        selected_provider="non_existent_provider",
+        selected_model="model_x",
+        fallback_chain=[("openai", "gpt-4o-mini")],
+    )
+    failover_mgr = FailoverManager(
+        FailoverConfig(max_delay_seconds=0.5, base_delay_seconds=0.1)
+    )
+    res = await failover_mgr.execute_with_failover(req, decision, client=client)
+    assert res.text == "ok"
+
+    # 2. Unexpected non-ProviderError exception is wrapped into ProviderError
+    class BuggyAdapter(AnthropicAdapter):
+        async def complete(
+            self, request: ProviderRequest, client: httpx.AsyncClient | None = None
+        ) -> ProviderResponse:
+            raise RuntimeError("Unexpected internal crash")
+
+    reg = get_provider_registry()
+    orig = reg.get("anthropic")
+    reg.register("anthropic", BuggyAdapter())
+    try:
+        dec2 = RoutingDecision(
+            selected_provider="anthropic", selected_model="claude-3-haiku"
+        )
+        with pytest.raises(ProviderError) as exc_info:
+            await failover_mgr.execute_with_failover(req, dec2, client=client)
+        assert "Unexpected internal crash" in exc_info.value.message
+    finally:
+        if orig:
+            reg.register("anthropic", orig)
+
+    # 3. All providers exhausted without last_error
+    dec3 = RoutingDecision(
+        selected_provider="non_existent_1",
+        selected_model="m1",
+        fallback_chain=[("non_existent_2", "m2")],
+    )
+    with pytest.raises(ProviderError) as exc_info2:
+        await failover_mgr.execute_with_failover(req, dec3, client=client)
+    assert exc_info2.value.category == ErrorCategory.PROVIDER_UNAVAILABLE
+
+
+def test_errors_additional_branches() -> None:
+    """Test 400 bad syntax, generic network error, and unmapped status fallback."""
+    # Status 400 without specific error message -> ProviderInvalidRequestError
+    e1 = normalize_provider_error("test", 400, "Bad syntax")
+    assert isinstance(e1, ProviderInvalidRequestError)
+
+    # General network exception
+    class MockConnectionError(Exception):
+        pass
+
+    e2 = normalize_provider_error("test", None, exc=MockConnectionError("DNS failure"))
+    assert isinstance(e2, ProviderUnavailableError)
+
+    # Fallback ProviderError
+    e3 = normalize_provider_error("test", 418, "I am a teapot")
+    assert type(e3) is ProviderError

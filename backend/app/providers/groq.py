@@ -10,6 +10,7 @@ Owns:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -146,11 +147,17 @@ class GroqAdapter(LLMProvider):
                     body = res.json()
                 except Exception:
                     body = res.text
+                retry_after = None
+                raw_retry = res.headers.get("retry-after")
+                if raw_retry:
+                    with contextlib.suppress(ValueError):
+                        retry_after = float(raw_retry)
                 raise normalize_provider_error(
                     provider=self.provider_name,
                     status_code=res.status_code,
                     response_body=body,
                     model=payload["model"],
+                    retry_after=retry_after,
                 )
 
             data = res.json()
