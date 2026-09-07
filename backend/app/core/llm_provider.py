@@ -65,7 +65,16 @@ async def call_upstream_llm_detailed(
     model_lower = model.lower()
     is_anthropic = "claude" in model_lower or "anthropic" in model_lower
     is_openai = any(k in model_lower for k in ("gpt", "o1", "o3"))
-    is_gemini = "gemini" in model_lower or (not is_anthropic and not is_openai)
+    is_groq = "groq" in model_lower or "llama" in model_lower
+    is_deepseek = "deepseek" in model_lower
+    is_openrouter = "openrouter" in model_lower or "/" in model_lower
+    is_gemini = "gemini" in model_lower or (
+        not is_anthropic
+        and not is_openai
+        and not is_groq
+        and not is_deepseek
+        and not is_openrouter
+    )
 
     # Determine explicit key from settings or BYOK if available to support mocked settings tests
     explicit_key: str | None = None
@@ -77,6 +86,18 @@ async def call_upstream_llm_detailed(
         explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "openai") or getattr(
             settings, "OPENAI_API_KEY", None
         )
+    elif is_groq:
+        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "groq") or getattr(
+            settings, "GROQ_API_KEY", None
+        )
+    elif is_deepseek:
+        explicit_key = await byok_mgr.get_decrypted_key(
+            tenant_id, "deepseek"
+        ) or getattr(settings, "DEEPSEEK_API_KEY", None)
+    elif is_openrouter:
+        explicit_key = await byok_mgr.get_decrypted_key(
+            tenant_id, "openrouter"
+        ) or getattr(settings, "OPENROUTER_API_KEY", None)
     elif is_gemini:
         explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "gemini") or getattr(
             settings, "GEMINI_API_KEY", None
