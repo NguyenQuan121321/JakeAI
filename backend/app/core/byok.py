@@ -133,22 +133,35 @@ class BYOKManager:
 
     def _unpack_record(self, raw_val: str, tenant_id: str) -> dict[str, Any]:
         """Unpack a stored record, maintaining backward compatibility with plain ciphertexts."""
+        if not raw_val:
+            return {
+                "ciphertext": "",
+                "masked_key": None,
+                "status": "unconfigured",
+                "created_at": None,
+                "updated_at": None,
+                "last_validated_at": None,
+                "validation_status": "untested",
+            }
+
         if raw_val.startswith("{") and raw_val.endswith("}"):
             try:
                 data = json.loads(raw_val)
                 if isinstance(data, dict) and "ciphertext" in data:
                     return data
-            except json.JSONDecodeError:
+            except Exception:
                 pass
 
-        # Legacy plain ciphertext backward compatibility
+        # Legacy plain ciphertext backward compatibility or corrupt payload
         try:
             decrypted = self.decrypt_key(raw_val, tenant_id)
             masked = self.mask_key(decrypted)
             status = "active"
+            val_status = "untested"
         except Exception:
             masked = "sk-corrupt"
             status = "corrupt"
+            val_status = "invalid"
 
         return {
             "ciphertext": raw_val,
@@ -157,7 +170,7 @@ class BYOKManager:
             "created_at": None,
             "updated_at": None,
             "last_validated_at": None,
-            "validation_status": "invalid" if status == "corrupt" else "untested",
+            "validation_status": val_status,
         }
 
     async def _get_redis(self) -> Any | None:
@@ -182,6 +195,36 @@ class BYOKManager:
         except Exception:
             self._redis_available = False
             return None
+
+    async def _get_raw_val(self, tenant_id: str, provider: str) -> str | None:
+        """Retrieve raw stored ciphertext record from Redis or fallback in-memory store."""
+        norm_provider = provider.lower().strip()
+        raw_val: str | None = None
+        redis = await self._get_redis()
+        if redis is not None:
+            try:
+                key_name = f"byok:{tenant_id}:{norm_provider}"
+                raw_val = await redis.get(key_name)
+            except Exception as exc:
+                logger.warning("Redis read failed (%s), checking memory", exc)
+                raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
+
+        # Fallback to in-memory store if Redis returned None or failed
+        if not raw_val:
+            raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
+
+        return raw_val
+
+    async def _save_raw_val(self, tenant_id: str, provider: str, packed: str) -> None:
+        """Persist raw ciphertext record to Redis (if available) and mirror to in-memory store."""
+        norm_provider = provider.lower().strip()
+        redis = await self._get_redis()
+        if redis is not None:
+            try:
+                await redis.set(f"byok:{tenant_id}:{norm_provider}", packed)
+            except Exception as exc:
+                logger.warning("Redis write failed (%s), using memory store", exc)
+        self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
 
     async def validate_key(
         self, provider: str, api_key: str
@@ -334,15 +377,7 @@ class BYOKManager:
                 f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}"
             )
 
-        raw_val: str | None = None
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                raw_val = await redis.get(f"byok:{tenant_id}:{norm_provider}")
-            except Exception:
-                raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-        else:
-            raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
+        raw_val = await self._get_raw_val(tenant_id, norm_provider)
 
         if not raw_val:
             raise ValueError(
@@ -366,14 +401,7 @@ class BYOKManager:
         record["validation_status"] = "valid" if is_valid else "invalid"
         packed = json.dumps(record)
 
-        if redis is not None:
-            try:
-                await redis.set(f"byok:{tenant_id}:{norm_provider}", packed)
-            except Exception:
-                self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
-        else:
-            self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
-
+        await self._save_raw_val(tenant_id, norm_provider, packed)
         return is_valid, err
 
     async def store_key(
@@ -412,16 +440,7 @@ class BYOKManager:
             validation_status=validation_status,
         )
 
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                key_name = f"byok:{tenant_id}:{norm_provider}"
-                await redis.set(key_name, packed)
-            except Exception as exc:
-                logger.warning("Redis store failed (%s), using memory", exc)
-                self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
-        else:
-            self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
+        await self._save_raw_val(tenant_id, norm_provider, packed)
 
         return {
             "tenant_id": tenant_id,
@@ -448,15 +467,7 @@ class BYOKManager:
         if not clean_key or len(clean_key) < 8:
             raise ValueError("New API key must be at least 8 characters long")
 
-        raw_val: str | None = None
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                raw_val = await redis.get(f"byok:{tenant_id}:{norm_provider}")
-            except Exception:
-                raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-        else:
-            raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
+        raw_val = await self._get_raw_val(tenant_id, norm_provider)
 
         if not raw_val:
             raise ValueError(
@@ -487,13 +498,7 @@ class BYOKManager:
             validation_status=validation_status,
         )
 
-        if redis is not None:
-            try:
-                await redis.set(f"byok:{tenant_id}:{norm_provider}", packed)
-            except Exception:
-                self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
-        else:
-            self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
+        await self._save_raw_val(tenant_id, norm_provider, packed)
 
         return {
             "tenant_id": tenant_id,
@@ -514,15 +519,7 @@ class BYOKManager:
                 f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}"
             )
 
-        raw_val: str | None = None
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                raw_val = await redis.get(f"byok:{tenant_id}:{norm_provider}")
-            except Exception:
-                raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-        else:
-            raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
+        raw_val = await self._get_raw_val(tenant_id, norm_provider)
 
         if not raw_val:
             raise ValueError(
@@ -535,13 +532,7 @@ class BYOKManager:
         existing["updated_at"] = now
         packed = json.dumps(existing)
 
-        if redis is not None:
-            try:
-                await redis.set(f"byok:{tenant_id}:{norm_provider}", packed)
-            except Exception:
-                self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
-        else:
-            self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
+        await self._save_raw_val(tenant_id, norm_provider, packed)
 
         return {
             "tenant_id": tenant_id,
@@ -555,19 +546,7 @@ class BYOKManager:
     async def get_decrypted_key(self, tenant_id: str, provider: str) -> str | None:
         """Retrieve and decrypt an API key transiently in memory for inference."""
         norm_provider = provider.lower().strip()
-        raw_val: str | None = None
-
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                key_name = f"byok:{tenant_id}:{norm_provider}"
-                raw_val = await redis.get(key_name)
-            except Exception as exc:
-                logger.warning("Redis read failed (%s), checking memory", exc)
-                raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-        else:
-            raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-
+        raw_val = await self._get_raw_val(tenant_id, norm_provider)
         if not raw_val:
             return None
 
@@ -580,18 +559,9 @@ class BYOKManager:
     async def list_keys(self, tenant_id: str) -> list[dict[str, Any]]:
         """List all configured providers for a tenant with masked previews and lifecycle state."""
         results: list[dict[str, Any]] = []
-        redis = await self._get_redis()
 
         for provider in sorted(SUPPORTED_PROVIDERS):
-            raw_val: str | None = None
-            if redis is not None:
-                try:
-                    key_name = f"byok:{tenant_id}:{provider}"
-                    raw_val = await redis.get(key_name)
-                except Exception:
-                    raw_val = self._memory_store.get(tenant_id, {}).get(provider)
-            else:
-                raw_val = self._memory_store.get(tenant_id, {}).get(provider)
+            raw_val = await self._get_raw_val(tenant_id, provider)
 
             if raw_val:
                 try:

@@ -464,16 +464,22 @@ async def test_byok_legacy_plain_ciphertext_backward_compat():
 
     # Encrypt directly without JSON record wrapper
     raw_ciphertext = manager.encrypt_key(raw_key, tenant)
+    redis = await manager._get_redis()
+    if redis is not None:
+        await redis.set(f"byok:{tenant}:openai", raw_ciphertext)
     manager._memory_store.setdefault(tenant, {})["openai"] = raw_ciphertext
 
-    # get_decrypted_key must unpack and decrypt correctly
-    assert await manager.get_decrypted_key(tenant, "openai") == raw_key
+    try:
+        # get_decrypted_key must unpack and decrypt correctly
+        assert await manager.get_decrypted_key(tenant, "openai") == raw_key
 
-    # list_keys must report configured=True with valid masked key
-    keys = await manager.list_keys(tenant)
-    openai_item = next(k for k in keys if k["provider"] == "openai")
-    assert openai_item["configured"] is True
-    assert "1111" in (openai_item["masked_key"] or "")
+        # list_keys must report configured=True with valid masked key
+        keys = await manager.list_keys(tenant)
+        openai_item = next(k for k in keys if k["provider"] == "openai")
+        assert openai_item["configured"] is True
+        assert "1111" in (openai_item["masked_key"] or "")
+    finally:
+        await manager.delete_key(tenant, "openai")
 
 
 @pytest.mark.asyncio
@@ -483,10 +489,50 @@ async def test_byok_corrupt_data_in_store_handled_gracefully():
     tenant = "tenant-corrupt-test"
 
     # Insert corrupt non-decryptable string
-    manager._memory_store.setdefault(tenant, {})["openai"] = "not-a-valid-ciphertext"
+    corrupt_val = "not-a-valid-ciphertext"
+    redis = await manager._get_redis()
+    if redis is not None:
+        await redis.set(f"byok:{tenant}:openai", corrupt_val)
+    manager._memory_store.setdefault(tenant, {})["openai"] = corrupt_val
 
-    keys = await manager.list_keys(tenant)
-    openai_item = next(k for k in keys if k["provider"] == "openai")
-    assert openai_item["configured"] is False
-    assert openai_item["status"] == "corrupt"
-    assert openai_item["masked_key"] == "sk-corrupt"
+    try:
+        keys = await manager.list_keys(tenant)
+        openai_item = next(k for k in keys if k["provider"] == "openai")
+        assert openai_item["configured"] is False
+        assert openai_item["status"] == "corrupt"
+        assert openai_item["masked_key"] == "sk-corrupt"
+    finally:
+        await manager.delete_key(tenant, "openai")
+
+
+@pytest.mark.asyncio
+async def test_byok_redis_fallback_to_memory_when_redis_empty_or_errors():
+    """Verify that when Redis is queried and returns None or errors, manager falls back to _memory_store."""
+    manager = BYOKManager()
+    tenant = "tenant-fallback-test"
+    key = "sk-test-fallback-openai-key-2222"
+
+    # Store only in memory, not in Redis
+    packed = manager._pack_record(
+        ciphertext=manager.encrypt_key(key, tenant),
+        masked_key=manager.mask_key(key),
+        status="active",
+        created_at=None,
+        updated_at=None,
+        last_validated_at=None,
+        validation_status="untested",
+    )
+    manager._memory_store.setdefault(tenant, {})["openai"] = packed
+
+    try:
+        # Ensure get_decrypted_key falls back to memory
+        decrypted = await manager.get_decrypted_key(tenant, "openai")
+        assert decrypted == key
+
+        # Ensure list_keys falls back to memory
+        keys = await manager.list_keys(tenant)
+        openai_item = next(k for k in keys if k["provider"] == "openai")
+        assert openai_item["configured"] is True
+        assert "2222" in (openai_item["masked_key"] or "")
+    finally:
+        await manager.delete_key(tenant, "openai")
