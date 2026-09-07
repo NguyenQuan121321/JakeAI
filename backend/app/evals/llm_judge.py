@@ -55,7 +55,7 @@ class LLMJudge:
 
     def __init__(self, judge_model: str | None = None, seed: int = 42) -> None:
         self.judge_model = judge_model or self.FIXED_JUDGE_MODEL
-        self._rng = random.Random(seed)
+        self._rng = random.Random(seed)  # nosec B311
 
     def create_blinded_pair(
         self, baseline_text: str, optimized_text: str, force_order: str | None = None

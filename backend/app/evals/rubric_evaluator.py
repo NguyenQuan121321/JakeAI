@@ -266,8 +266,9 @@ class RubricEvaluator:
                         clean_cand = clean_cand[:-3].strip()
                 json.loads(clean_cand)
                 checks_passed += 1
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, TypeError):
+                # Invalid JSON syntax does not satisfy JSON-only constraint
+                checks_passed += 0
 
         # Check 4: Brevity/conciseness constraint
         if "concise" in sys_and_query or "briefly" in sys_and_query:
