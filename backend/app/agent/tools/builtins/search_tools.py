@@ -37,8 +37,9 @@ class SearchSymbolsTool(Tool):
     async def execute(
         self,
         arguments: dict[str, Any],
-        _context: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> ToolResult:
+        _ = context
         start_ts = time.time()
         query = arguments.get("query", "").lower()
         max_results = int(arguments.get("max_results", 10))

@@ -36,8 +36,9 @@ class ReadFileTool(Tool):
     async def execute(
         self,
         arguments: dict[str, Any],
-        _context: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> ToolResult:
+        _ = context
         start_ts = time.time()
         raw_path = arguments.get("path", "")
         max_bytes = int(arguments.get("max_bytes", 10000))

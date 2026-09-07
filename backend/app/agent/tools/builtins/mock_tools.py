@@ -31,8 +31,9 @@ class CalculatorTool(Tool):
     async def execute(
         self,
         arguments: dict[str, Any],
-        _context: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> ToolResult:
+        _ = context
         start_ts = time.time()
         expr = arguments.get("expression", "").strip()
 
@@ -79,9 +80,10 @@ class SystemTimeTool(Tool):
 
     async def execute(
         self,
-        _arguments: dict[str, Any],
-        _context: dict[str, Any] | None = None,
+        arguments: dict[str, Any],
+        context: dict[str, Any] | None = None,
     ) -> ToolResult:
+        _ = (arguments, context)
         start_ts = time.time()
         now = datetime.datetime.now(datetime.UTC)
         return ToolResult(
@@ -114,8 +116,9 @@ class MockDangerousShellTool(Tool):
     async def execute(
         self,
         arguments: dict[str, Any],
-        _context: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> ToolResult:
+        _ = context
         start_ts = time.time()
         cmd = arguments.get("command", "")
         # Emulate safe execution of an approved command

@@ -117,6 +117,10 @@ class ApprovalManager:
         """Reset internal store for test isolation."""
         self._approvals.clear()
 
+    # Aliases for interface ergonomics
+    get_pending_approvals = list_pending
+    decide_request = decide
+
 
 _approval_manager: ApprovalManager | None = None
 

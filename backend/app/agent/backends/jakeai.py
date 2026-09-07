@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -81,8 +81,24 @@ class JakeAIBackend(AgentBackendInterface):
                 finish_reason="error",
             )
 
-        telemetry = upstream_resp.telemetry
-        content_text = upstream_resp.text or ""
+        raw_resp: Any = upstream_resp
+        if isinstance(raw_resp, dict):
+            content_text = raw_resp.get("content") or raw_resp.get("text") or ""
+            model = raw_resp.get("model", model_target)
+            provider = raw_resp.get("provider", "jakeai")
+            input_tokens = raw_resp.get("prompt_tokens") or raw_resp.get("input_tokens", 0)
+            output_tokens = raw_resp.get("completion_tokens") or raw_resp.get("output_tokens", 0)
+            cached_tokens = raw_resp.get("cached_tokens", 0)
+            cost_usd = raw_resp.get("cost_usd") or raw_resp.get("actual_cost_usd", 0.0)
+        else:
+            telemetry = getattr(upstream_resp, "telemetry", None)
+            content_text = getattr(upstream_resp, "text", "") or ""
+            model = getattr(upstream_resp, "model", model_target)
+            provider = f"jakeai:{getattr(upstream_resp, 'provider', 'default')}"
+            input_tokens = (telemetry.uncached_input_tokens + telemetry.cached_tokens) if telemetry else 0
+            output_tokens = telemetry.output_tokens if telemetry else 0
+            cached_tokens = telemetry.cached_tokens if telemetry else 0
+            cost_usd = telemetry.actual_cost_usd if telemetry else 0.0
 
         # Parse any structured tool calls from content if presented in JSON blocks
         parsed_tool_calls = self._extract_tool_calls(content_text)
@@ -90,12 +106,12 @@ class JakeAIBackend(AgentBackendInterface):
         return BackendResponse(
             content=content_text,
             tool_calls=parsed_tool_calls,
-            model=upstream_resp.model,
-            provider=f"jakeai:{upstream_resp.provider}",
-            input_tokens=telemetry.uncached_input_tokens + telemetry.cached_tokens,
-            output_tokens=telemetry.output_tokens,
-            cached_tokens=telemetry.cached_tokens,
-            cost_usd=telemetry.actual_cost_usd,
+            model=model,
+            provider=provider,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            cost_usd=cost_usd,
             latency_ms=latency_ms,
             finish_reason="tool_calls" if parsed_tool_calls else "stop",
         )
@@ -127,19 +143,25 @@ class JakeAIBackend(AgentBackendInterface):
         if not text:
             return tool_calls
 
-        # Check for ```json ... ``` or explicit tool_call blocks
-        stripped = text.strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
+        cleaned = text.strip()
+        if "```json" in cleaned:
+            cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+        elif "```" in cleaned:
+            cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+        if cleaned.startswith("{") and cleaned.endswith("}"):
             try:
-                data = json.loads(stripped)
-                if isinstance(data, dict) and "tool" in data and "arguments" in data:
-                    tool_calls.append(
-                        AgentToolCall(
-                            call_id=f"call_{int(time.time() * 1000)}",
-                            tool_name=str(data["tool"]),
-                            arguments=data.get("arguments") or {},
+                data = json.loads(cleaned)
+                if isinstance(data, dict):
+                    tool_name = data.get("tool_name") or data.get("tool") or data.get("name")
+                    if tool_name and (data.get("action") == "tool_call" or "arguments" in data):
+                        tool_calls.append(
+                            AgentToolCall(
+                                call_id=f"call_{int(time.time() * 1000)}",
+                                tool_name=str(tool_name),
+                                arguments=data.get("arguments") or {},
+                            )
                         )
-                    )
             except Exception:
                 pass
         return tool_calls
