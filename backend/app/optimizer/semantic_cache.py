@@ -22,12 +22,37 @@ except ImportError:
     redis = None  # type: ignore[assignment]
 
 
+class CacheMetrics(BaseModel):
+    """Telemetry tracking for exact and semantic cache layers."""
+
+    total_requests: int = 0
+    exact_hits: int = 0
+    semantic_hits: int = 0
+    misses: int = 0
+    tokens_avoided: int = 0
+    cost_avoided_usd: float = 0.0
+
+    @property
+    def total_hits(self) -> int:
+        return self.exact_hits + self.semantic_hits
+
+    @property
+    def hit_rate_pct(self) -> float:
+        if self.total_requests == 0:
+            return 0.0
+        return round((self.total_hits / self.total_requests) * 100.0, 2)
+
+
 class SemanticCacheEntry(BaseModel):
     """Cached response item with retrieval metadata."""
 
     prompt: str
     response: str
     tenant_id: str
+    model: str = "default"
+    provider: str = "generic"
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    version: str = "v1.0"
     citations: list[dict[str, Any]] = Field(default_factory=list)
     mascot_state: str = "idle"
     similarity_score: float = 1.0
@@ -35,17 +60,25 @@ class SemanticCacheEntry(BaseModel):
     cached_at: float = Field(default_factory=time.time)
     ttl_seconds: int = 3600
     vector: list[float] = Field(default_factory=list)
+    tokens_avoided: int = 0
+    cost_avoided_usd: float = 0.0
 
 
-def _compute_hash(text: str, tenant_id: str) -> str:
-    """Compute deterministic SHA-256 hash for normalized prompt and tenant.
+def _compute_hash(
+    text: str,
+    tenant_id: str,
+    model: str = "default",
+    provider: str = "generic",
+    version: str = "v1.0",
+) -> str:
+    """Compute deterministic SHA-256 hash for normalized prompt, tenant, and model.
 
     Applies Unicode NFC normalization, lowercase conversion, and single-space
     collapsing to guarantee exact cross-language hash parity with FinnApiGo (Go).
     """
     nfc_text = unicodedata.normalize("NFC", text.strip().lower())
     normalized = re.sub(r"\s+", " ", nfc_text)
-    payload = f"{tenant_id}:{normalized}".encode()
+    payload = f"{tenant_id}:{provider}:{model}:{version}:{normalized}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -99,6 +132,24 @@ class SemanticCacheManager:
         self._memory_exact: dict[str, SemanticCacheEntry] = {}
         self._memory_vectors: dict[str, list[SemanticCacheEntry]] = {}
         self._redis_available: bool = True
+        self.metrics = CacheMetrics()
+
+    def get_metrics(self) -> dict[str, Any]:
+        """Return snapshot of cache performance metrics."""
+        return {
+            "total_requests": self.metrics.total_requests,
+            "exact_hits": self.metrics.exact_hits,
+            "semantic_hits": self.metrics.semantic_hits,
+            "total_hits": self.metrics.total_hits,
+            "misses": self.metrics.misses,
+            "hit_rate_pct": self.metrics.hit_rate_pct,
+            "tokens_avoided": self.metrics.tokens_avoided,
+            "cost_avoided_usd": round(self.metrics.cost_avoided_usd, 6),
+        }
+
+    def reset_metrics(self) -> None:
+        """Reset cache telemetry counters."""
+        self.metrics = CacheMetrics()
 
     async def _get_redis(self) -> Any | None:
         """Lazily initialize Redis connection if available with connection verification."""
@@ -125,9 +176,21 @@ class SemanticCacheManager:
             self._redis_available = False
             return None
 
-    async def get(self, prompt: str, tenant_id: str) -> SemanticCacheEntry | None:
-        """Query cache for exact or semantic matches for the given tenant."""
-        exact_key = _compute_hash(prompt, tenant_id)
+    async def get(
+        self,
+        prompt: str,
+        tenant_id: str,
+        model: str = "default",
+        provider: str = "generic",
+        parameters: dict[str, Any] | None = None,
+        version: str = "v1.0",
+    ) -> SemanticCacheEntry | None:
+        """Query cache for exact or semantic matches with model/tenant boundaries."""
+        _ = parameters
+        self.metrics.total_requests += 1
+        exact_key = _compute_hash(
+            prompt, tenant_id, model=model, provider=provider, version=version
+        )
         now = time.time()
 
         # 1. Tier 1: Check Exact Match in Redis
@@ -138,9 +201,21 @@ class SemanticCacheManager:
                 if raw_data:
                     data = json.loads(raw_data)
                     entry = SemanticCacheEntry(**data)
-                    entry.cache_type = "exact"
-                    entry.similarity_score = 1.0
-                    return entry
+                    if (
+                        entry.model == model
+                        or model == "default"
+                        or entry.model == "default"
+                    ) and (
+                        entry.provider == provider
+                        or provider == "generic"
+                        or entry.provider == "generic"
+                    ):
+                        entry.cache_type = "exact"
+                        entry.similarity_score = 1.0
+                        self.metrics.exact_hits += 1
+                        self.metrics.tokens_avoided += entry.tokens_avoided
+                        self.metrics.cost_avoided_usd += entry.cost_avoided_usd
+                        return entry
             except Exception:
                 self._redis_available = False
 
@@ -148,10 +223,23 @@ class SemanticCacheManager:
         if exact_key in self._memory_exact:
             entry = self._memory_exact[exact_key]
             if (now - entry.cached_at) <= entry.ttl_seconds:
-                entry.cache_type = "exact"
-                entry.similarity_score = 1.0
-                return entry
-            del self._memory_exact[exact_key]
+                if (
+                    entry.model == model
+                    or model == "default"
+                    or entry.model == "default"
+                ) and (
+                    entry.provider == provider
+                    or provider == "generic"
+                    or entry.provider == "generic"
+                ):
+                    entry.cache_type = "exact"
+                    entry.similarity_score = 1.0
+                    self.metrics.exact_hits += 1
+                    self.metrics.tokens_avoided += entry.tokens_avoided
+                    self.metrics.cost_avoided_usd += entry.cost_avoided_usd
+                    return entry
+            else:
+                del self._memory_exact[exact_key]
 
         # 2. Tier 2: Semantic Vector Cosine Similarity Search
         query_vec = _generate_synthetic_embedding(prompt)
@@ -165,6 +253,18 @@ class SemanticCacheManager:
             if (now - entry.cached_at) > entry.ttl_seconds:
                 continue
             valid_entries.append(entry)
+            # Strict Model/Provider Compatibility Guardrail
+            if entry.model != model and model != "default" and entry.model != "default":
+                continue
+            if (
+                entry.provider != provider
+                and provider != "generic"
+                and entry.provider != "generic"
+            ):
+                continue
+            if entry.version != version:
+                continue
+
             sim = _cosine_similarity(query_vec, entry.vector)
             if sim > best_similarity:
                 best_similarity = sim
@@ -173,11 +273,17 @@ class SemanticCacheManager:
         self._memory_vectors[tenant_id] = valid_entries
 
         if best_match is not None and best_similarity >= self.similarity_threshold:
-            # Construct matched entry copy with semantic cache metadata
+            self.metrics.semantic_hits += 1
+            self.metrics.tokens_avoided += best_match.tokens_avoided
+            self.metrics.cost_avoided_usd += best_match.cost_avoided_usd
             return SemanticCacheEntry(
                 prompt=best_match.prompt,
                 response=best_match.response,
                 tenant_id=tenant_id,
+                model=best_match.model,
+                provider=best_match.provider,
+                parameters=best_match.parameters,
+                version=best_match.version,
                 citations=best_match.citations,
                 mascot_state=best_match.mascot_state,
                 similarity_score=round(best_similarity, 4),
@@ -185,8 +291,11 @@ class SemanticCacheManager:
                 cached_at=best_match.cached_at,
                 ttl_seconds=best_match.ttl_seconds,
                 vector=best_match.vector,
+                tokens_avoided=best_match.tokens_avoided,
+                cost_avoided_usd=best_match.cost_avoided_usd,
             )
 
+        self.metrics.misses += 1
         return None
 
     async def set(
@@ -197,16 +306,28 @@ class SemanticCacheManager:
         citations: list[dict[str, Any]] | None = None,
         mascot_state: str = "idle",
         ttl_seconds: int | None = None,
+        model: str = "default",
+        provider: str = "generic",
+        parameters: dict[str, Any] | None = None,
+        version: str = "v1.0",
+        tokens_avoided: int = 0,
+        cost_avoided_usd: float = 0.0,
     ) -> SemanticCacheEntry:
         """Store prompt and response in both exact and semantic cache tiers."""
         ttl = ttl_seconds or self.default_ttl
-        exact_key = _compute_hash(prompt, tenant_id)
+        exact_key = _compute_hash(
+            prompt, tenant_id, model=model, provider=provider, version=version
+        )
         vector = _generate_synthetic_embedding(prompt)
 
         entry = SemanticCacheEntry(
             prompt=prompt,
             response=response,
             tenant_id=tenant_id,
+            model=model,
+            provider=provider,
+            parameters=parameters or {},
+            version=version,
             citations=citations or [],
             mascot_state=mascot_state,
             similarity_score=1.0,
@@ -214,6 +335,8 @@ class SemanticCacheManager:
             cached_at=time.time(),
             ttl_seconds=ttl,
             vector=vector,
+            tokens_avoided=tokens_avoided,
+            cost_avoided_usd=cost_avoided_usd,
         )
 
         # 1. Write Exact Match to Redis

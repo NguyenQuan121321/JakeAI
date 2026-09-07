@@ -185,12 +185,13 @@ class PromptCompiler:
         user_query: str = "",
         dynamic_context: str = "",
         prompt_version: str | None = None,
+        version: str | None = None,
         min_cache_tokens: int | None = None,
         model: str = "default",
         tenant_id: str = "default",
     ) -> PromptEnvelope:
         """Compile separate static components into Zone 1 and dynamic components into Zone 2."""
-        version = prompt_version or self.default_version
+        effective_version = version or prompt_version or self.default_version
         policy = get_provider_cache_policy(model)
         min_tokens = (
             min_cache_tokens
@@ -232,7 +233,7 @@ class PromptCompiler:
 
         # Metrics & Fingerprinting
         static_hash = self.compute_prefix_hash(
-            zone1, version=version, tenant_id=tenant_id
+            zone1, version=effective_version, tenant_id=tenant_id
         )
         static_tokens = estimate_tokens(zone1) if zone1 else 0
         dynamic_tokens = estimate_tokens(zone2) if zone2 else 0
@@ -251,7 +252,7 @@ class PromptCompiler:
             static_token_count=static_tokens,
             dynamic_token_count=dynamic_tokens,
             total_token_count=total_tokens,
-            version=version,
+            version=effective_version,
             is_cache_eligible=is_eligible,
             metadata={
                 "contamination_detected": bool(contamination_warnings),

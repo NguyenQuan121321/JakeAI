@@ -10,8 +10,14 @@ from app.optimizer.bpe_tokenizer import (
     ContextBudgetExceededError,
     get_bpe_tokenizer,
 )
+from app.optimizer.code_context_compressor import (
+    CodeCompressionResult,
+    CodeContextCompressor,
+    get_code_context_compressor,
+)
 from app.optimizer.context_optimizer import (
     ContextOptimizer,
+    WorkloadType,
     get_context_optimizer,
 )
 from app.optimizer.contracts import (
@@ -56,7 +62,13 @@ from app.optimizer.provider_pricing import (
     get_model_pricing,
     measure_cost,
 )
+from app.optimizer.retrieval_compressor import (
+    RetrievalCompressionResult,
+    RetrievalCompressor,
+    get_retrieval_compressor,
+)
 from app.optimizer.semantic_cache import (
+    CacheMetrics,
     SemanticCacheEntry,
     SemanticCacheManager,
     get_semantic_cache_manager,
@@ -82,7 +94,10 @@ __all__ = [
     "ASTSkeletonTransformResult",
     "AnthropicPromptCacheAdapter",
     "BPETokenizer",
+    "CacheMetrics",
     "CacheMissReason",
+    "CodeCompressionResult",
+    "CodeContextCompressor",
     "CodeSkeletonizer",
     "CompiledPrompt",
     "ContaminationError",
@@ -110,6 +125,8 @@ __all__ = [
     "ProviderCostBreakdown",
     "ProviderPromptCacheAdapter",
     "PrunedResult",
+    "RetrievalCompressionResult",
+    "RetrievalCompressor",
     "SemanticCacheEntry",
     "SemanticCacheManager",
     "TokenAccounting",
@@ -117,10 +134,12 @@ __all__ = [
     "TokenMetrics",
     "TokenUsageRecord",
     "TwoZonePromptCompiler",
+    "WorkloadType",
     "calculate_provider_costs",
     "estimate_tokens",
     "evaluate_cache_eligibility",
     "get_bpe_tokenizer",
+    "get_code_context_compressor",
     "get_code_skeletonizer",
     "get_context_optimizer",
     "get_cross_tier_pipeline",
@@ -128,6 +147,7 @@ __all__ = [
     "get_prompt_compiler",
     "get_provider_adapter",
     "get_provider_cache_policy",
+    "get_retrieval_compressor",
     "get_semantic_cache_manager",
     "get_token_pruner",
     "get_two_zone_compiler",

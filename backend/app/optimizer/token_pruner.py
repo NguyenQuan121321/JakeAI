@@ -9,6 +9,7 @@ Reduces LLM input token consumption by 25-45% on RAG context through:
 
 from __future__ import annotations
 
+import json
 import re
 from typing import NamedTuple
 
@@ -28,19 +29,58 @@ BOILERPLATE_PATTERNS = [
     ),
 ]
 
-NUMERICAL_ENTITY_REGEX = re.compile(
-    r"\$?\d+(?:[.,]\d+)?%?|\b(?:q[1-4]|fy\d{2,4})\b", re.IGNORECASE
+# Comprehensive protection for numbers, currencies, dates, citations, and symbols
+PROTECTED_ENTITY_REGEX = re.compile(
+    r"("
+    r"[\$€£¥₫]\s*\d+(?:[.,]\d+)?(?:\s*(?:billion|million|trillion|tỷ|triệu|k|m|b))?"  # Currencies
+    r"|\d+(?:[.,]\d+)?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ\s*VNĐ|triệu\s*VNĐ|tỷ|triệu|seats|authorized\s*seats|%)"  # Units/percentages
+    r"|\b(?:q[1-4]|fy\d{2,4}|quý\s+[1-4])(?:\s*năm\s*\d{4}|/\d{2,4})?\b"  # Quarters / Fiscal years
+    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b"  # Textual dates
+    r"|\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"  # ISO dates
+    r"|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"  # Conventional dates
+    r"|\[(?:SEC|DOC|P|REF|CHUNK|EXCERPT)[^\]]+\]"  # Citation tags e.g. [SEC-Q3-P14]
+    r"|\b[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+\b"  # Dotted code identifiers (hmac.compare_digest)
+    r"|\b[a-zA-Z0-9_-]+\.(?:internal|com|org|net|io)\b"  # Domain/host identifiers
+    r"|\b\d+(?:[.,]\d+)?\b"  # Raw numbers & decimals
+    r")",
+    re.IGNORECASE,
 )
+
+# Backward-compatible alias
+NUMERICAL_ENTITY_REGEX = PROTECTED_ENTITY_REGEX
+
+
+def is_structured_json(text: str) -> bool:
+    """Check if input text is valid structured JSON."""
+    stripped = text.strip()
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
+        try:
+            json.loads(stripped)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def compact_json(text: str) -> str:
+    """Safely compact structured JSON without modifying schema or values."""
+    try:
+        data = json.loads(text.strip())
+        return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+    except Exception:
+        return text
 
 
 def estimate_tokens(text: str) -> int:
     """Calibrated token counter matching BPE token distributions (GPT/Gemini).
 
-    Accurately accounts for words and standalone punctuation symbols.
+    Accurately accounts for words, standalone punctuation symbols, and newline/indent tokens.
     """
     if not text:
         return 0
-    tokens = re.findall(r"\w+|[^\w\s]", text)
+    tokens = re.findall(r"\w+|[^\w\s]|\n|[ ]{2,}", text)
     return max(1, len(tokens))
 
 
@@ -127,21 +167,52 @@ class HeuristicTokenPruner:
                 compression_ratio=0.0,
             )
 
+        if is_structured_json(raw_text):
+            compacted = compact_json(raw_text)
+            comp_tokens = estimate_tokens(compacted)
+            tokens_saved = max(0, original_tokens - comp_tokens)
+            compression_ratio = (
+                round((tokens_saved / original_tokens) * 100, 2)
+                if original_tokens > 0
+                else 0.0
+            )
+            return PrunedResult(
+                original_text=raw_text,
+                pruned_text=compacted,
+                original_tokens=original_tokens,
+                pruned_tokens=comp_tokens,
+                tokens_saved=tokens_saved,
+                compression_ratio=compression_ratio,
+            )
+
         cleaned_text = self._clean_boilerplate(raw_text)
-        sentences = self._split_sentences(cleaned_text)
+
+        # Protect markdown code blocks from sentence fragmentation
+        code_blocks: list[str] = []
+
+        def _stash_code(match: re.Match[str]) -> str:
+            idx = len(code_blocks)
+            code_blocks.append(match.group(0))
+            return f"__CODE_BLOCK_PLACEHOLDER_{idx}__"
+
+        text_to_split = re.sub(r"```[\s\S]*?```", _stash_code, cleaned_text)
+        sentences = self._split_sentences(text_to_split)
 
         kept_sentences: list[str] = []
         seen_token_sets: list[SentenceTokenInfo] = []
 
         for sent in sentences:
+            has_placeholder = "__CODE_BLOCK_PLACEHOLDER_" in sent
             # Check length
-            if len(sent) < self.min_sentence_len and not NUMERICAL_ENTITY_REGEX.search(
-                sent
+            if (
+                len(sent) < self.min_sentence_len
+                and not NUMERICAL_ENTITY_REGEX.search(sent)
+                and not has_placeholder
             ):
                 continue
 
             words = set(re.findall(r"\b[a-zA-Z0-9_\$]{2,}\b", sent.lower()))
-            has_numerical = bool(NUMERICAL_ENTITY_REGEX.search(sent))
+            has_numerical = bool(NUMERICAL_ENTITY_REGEX.search(sent)) or has_placeholder
 
             # Deduplication against previously kept sentences
             is_duplicate = False
@@ -164,6 +235,12 @@ class HeuristicTokenPruner:
                 )
 
         pruned_text = " ".join(kept_sentences)
+        # Restore stashed code blocks intact
+        for idx, block in enumerate(code_blocks):
+            pruned_text = pruned_text.replace(
+                f"__CODE_BLOCK_PLACEHOLDER_{idx}__", block
+            )
+
         pruned_tokens = estimate_tokens(pruned_text)
         tokens_saved = max(0, original_tokens - pruned_tokens)
         compression_ratio = (

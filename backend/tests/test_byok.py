@@ -536,3 +536,14 @@ async def test_byok_redis_fallback_to_memory_when_redis_empty_or_errors():
         assert "2222" in (openai_item["masked_key"] or "")
     finally:
         await manager.delete_key(tenant, "openai")
+
+
+@pytest.mark.asyncio
+async def test_byok_unpack_corrupt_json_structure():
+    """Verify that corrupt JSON within braces triggers safe fallback and debug logging."""
+    manager = BYOKManager()
+    # String starting with { and ending with } but invalid JSON syntax
+    corrupt_json = "{not: valid, json: syntax}"
+    res = manager._unpack_record(corrupt_json, "tenant-test")
+    assert res["status"] == "corrupt"
+    assert res["masked_key"] == "sk-corrupt"

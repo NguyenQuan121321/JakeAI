@@ -50,6 +50,10 @@ class RoutingPolicy(BaseModel):
     disallowed_providers: list[str] = Field(
         default_factory=list, description="Blacklist of provider names"
     )
+    cost_aware_routing: bool = Field(
+        default=False,
+        description="Enable minimum cost routing subject to quality constraints",
+    )
 
 
 class RoutingDecision(BaseModel):
@@ -65,6 +69,7 @@ class RoutingDecision(BaseModel):
     decision_reasons: list[str] = Field(default_factory=list)
     estimated_input_cost: float = 0.0
     estimated_output_cost: float = 0.0
+    cost_savings_usd_per_million: float = 0.0
     is_observable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,6 +82,7 @@ class RoutingDecision(BaseModel):
             "decision_reasons": self.decision_reasons,
             "estimated_input_cost": self.estimated_input_cost,
             "estimated_output_cost": self.estimated_output_cost,
+            "cost_savings_usd_per_million": self.cost_savings_usd_per_million,
         }
 
 
@@ -146,7 +152,26 @@ class ModelRouter:
                         f"Re-routed to reasoning model '{selected_model}' under '{provider_name}'"
                     )
 
-        # 5. Cost budget check
+        initial_cap = cap
+
+        # 5. Cost-Aware Model Routing (Phase 03 Section 2 Layer 8)
+        if (
+            (policy.cost_aware_routing or policy.workload_class == "simple_chat")
+            and policy.workload_class == "simple_chat"
+            and cap.input_pricing > 0.50
+        ):
+            if provider_name == "openai" and "mini" not in selected_model:
+                selected_model = "gpt-4o-mini"
+            elif provider_name == "anthropic" and "haiku" not in selected_model:
+                selected_model = "claude-3-haiku"
+            elif provider_name == "gemini" and "flash" not in selected_model:
+                selected_model = "gemini-1.5-flash"
+            cap = ModelCapabilityCatalog.get(selected_model, provider=provider_name)
+            reasons.append(
+                f"Cost-Aware Routing: Workload 'simple_chat' meets quality threshold under cost-optimized model '{selected_model}' (${cap.input_pricing}/M)"
+            )
+
+        # 6. Cost budget check
         if (
             policy.max_input_cost_per_million is not None
             and cap.input_pricing > policy.max_input_cost_per_million
@@ -166,7 +191,7 @@ class ModelRouter:
                 f"Down-tiered to cost-compliant model '{selected_model}' (${cap.input_pricing}/M)"
             )
 
-        # 6. Build Cross-Provider Fallback Chain
+        # 7. Build Cross-Provider Fallback Chain
         fallback_chain: list[tuple[str, str]] = []
         if policy.allow_fallback:
             if provider_name == "anthropic":
@@ -212,6 +237,8 @@ class ModelRouter:
             f"Final routing choice: '{provider_name}' using model '{selected_model}'"
         )
 
+        cost_savings = max(0.0, initial_cap.input_pricing - cap.input_pricing)
+
         return RoutingDecision(
             selected_provider=provider_name,
             selected_model=selected_model,
@@ -220,6 +247,7 @@ class ModelRouter:
             decision_reasons=reasons,
             estimated_input_cost=cap.input_pricing,
             estimated_output_cost=cap.output_pricing,
+            cost_savings_usd_per_million=cost_savings,
             is_observable=True,
         )
 
