@@ -82,7 +82,16 @@ class FailoverManager:
         last_error: ProviderError | None = None
         total_attempts = 0
 
-        for provider_name, model_name in providers_to_try:
+        from app.telemetry.metrics import metrics
+
+        for idx, (provider_name, model_name) in enumerate(providers_to_try):
+            if idx > 0 and last_error is not None:
+                metrics.record_failover(
+                    from_provider=providers_to_try[idx - 1][0],
+                    to_provider=provider_name,
+                    reason=last_error.category.value,
+                )
+
             if total_attempts >= self.config.max_total_attempts:
                 logger.warning(
                     "Failover ceiling reached (%d attempts). Aborting fallback chain.",

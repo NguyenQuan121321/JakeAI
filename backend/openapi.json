@@ -28,6 +28,50 @@
         }
       }
     },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Root Liveness Probe",
+        "description": "Direct container liveness probe.",
+        "operationId": "check_liveness_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Root Readiness Probe",
+        "description": "Direct container readiness probe.",
+        "operationId": "check_readiness_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -37,6 +81,52 @@
         "summary": "Service Health Probe",
         "description": "Returns service health status, environment, and uptime metrics.",
         "operationId": "check_health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "tags": [
+          "Health",
+          "Health"
+        ],
+        "summary": "Liveness Probe",
+        "description": "Container liveness probe verifying process is responsive.",
+        "operationId": "check_liveness_api_v1_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "tags": [
+          "Health",
+          "Health"
+        ],
+        "summary": "Readiness Probe",
+        "description": "Container readiness probe verifying core dependencies are responsive.",
+        "operationId": "check_readiness_api_v1_health_ready_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -754,13 +844,14 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "OpenAI-compatible chat completion JSON object or Server-Sent Events stream",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GatewayChatResponse"
                 }
-              }
+              },
+              "text/event-stream": {}
             }
           },
           "422": {
@@ -984,6 +1075,33 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AnalyticsDashboard"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/analytics/metrics": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Runtime Metrics",
+        "description": "Retrieve fine-grained runtime platform telemetry and operational metrics.",
+        "operationId": "get_runtime_metrics_api_v1_analytics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsSnapshot"
                 }
               }
             }
@@ -1380,13 +1498,14 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "OpenAI-compatible chat completion JSON object or Server-Sent Events stream",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GatewayChatResponse"
                 }
-              }
+              },
+              "text/event-stream": {}
             }
           },
           "422": {
@@ -2708,6 +2827,14 @@
             "type": "number",
             "title": "Uptime Seconds",
             "description": "Total application uptime in seconds"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Components",
+            "description": "Operational status of platform components"
           }
         },
         "type": "object",
@@ -2908,6 +3035,100 @@
         ],
         "title": "InternalResumeSubmission",
         "description": "Payload routed internally by FinnApiGo edge gateway."
+      },
+      "MetricsSnapshot": {
+        "properties": {
+          "timestamp": {
+            "type": "number",
+            "title": "Timestamp"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds",
+            "default": 0.0
+          },
+          "http_requests_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Http Requests Total"
+          },
+          "http_request_duration_ms_avg": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Http Request Duration Ms Avg"
+          },
+          "provider_requests_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Provider Requests Total"
+          },
+          "provider_latency_ms_avg": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Provider Latency Ms Avg"
+          },
+          "provider_errors_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Provider Errors Total"
+          },
+          "active_streams": {
+            "type": "integer",
+            "title": "Active Streams",
+            "default": 0
+          },
+          "stream_cancellations_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Stream Cancellations Total"
+          },
+          "stream_duration_ms_avg": {
+            "type": "number",
+            "title": "Stream Duration Ms Avg",
+            "default": 0.0
+          },
+          "cache_operations_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Cache Operations Total"
+          },
+          "failover_events_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Failover Events Total"
+          },
+          "tokens_consumed_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Tokens Consumed Total"
+          },
+          "estimated_cost_usd_total": {
+            "type": "number",
+            "title": "Estimated Cost Usd Total",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "title": "MetricsSnapshot",
+        "description": "Structured snapshot of active platform metrics."
       },
       "ModelItem": {
         "properties": {

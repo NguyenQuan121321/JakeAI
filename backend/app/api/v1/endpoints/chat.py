@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
 from app.agents import stream_multi_agent_workflow
+from app.core.config import get_settings
 from app.core.context import TenantContext
 from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
@@ -19,6 +20,8 @@ from app.guardrails import GuardrailsEngine
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
+from app.providers.errors import sanitize_error_message
+from app.telemetry.metrics import metrics
 
 router = APIRouter()
 
@@ -84,10 +87,13 @@ async def generate_chat_stream(
 ) -> AsyncGenerator[str, None]:
     """Stream real-time LangGraph multi-agent events via SSE with guardrails & caching."""
     start_time = time.time()
+    settings = get_settings()
+    metrics.stream_started()
 
     # 1. Perimeter Input Guardrail Check
     guard_decision = GuardrailsEngine.inspect_input(prompt)
     if not guard_decision.allowed:
+        metrics.stream_completed(round((time.time() - start_time) * 1000, 2))
         yield _format_sse_event(
             "error",
             {
@@ -101,6 +107,9 @@ async def generate_chat_stream(
 
     # 2. PII Redaction
     sanitized_prompt, _ = GuardrailsEngine.redact_pii(prompt)
+    raw_prompt_tokens = estimate_tokens(sanitized_prompt)
+    final_response: str = ""
+    accounting_recorded = False
 
     try:
         # 3. Initial Handshake & Context Acknowledgment
@@ -139,6 +148,9 @@ async def generate_chat_stream(
             words = cached_entry.response.split(" ")
             for i, word in enumerate(words):
                 if request and await request.is_disconnected():
+                    metrics.record_stream_cancellation(
+                        "/api/v1/chat/stream", reason="client_disconnect"
+                    )
                     return
                 delta = word if i == 0 else f" {word}"
                 yield _format_sse_event(
@@ -152,22 +164,22 @@ async def generate_chat_stream(
                 )
                 await asyncio.sleep(0.002)
 
-            raw_tokens = estimate_tokens(sanitized_prompt)
             est_comp = max(1, estimate_tokens(cached_entry.response))
             record = TokenAccounting.record_transaction(
                 request_id=f"stream-{conversation_id}",
                 tenant_id=context.tenant_id,
                 model="stream",
-                raw_prompt_tokens=raw_tokens,
+                raw_prompt_tokens=raw_prompt_tokens,
                 pruned_prompt_tokens=0,
                 completion_tokens=est_comp,
                 cache_hit=True,
                 cache_type=cached_entry.cache_type or "exact",
             )
+            accounting_recorded = True
             yield _format_sse_event(
                 "telemetry",
                 {
-                    "baseline_tokens": raw_tokens + est_comp,
+                    "baseline_tokens": raw_prompt_tokens + est_comp,
                     "billed_tokens": record.actual_billed_tokens,
                     "tokens_saved": record.tokens_saved,
                     "reduction_rate": round(record.reduction_percentage / 100.0, 4),
@@ -176,6 +188,7 @@ async def generate_chat_stream(
             )
 
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            metrics.stream_completed(elapsed_ms)
             yield _format_sse_event(
                 "done",
                 {
@@ -189,17 +202,50 @@ async def generate_chat_stream(
             )
             return
 
-        final_response: str = ""
         citations: list[dict[str, Any]] = []
         final_mascot_state: str = "idle"
-
         has_tool_execution = False
+
         # 5. Real-time LangGraph Event Stream
         async for event in stream_multi_agent_workflow(
             sanitized_prompt, context, conversation_id
         ):
-            # Check if client disconnected to prevent wasted compute
+            # Check for Bounded Stream Timeout
+            if (time.time() - start_time) > settings.STREAM_TIMEOUT_SECONDS:
+                yield _format_sse_event(
+                    "error",
+                    {
+                        "conversation_id": conversation_id,
+                        "error": "Stream timeout",
+                        "detail": f"Stream exceeded maximum duration of {settings.STREAM_TIMEOUT_SECONDS}s",
+                        "mascot_state": "alert",
+                    },
+                )
+                metrics.record_stream_cancellation(
+                    "/api/v1/chat/stream", reason="stream_timeout"
+                )
+                return
+
+            # Check if client disconnected to prevent wasted compute & finalize accounting
             if request and await request.is_disconnected():
+                metrics.record_stream_cancellation(
+                    "/api/v1/chat/stream", reason="client_disconnect"
+                )
+                if not accounting_recorded:
+                    comp_tokens = (
+                        max(1, estimate_tokens(final_response)) if final_response else 0
+                    )
+                    TokenAccounting.record_transaction(
+                        request_id=f"stream-{conversation_id}",
+                        tenant_id=context.tenant_id,
+                        model="stream",
+                        raw_prompt_tokens=raw_prompt_tokens,
+                        pruned_prompt_tokens=raw_prompt_tokens,
+                        completion_tokens=comp_tokens,
+                        cache_hit=False,
+                        cache_type="none",
+                    )
+                    accounting_recorded = True
                 return
 
             node = event.get("node")
@@ -255,6 +301,22 @@ async def generate_chat_stream(
             words = final_response.split(" ")
             for i, word in enumerate(words):
                 if request and await request.is_disconnected():
+                    metrics.record_stream_cancellation(
+                        "/api/v1/chat/stream", reason="client_disconnect"
+                    )
+                    if not accounting_recorded:
+                        comp_tokens = max(1, estimate_tokens(" ".join(words[: i + 1])))
+                        TokenAccounting.record_transaction(
+                            request_id=f"stream-{conversation_id}",
+                            tenant_id=context.tenant_id,
+                            model="stream",
+                            raw_prompt_tokens=raw_prompt_tokens,
+                            pruned_prompt_tokens=raw_prompt_tokens,
+                            completion_tokens=comp_tokens,
+                            cache_hit=False,
+                            cache_type="none",
+                        )
+                        accounting_recorded = True
                     return
                 delta = word if i == 0 else f" {word}"
                 yield _format_sse_event(
@@ -269,22 +331,22 @@ async def generate_chat_stream(
                 await asyncio.sleep(0.002)
 
         # 7. Telemetry & Token Optimization Frame
-        raw_tokens = estimate_tokens(sanitized_prompt)
         comp_tokens = max(1, estimate_tokens(final_response)) if final_response else 10
         record = TokenAccounting.record_transaction(
             request_id=f"stream-{conversation_id}",
             tenant_id=context.tenant_id,
             model="stream",
-            raw_prompt_tokens=raw_tokens,
-            pruned_prompt_tokens=raw_tokens,
+            raw_prompt_tokens=raw_prompt_tokens,
+            pruned_prompt_tokens=raw_prompt_tokens,
             completion_tokens=comp_tokens,
             cache_hit=False,
             cache_type="none",
         )
+        accounting_recorded = True
         yield _format_sse_event(
             "telemetry",
             {
-                "baseline_tokens": raw_tokens + comp_tokens,
+                "baseline_tokens": raw_prompt_tokens + comp_tokens,
                 "billed_tokens": record.actual_billed_tokens,
                 "tokens_saved": record.tokens_saved,
                 "reduction_rate": round(record.reduction_percentage / 100.0, 4),
@@ -293,6 +355,7 @@ async def generate_chat_stream(
 
         # 8. Stream Completion Frame with Mascot State
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        metrics.stream_completed(elapsed_ms)
         yield _format_sse_event(
             "done",
             {
@@ -304,15 +367,35 @@ async def generate_chat_stream(
             },
         )
     except asyncio.CancelledError:
-        # Client aborted connection
+        # Client aborted connection: finalize partial token accounting and record telemetry
+        metrics.record_stream_cancellation(
+            "/api/v1/chat/stream", reason="client_disconnect"
+        )
+        if not accounting_recorded:
+            comp_tokens = (
+                max(1, estimate_tokens(final_response)) if final_response else 1
+            )
+            TokenAccounting.record_transaction(
+                request_id=f"stream-{conversation_id}",
+                tenant_id=context.tenant_id,
+                model="stream",
+                raw_prompt_tokens=raw_prompt_tokens,
+                pruned_prompt_tokens=raw_prompt_tokens,
+                completion_tokens=comp_tokens,
+                cache_hit=False,
+                cache_type="none",
+            )
+            accounting_recorded = True
         return
     except Exception as exc:
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        metrics.stream_completed(elapsed_ms)
         yield _format_sse_event(
             "error",
             {
                 "conversation_id": conversation_id,
                 "error": "Error during multi-agent workflow execution",
-                "detail": str(exc),
+                "detail": sanitize_error_message(str(exc)),
                 "mascot_state": "alert",
             },
         )

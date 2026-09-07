@@ -129,12 +129,32 @@ async def call_upstream_llm_detailed(
     decision = router.route(routing_policy)
     failover_mgr = get_failover_manager()
 
+    from app.telemetry.metrics import metrics
+
+    timeout = httpx.Timeout(
+        connect=5.0,
+        read=settings.PROVIDER_TIMEOUT_SECONDS,
+        write=10.0,
+        pool=5.0,
+    )
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await failover_mgr.execute_with_failover(
                 request=provider_req,
                 decision=decision,
                 client=client,
+            )
+
+            metrics.record_provider_request(
+                provider=resp.provider,
+                model=resp.model,
+                status="success",
+                duration_ms=resp.telemetry.latency_ms,
+                prompt_tokens=resp.telemetry.uncached_input_tokens
+                + resp.telemetry.cached_tokens,
+                completion_tokens=resp.telemetry.output_tokens,
+                cost_usd=resp.telemetry.actual_cost_usd,
             )
 
             return UpstreamLLMResponse(
@@ -144,6 +164,12 @@ async def call_upstream_llm_detailed(
                 telemetry=resp.telemetry,
             )
     except Exception as exc:
+        metrics.record_provider_request(
+            provider=decision.selected_provider,
+            model=decision.selected_model,
+            status="error",
+            duration_ms=0.0,
+        )
         logger.debug("Provider dispatch failed via failover manager: %s", exc)
         return None
 

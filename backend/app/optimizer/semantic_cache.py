@@ -132,6 +132,7 @@ class SemanticCacheManager:
         self._memory_exact: dict[str, SemanticCacheEntry] = {}
         self._memory_vectors: dict[str, list[SemanticCacheEntry]] = {}
         self._redis_available: bool = True
+        self._redis_retry_after: float = 0.0
         self.metrics = CacheMetrics()
 
     def get_metrics(self) -> dict[str, Any]:
@@ -152,10 +153,11 @@ class SemanticCacheManager:
         self.metrics = CacheMetrics()
 
     async def _get_redis(self) -> Any | None:
-        """Lazily initialize Redis connection if available with connection verification."""
+        """Lazily initialize Redis connection if available with connection verification and cooldown."""
         if self.redis_client is not None:
             return self.redis_client
-        if not self._redis_available:
+        now = time.time()
+        if not self._redis_available and now < self._redis_retry_after:
             return None
         try:
             import redis.asyncio as aioredis
@@ -166,14 +168,21 @@ class SemanticCacheManager:
             client = aioredis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
+                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+                socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
             )
             await client.ping()
             self.redis_client = client
+            self._redis_available = True
+            self._redis_retry_after = 0.0
             return self.redis_client
         except Exception:
+            from app.core.config import get_settings
+
+            settings = get_settings()
             self._redis_available = False
+            self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
+            self.redis_client = None
             return None
 
     async def get(
@@ -217,7 +226,12 @@ class SemanticCacheManager:
                         self.metrics.cost_avoided_usd += entry.cost_avoided_usd
                         return entry
             except Exception:
+                from app.core.config import get_settings
+
+                settings = get_settings()
                 self._redis_available = False
+                self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
+                self.redis_client = None
 
         # Check in-memory exact match
         if exact_key in self._memory_exact:
@@ -350,7 +364,12 @@ class SemanticCacheManager:
                     ex=ttl,
                 )
             except Exception:
+                from app.core.config import get_settings
+
+                settings = get_settings()
                 self._redis_available = False
+                self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
+                self.redis_client = None
 
         # Write to in-memory exact and semantic stores
         self._memory_exact[exact_key] = entry

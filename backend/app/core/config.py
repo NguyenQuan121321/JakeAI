@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     PAYOS_CHECKSUM_KEY: str = "dev-payos-checksum-secret-key-32b"
     INTERNAL_GATEWAY_SECRET: str = "jakeai-finnapigo-shared-internal-secret-32b"
 
+    # Phase 07: Production Hardening, Timeouts & Safety Limits
+    STREAM_TIMEOUT_SECONDS: float = 120.0
+    PROVIDER_TIMEOUT_SECONDS: float = 30.0
+    HTTP_CLIENT_TIMEOUT_SECONDS: float = 15.0
+    MAX_REQUEST_BODY_BYTES: int = 10_485_760  # 10 MB payload ceiling
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = 0.5
+    REDIS_COOLDOWN_SECONDS: float = 5.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
