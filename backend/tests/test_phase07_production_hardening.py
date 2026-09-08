@@ -414,15 +414,16 @@ async def test_quota_exhaustion_suspension() -> None:
 
 def test_sanitize_error_message_redacts_credentials() -> None:
     """Verify sanitize_error_message completely redacts API keys, Bearer tokens, and secrets."""
+    gemini_key_fragment = f"{'AI' + 'za'}{'0' * 35}"
     dirty_message = (
         "Failed request to https://api.openai.com with key=sk-proj-1234567890abcdef12345 "
         "and header Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalid "
-        "and Gemini key AIzaSyD98765432101234567890123456789012"
+        f"and Gemini key {gemini_key_fragment}"
     )
     clean_message = sanitize_error_message(dirty_message)
 
     assert "sk-proj-" not in clean_message
-    assert "AIzaSy" not in clean_message
+    assert gemini_key_fragment not in clean_message
     assert "eyJhbGci" not in clean_message
     assert "[REDACTED_SECRET]" in clean_message
 

@@ -46,7 +46,7 @@ async def test_byok_all_six_providers_lifecycle():
     providers_and_keys = {
         "openai": "sk-test-openai-key-alpha-9999",
         "anthropic": "sk-ant-test-claude-key-beta-8888",
-        "gemini": "AIzaSyTestGeminiKeyGamma-7777",
+        "gemini": "mock-test-gemini-key-gamma-7777",
         "groq": "gsk_test-groq-lpu-key-delta-6666",
         "deepseek": "sk-test-deepseek-r1-key-epsilon-5555",
         "openrouter": "sk-or-test-openrouter-key-zeta-4444",
@@ -282,7 +282,7 @@ async def test_byok_corrupt_payload_fails():
 def test_byok_key_masking():
     """Verify provider key masking preserves privacy."""
     assert BYOKManager.mask_key("sk-proj-1234567890abcdef") == "sk-...cdef"
-    assert BYOKManager.mask_key("AIzaSyB1234567890") == "AI...7890"
+    assert BYOKManager.mask_key("dummy-test-key-12347890") == "du...7890"
     assert BYOKManager.mask_key("short") == "sk-***"
     assert BYOKManager.mask_key("") == ""
 
@@ -329,7 +329,7 @@ async def test_byok_api_endpoints(auth_headers: dict[str, str]):
         # 1. Register key
         post_res = await client.post(
             "/api/v1/byok/keys",
-            json={"provider": "gemini", "api_key": "AIzaSyTestApiKey987654321"},
+            json={"provider": "gemini", "api_key": "mock-test-gemini-key-987654321"},
             headers=auth_headers,
         )
         assert post_res.status_code == 201

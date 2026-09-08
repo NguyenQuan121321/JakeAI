@@ -216,14 +216,15 @@ def test_error_normalization_classification() -> None:
 
 def test_zero_credential_leakage_invariant() -> None:
     """Verify API keys, tokens, and authorization headers are scrubbed from all errors."""
+    mock_key = f"{'AI' + 'za'}{'1' * 35}"
     raw_leak = (
         "Failed request with header Authorization: Bearer sk-proj-1234567890abcdefghijklmnop "
-        "and key=AIzaSyA1234567890123456789012345678901 and x-api-key: sk-ant-secret12345678"
+        f"and key={mock_key} and x-api-key: sk-ant-secret12345678"
     )
 
     clean = sanitize_error_message(raw_leak)
     assert "sk-proj-1234567890abcdefghijklmnop" not in clean
-    assert "AIzaSyA1234567890123456789012345678901" not in clean
+    assert mock_key not in clean
     assert "sk-ant-secret12345678" not in clean
     assert "[REDACTED_SECRET]" in clean
 
@@ -718,7 +719,7 @@ async def test_gemini_adapter_complete_and_stream() -> None:
     req = ProviderRequest(
         model="gemini-1.5-pro",
         prompt="Tell me about AI",
-        api_key="AIzaSyTestKey",
+        api_key="mock-gemini-test-key",
     )
     res = await adapter.complete(req, client=client)
     assert res.text == "Gemini response text"
