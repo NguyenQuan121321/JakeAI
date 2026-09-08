@@ -21,6 +21,10 @@ try:
 except ImportError:
     redis = None  # type: ignore[assignment]
 
+# Cache identity schema version. Bump when the cache key derivation
+# algorithm changes to prevent legacy entries from colliding with new ones.
+CACHE_VERSION = "v2.0"
+
 
 class CacheMetrics(BaseModel):
     """Telemetry tracking for exact and semantic cache layers."""
@@ -52,7 +56,7 @@ class SemanticCacheEntry(BaseModel):
     model: str = "default"
     provider: str = "generic"
     parameters: dict[str, Any] = Field(default_factory=dict)
-    version: str = "v1.0"
+    version: str = CACHE_VERSION
     citations: list[dict[str, Any]] = Field(default_factory=list)
     mascot_state: str = "idle"
     similarity_score: float = 1.0
@@ -62,6 +66,15 @@ class SemanticCacheEntry(BaseModel):
     vector: list[float] = Field(default_factory=list)
     tokens_avoided: int = 0
     cost_avoided_usd: float = 0.0
+    system_instructions: str = ""
+    tools: list[dict[str, Any]] | None = None
+    response_format: dict[str, Any] | str | None = None
+
+
+def _normalize_text(text: str) -> str:
+    """Apply deterministic Unicode NFC normalization and whitespace collapsing."""
+    nfc_text = unicodedata.normalize("NFC", text.strip().lower())
+    return re.sub(r"\s+", " ", nfc_text)
 
 
 def _compute_hash(
@@ -69,16 +82,127 @@ def _compute_hash(
     tenant_id: str,
     model: str = "default",
     provider: str = "generic",
-    version: str = "v1.0",
+    version: str = CACHE_VERSION,
 ) -> str:
-    """Compute deterministic SHA-256 hash for normalized prompt, tenant, and model.
+    """Legacy hash function. Kept for backward-compatible callers.
 
-    Applies Unicode NFC normalization, lowercase conversion, and single-space
-    collapsing to guarantee exact cross-language hash parity with FinnApiGo (Go).
+    New code should use ``compute_cache_identity`` which includes all
+    generation-relevant dimensions.
     """
-    nfc_text = unicodedata.normalize("NFC", text.strip().lower())
-    normalized = re.sub(r"\s+", " ", nfc_text)
+    normalized = _normalize_text(text)
     payload = f"{tenant_id}:{provider}:{model}:{version}:{normalized}".encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _canonical_messages_repr(
+    messages: list[dict[str, str]] | None,
+) -> str:
+    """Build a deterministic canonical string from the full message history.
+
+    Each message is represented as ``role:content`` with normalized content,
+    joined by a record separator to preserve ordering.
+    """
+    if not messages:
+        return ""
+    parts: list[str] = []
+    for msg in messages:
+        role = msg.get("role", "").strip().lower()
+        content = _normalize_text(msg.get("content", ""))
+        parts.append(f"{role}:{content}")
+    return "\x1e".join(parts)  # ASCII record separator
+
+
+def _canonical_tools_repr(tools: list[dict[str, Any]] | None) -> str:
+    """Build a deterministic canonical string from tool definitions.
+
+    Tools are serialized as sorted JSON to ensure key ordering does not
+    affect the cache identity.
+    """
+    if not tools:
+        return ""
+    return json.dumps(tools, sort_keys=True, separators=(",", ":"))
+
+
+def _canonical_response_format_repr(
+    response_format: dict[str, Any] | str | None,
+) -> str:
+    """Build a deterministic canonical string from response format constraints.
+
+    Dicts (e.g. JSON schemas) are sorted by keys for determinism.
+    Strings (e.g. 'json_object') are lowercased and stripped.
+    """
+    if not response_format:
+        return ""
+    if isinstance(response_format, str):
+        return response_format.strip().lower()
+    return json.dumps(response_format, sort_keys=True, separators=(",", ":"))
+
+
+def _canonical_params_repr(params: dict[str, Any] | None) -> str:
+    """Build a deterministic canonical string from generation parameters.
+
+    Only meaningful parameters (non-None values) are included.
+    """
+    if not params:
+        return ""
+    # Filter out None values, sort keys for determinism
+    filtered = {k: v for k, v in sorted(params.items()) if v is not None}
+    if not filtered:
+        return ""
+    return json.dumps(filtered, sort_keys=True, separators=(",", ":"))
+
+
+def compute_cache_identity(
+    *,
+    tenant_id: str,
+    provider: str = "generic",
+    model: str = "default",
+    system_instructions: str = "",
+    messages: list[dict[str, str]] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    response_format: dict[str, Any] | str | None = None,
+    generation_params: dict[str, Any] | None = None,
+    version: str = CACHE_VERSION,
+) -> str:
+    """Compute canonical SHA-256 cache identity from ALL generation-relevant dimensions.
+
+    This function guarantees that two requests sharing a cache identity are
+    semantically equivalent with respect to every dimension that affects the
+    model's generation output. Any difference in tenant, provider, model,
+    system instructions, conversation history, tools, response format,
+    generation parameters, or cache schema version produces a different identity.
+
+    All text inputs are NFC-normalized, lowercased, and whitespace-collapsed
+    to ensure deterministic hashing.
+
+    Returns:
+        64-character lowercase hex SHA-256 digest.
+    """
+    normalized_system = (
+        _normalize_text(system_instructions) if system_instructions else ""
+    )
+    messages_repr = _canonical_messages_repr(messages)
+    tools_repr = _canonical_tools_repr(tools)
+    response_format_repr = _canonical_response_format_repr(response_format)
+    params_repr = _canonical_params_repr(generation_params)
+
+    # Build the composite payload with explicit field separators.
+    # Using \x1f (unit separator) between top-level fields to avoid
+    # accidental collisions from field content containing delimiters.
+    payload = "\x1f".join(
+        [
+            f"v={version}",
+            f"t={tenant_id}",
+            f"p={provider.strip().lower()}",
+            f"m={model.strip().lower()}",
+            f"si={normalized_system}",
+            f"msgs={messages_repr}",
+            f"tools={tools_repr}",
+            f"rf={response_format_repr}",
+            f"params={params_repr}",
+        ]
+    ).encode("utf-8")
+
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -192,13 +316,42 @@ class SemanticCacheManager:
         model: str = "default",
         provider: str = "generic",
         parameters: dict[str, Any] | None = None,
-        version: str = "v1.0",
+        version: str = CACHE_VERSION,
+        *,
+        system_instructions: str = "",
+        messages: list[dict[str, str]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | str | None = None,
+        generation_params: dict[str, Any] | None = None,
+        exact_only: bool = False,
     ) -> SemanticCacheEntry | None:
-        """Query cache for exact or semantic matches with model/tenant boundaries."""
-        _ = parameters
+        """Query cache for exact or semantic matches using canonical cache identity.
+
+        The exact cache key is derived from ALL generation-relevant dimensions
+        via ``compute_cache_identity``. Passing ``messages`` is strongly
+        recommended; when omitted, a single-message list containing ``prompt``
+        with role ``user`` is synthesized for backward compatibility.
+
+        When ``exact_only=True``, only Tier 1 exact matches are queried and
+        Tier 2 semantic vector search is bypassed.
+        """
         self.metrics.total_requests += 1
-        exact_key = _compute_hash(
-            prompt, tenant_id, model=model, provider=provider, version=version
+
+        # Build canonical messages from prompt when callers haven't provided them
+        effective_messages = messages
+        if effective_messages is None:
+            effective_messages = [{"role": "user", "content": prompt}]
+
+        exact_key = compute_cache_identity(
+            tenant_id=tenant_id,
+            provider=provider,
+            model=model,
+            system_instructions=system_instructions,
+            messages=effective_messages,
+            tools=tools,
+            response_format=response_format,
+            generation_params=generation_params or parameters,
+            version=version,
         )
         now = time.time()
 
@@ -210,21 +363,12 @@ class SemanticCacheManager:
                 if raw_data:
                     data = json.loads(raw_data)
                     entry = SemanticCacheEntry(**data)
-                    if (
-                        entry.model == model
-                        or model == "default"
-                        or entry.model == "default"
-                    ) and (
-                        entry.provider == provider
-                        or provider == "generic"
-                        or entry.provider == "generic"
-                    ):
-                        entry.cache_type = "exact"
-                        entry.similarity_score = 1.0
-                        self.metrics.exact_hits += 1
-                        self.metrics.tokens_avoided += entry.tokens_avoided
-                        self.metrics.cost_avoided_usd += entry.cost_avoided_usd
-                        return entry
+                    entry.cache_type = "exact"
+                    entry.similarity_score = 1.0
+                    self.metrics.exact_hits += 1
+                    self.metrics.tokens_avoided += entry.tokens_avoided
+                    self.metrics.cost_avoided_usd += entry.cost_avoided_usd
+                    return entry
             except Exception:
                 from app.core.config import get_settings
 
@@ -237,23 +381,19 @@ class SemanticCacheManager:
         if exact_key in self._memory_exact:
             entry = self._memory_exact[exact_key]
             if (now - entry.cached_at) <= entry.ttl_seconds:
-                if (
-                    entry.model == model
-                    or model == "default"
-                    or entry.model == "default"
-                ) and (
-                    entry.provider == provider
-                    or provider == "generic"
-                    or entry.provider == "generic"
-                ):
-                    entry.cache_type = "exact"
-                    entry.similarity_score = 1.0
-                    self.metrics.exact_hits += 1
-                    self.metrics.tokens_avoided += entry.tokens_avoided
-                    self.metrics.cost_avoided_usd += entry.cost_avoided_usd
-                    return entry
+                entry.cache_type = "exact"
+                entry.similarity_score = 1.0
+                self.metrics.exact_hits += 1
+                self.metrics.tokens_avoided += entry.tokens_avoided
+                self.metrics.cost_avoided_usd += entry.cost_avoided_usd
+                return entry
             else:
                 del self._memory_exact[exact_key]
+
+        # If exact_only requested, skip Tier 2 semantic vector search
+        if exact_only:
+            self.metrics.misses += 1
+            return None
 
         # 2. Tier 2: Semantic Vector Cosine Similarity Search
         query_vec = _generate_synthetic_embedding(prompt)
@@ -277,6 +417,18 @@ class SemanticCacheManager:
             ):
                 continue
             if entry.version != version:
+                continue
+            # System instructions, tools, and response format must match for semantic hit
+            if (
+                entry.system_instructions
+                and system_instructions
+                and _normalize_text(entry.system_instructions)
+                != _normalize_text(system_instructions)
+            ):
+                continue
+            if entry.tools != tools:
+                continue
+            if entry.response_format != response_format:
                 continue
 
             sim = _cosine_similarity(query_vec, entry.vector)
@@ -307,6 +459,9 @@ class SemanticCacheManager:
                 vector=best_match.vector,
                 tokens_avoided=best_match.tokens_avoided,
                 cost_avoided_usd=best_match.cost_avoided_usd,
+                system_instructions=best_match.system_instructions,
+                tools=best_match.tools,
+                response_format=best_match.response_format,
             )
 
         self.metrics.misses += 1
@@ -323,14 +478,40 @@ class SemanticCacheManager:
         model: str = "default",
         provider: str = "generic",
         parameters: dict[str, Any] | None = None,
-        version: str = "v1.0",
+        version: str = CACHE_VERSION,
         tokens_avoided: int = 0,
         cost_avoided_usd: float = 0.0,
+        *,
+        system_instructions: str = "",
+        messages: list[dict[str, str]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | str | None = None,
+        generation_params: dict[str, Any] | None = None,
     ) -> SemanticCacheEntry:
-        """Store prompt and response in both exact and semantic cache tiers."""
+        """Store prompt and response in both exact and semantic cache tiers.
+
+        The exact cache key is derived from ALL generation-relevant dimensions
+        via ``compute_cache_identity``. When ``messages`` is not provided,
+        a single ``user`` message from ``prompt`` is synthesized for backward
+        compatibility.
+        """
         ttl = ttl_seconds or self.default_ttl
-        exact_key = _compute_hash(
-            prompt, tenant_id, model=model, provider=provider, version=version
+
+        # Build canonical messages from prompt when callers haven't provided them
+        effective_messages = messages
+        if effective_messages is None:
+            effective_messages = [{"role": "user", "content": prompt}]
+
+        exact_key = compute_cache_identity(
+            tenant_id=tenant_id,
+            provider=provider,
+            model=model,
+            system_instructions=system_instructions,
+            messages=effective_messages,
+            tools=tools,
+            response_format=response_format,
+            generation_params=generation_params or parameters,
+            version=version,
         )
         vector = _generate_synthetic_embedding(prompt)
 
@@ -351,6 +532,9 @@ class SemanticCacheManager:
             vector=vector,
             tokens_avoided=tokens_avoided,
             cost_avoided_usd=cost_avoided_usd,
+            system_instructions=system_instructions,
+            tools=tools,
+            response_format=response_format,
         )
 
         # 1. Write Exact Match to Redis
