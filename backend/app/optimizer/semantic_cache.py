@@ -342,15 +342,31 @@ class SemanticCacheManager:
         if effective_messages is None:
             effective_messages = [{"role": "user", "content": prompt}]
 
+        # Extract tools, response_format, and system_instructions from parameters/generation_params if passed there
+        combined_params = dict(generation_params or parameters or {})
+        effective_tools = (
+            tools if tools is not None else combined_params.pop("tools", None)
+        )
+        effective_rf = (
+            response_format
+            if response_format is not None
+            else combined_params.pop("response_format", None)
+        )
+        effective_system = (
+            system_instructions
+            if system_instructions
+            else combined_params.pop("system_instructions", "")
+        )
+
         exact_key = compute_cache_identity(
             tenant_id=tenant_id,
             provider=provider,
             model=model,
-            system_instructions=system_instructions,
+            system_instructions=effective_system,
             messages=effective_messages,
-            tools=tools,
-            response_format=response_format,
-            generation_params=generation_params or parameters,
+            tools=effective_tools,
+            response_format=effective_rf,
+            generation_params=combined_params if combined_params else None,
             version=version,
         )
         now = time.time()
@@ -421,14 +437,14 @@ class SemanticCacheManager:
             # System instructions, tools, and response format must match for semantic hit
             if (
                 entry.system_instructions
-                and system_instructions
+                and effective_system
                 and _normalize_text(entry.system_instructions)
-                != _normalize_text(system_instructions)
+                != _normalize_text(effective_system)
             ):
                 continue
-            if entry.tools != tools:
+            if entry.tools != effective_tools:
                 continue
-            if entry.response_format != response_format:
+            if entry.response_format != effective_rf:
                 continue
 
             sim = _cosine_similarity(query_vec, entry.vector)
@@ -502,15 +518,31 @@ class SemanticCacheManager:
         if effective_messages is None:
             effective_messages = [{"role": "user", "content": prompt}]
 
+        # Extract tools, response_format, and system_instructions from parameters/generation_params if passed there
+        combined_params = dict(generation_params or parameters or {})
+        effective_tools = (
+            tools if tools is not None else combined_params.pop("tools", None)
+        )
+        effective_rf = (
+            response_format
+            if response_format is not None
+            else combined_params.pop("response_format", None)
+        )
+        effective_system = (
+            system_instructions
+            if system_instructions
+            else combined_params.pop("system_instructions", "")
+        )
+
         exact_key = compute_cache_identity(
             tenant_id=tenant_id,
             provider=provider,
             model=model,
-            system_instructions=system_instructions,
+            system_instructions=effective_system,
             messages=effective_messages,
-            tools=tools,
-            response_format=response_format,
-            generation_params=generation_params or parameters,
+            tools=effective_tools,
+            response_format=effective_rf,
+            generation_params=combined_params if combined_params else None,
             version=version,
         )
         vector = _generate_synthetic_embedding(prompt)
@@ -521,7 +553,7 @@ class SemanticCacheManager:
             tenant_id=tenant_id,
             model=model,
             provider=provider,
-            parameters=parameters or {},
+            parameters=combined_params,
             version=version,
             citations=citations or [],
             mascot_state=mascot_state,
@@ -532,9 +564,9 @@ class SemanticCacheManager:
             vector=vector,
             tokens_avoided=tokens_avoided,
             cost_avoided_usd=cost_avoided_usd,
-            system_instructions=system_instructions,
-            tools=tools,
-            response_format=response_format,
+            system_instructions=effective_system,
+            tools=effective_tools,
+            response_format=effective_rf,
         )
 
         # 1. Write Exact Match to Redis

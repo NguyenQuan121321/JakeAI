@@ -263,9 +263,11 @@ class TestComputeCacheIdentity:
 async def test_cache_miss_different_model() -> None:
     """Cache set with model A, get with model B => miss (no collision)."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_diff_model"
+    await cache.invalidate(tenant_id)
     await cache.set(
         prompt="Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="Hi from GPT-4",
         model="gpt-4o",
         provider="openai",
@@ -275,7 +277,7 @@ async def test_cache_miss_different_model() -> None:
     # Same prompt but different model => must miss
     result = await cache.get(
         "Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         model="gpt-3.5-turbo",
         provider="openai",
         messages=[{"role": "user", "content": "Hello"}],
@@ -287,9 +289,11 @@ async def test_cache_miss_different_model() -> None:
 async def test_cache_miss_different_provider() -> None:
     """Cache set with provider A, get with provider B => miss."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_diff_provider"
+    await cache.invalidate(tenant_id)
     await cache.set(
         prompt="Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="Hi from OpenAI",
         model="gpt-4o",
         provider="openai",
@@ -298,7 +302,7 @@ async def test_cache_miss_different_provider() -> None:
 
     result = await cache.get(
         "Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="anthropic",
         messages=[{"role": "user", "content": "Hello"}],
@@ -310,9 +314,11 @@ async def test_cache_miss_different_provider() -> None:
 async def test_cache_miss_different_system_prompt() -> None:
     """Cache set with system prompt A, get with system prompt B => miss."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_diff_sys"
+    await cache.invalidate(tenant_id)
     await cache.set(
         prompt="Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="Hi, assistant here",
         model="gpt-4o",
         provider="openai",
@@ -325,7 +331,7 @@ async def test_cache_miss_different_system_prompt() -> None:
 
     result = await cache.get(
         "Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="openai",
         system_instructions="You are a Python expert.",
@@ -341,9 +347,11 @@ async def test_cache_miss_different_system_prompt() -> None:
 async def test_cache_miss_different_history() -> None:
     """Cache set with history A, get with different history => miss."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_diff_hist"
+    await cache.invalidate(tenant_id)
     await cache.set(
         prompt="What next?",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="Continue with X",
         model="gpt-4o",
         provider="openai",
@@ -357,7 +365,7 @@ async def test_cache_miss_different_history() -> None:
     # Same last message but different history
     result = await cache.get(
         "What next?",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="openai",
         messages=[
@@ -371,63 +379,172 @@ async def test_cache_miss_different_history() -> None:
 
 @pytest.mark.asyncio
 async def test_cache_miss_different_tools() -> None:
-    """Cache set with tools, get without tools => miss."""
+    """Cache set with tools, get without tools => miss (and vice versa)."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
-    tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
+    tenant_id = "t_diff_tools"
+    await cache.invalidate(tenant_id)
+
+    tools_a = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
+    tools_b = [{"type": "function", "function": {"name": "lookup", "parameters": {}}}]
+    messages = [{"role": "user", "content": "Execute operation"}]
+
+    # 1. Set with tools_a
     await cache.set(
-        prompt="Hello",
-        tenant_id="t1",
-        response="Hi with tools",
+        prompt="Execute operation",
+        tenant_id=tenant_id,
+        response="Hi with tools A",
         model="gpt-4o",
         provider="openai",
-        tools=tools,
-        messages=[{"role": "user", "content": "Hello"}],
+        tools=tools_a,
+        messages=messages,
     )
 
-    # Same prompt but no tools
-    result = await cache.get(
-        "Hello",
-        tenant_id="t1",
+    # Query without tools => must miss
+    res_no_tools = await cache.get(
+        "Execute operation",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="openai",
         tools=None,
-        messages=[{"role": "user", "content": "Hello"}],
+        messages=messages,
     )
-    assert result is None
+    assert res_no_tools is None
+
+    # Query with different tools_b => must miss
+    res_diff_tools = await cache.get(
+        "Execute operation",
+        tenant_id=tenant_id,
+        model="gpt-4o",
+        provider="openai",
+        tools=tools_b,
+        messages=messages,
+    )
+    assert res_diff_tools is None
+
+    # Query with exact matching tools_a => must hit
+    res_hit = await cache.get(
+        "Execute operation",
+        tenant_id=tenant_id,
+        model="gpt-4o",
+        provider="openai",
+        tools=tools_a,
+        messages=messages,
+    )
+    assert res_hit is not None
+    assert res_hit.response == "Hi with tools A"
+
+    # 2. Set entry without tools
+    tenant_id_notools = "t_diff_tools_empty"
+    await cache.invalidate(tenant_id_notools)
+    await cache.set(
+        prompt="Execute operation",
+        tenant_id=tenant_id_notools,
+        response="Hi with no tools",
+        model="gpt-4o",
+        provider="openai",
+        tools=None,
+        messages=messages,
+    )
+
+    # Query with tools on entry that has no tools => must miss
+    res_with_tools_miss = await cache.get(
+        "Execute operation",
+        tenant_id=tenant_id_notools,
+        model="gpt-4o",
+        provider="openai",
+        tools=tools_a,
+        messages=messages,
+    )
+    assert res_with_tools_miss is None
 
 
 @pytest.mark.asyncio
 async def test_cache_miss_different_response_format() -> None:
-    """Cache set with response_format=json, get without => miss."""
+    """Cache set with response_format=json, get without => miss (and vice versa)."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_diff_rf"
+    await cache.invalidate(tenant_id)
+    messages = [{"role": "user", "content": "Format query"}]
+
+    # 1. Set with JSON object response format
     await cache.set(
-        prompt="Hello",
-        tenant_id="t1",
+        prompt="Format query",
+        tenant_id=tenant_id,
         response='{"message": "hi"}',
         model="gpt-4o",
         provider="openai",
         response_format={"type": "json_object"},
-        messages=[{"role": "user", "content": "Hello"}],
+        messages=messages,
     )
 
-    result = await cache.get(
-        "Hello",
-        tenant_id="t1",
+    # Query without response_format => must miss
+    res_no_rf = await cache.get(
+        "Format query",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="openai",
         response_format=None,
-        messages=[{"role": "user", "content": "Hello"}],
+        messages=messages,
     )
-    assert result is None
+    assert res_no_rf is None
+
+    # Query with different response format => must miss
+    res_diff_rf = await cache.get(
+        "Format query",
+        tenant_id=tenant_id,
+        model="gpt-4o",
+        provider="openai",
+        response_format={"type": "text"},
+        messages=messages,
+    )
+    assert res_diff_rf is None
+
+    # Query with same response format => must hit
+    res_hit = await cache.get(
+        "Format query",
+        tenant_id=tenant_id,
+        model="gpt-4o",
+        provider="openai",
+        response_format={"type": "json_object"},
+        messages=messages,
+    )
+    assert res_hit is not None
+    assert res_hit.response == '{"message": "hi"}'
+
+    # 2. Set entry without response format
+    tenant_id_norf = "t_diff_rf_empty"
+    await cache.invalidate(tenant_id_norf)
+    await cache.set(
+        prompt="Format query",
+        tenant_id=tenant_id_norf,
+        response="Plain string",
+        model="gpt-4o",
+        provider="openai",
+        response_format=None,
+        messages=messages,
+    )
+
+    # Query with response format on entry with None => must miss
+    res_with_rf_miss = await cache.get(
+        "Format query",
+        tenant_id=tenant_id_norf,
+        model="gpt-4o",
+        provider="openai",
+        response_format={"type": "json_object"},
+        messages=messages,
+    )
+    assert res_with_rf_miss is None
 
 
 @pytest.mark.asyncio
 async def test_cache_miss_different_generation_params() -> None:
     """Cache set with temp=0.7, get with temp=0.0 => miss."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_diff_gen_params"
+    await cache.invalidate(tenant_id)
     await cache.set(
         prompt="Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="Hi creative",
         model="gpt-4o",
         provider="openai",
@@ -437,7 +554,7 @@ async def test_cache_miss_different_generation_params() -> None:
 
     result = await cache.get(
         "Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="openai",
         generation_params={"temperature": 0.0, "max_tokens": 1024},
@@ -450,6 +567,8 @@ async def test_cache_miss_different_generation_params() -> None:
 async def test_cache_hit_identical_request() -> None:
     """Identical requests => cache hit."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_hit_identical"
+    await cache.invalidate(tenant_id)
     msgs = [
         {"role": "system", "content": "You are helpful."},
         {"role": "user", "content": "Hello"},
@@ -458,7 +577,7 @@ async def test_cache_hit_identical_request() -> None:
 
     await cache.set(
         prompt="Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="Hi there!",
         model="gpt-4o",
         provider="openai",
@@ -469,7 +588,7 @@ async def test_cache_hit_identical_request() -> None:
 
     result = await cache.get(
         "Hello",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         model="gpt-4o",
         provider="openai",
         system_instructions="You are helpful.",
@@ -485,18 +604,105 @@ async def test_cache_hit_identical_request() -> None:
 async def test_cache_backward_compatibility() -> None:
     """Legacy callers (no messages/system_instructions) still work via synthesis."""
     cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_compat"
+    await cache.invalidate(tenant_id)
 
     # Legacy-style set (only prompt + tenant)
     await cache.set(
         prompt="legacy query",
-        tenant_id="t1",
+        tenant_id=tenant_id,
         response="legacy response",
     )
 
     # Legacy-style get (only prompt + tenant) => should hit
-    result = await cache.get("legacy query", tenant_id="t1")
+    result = await cache.get("legacy query", tenant_id=tenant_id)
     assert result is not None
     assert result.response == "legacy response"
+
+
+@pytest.mark.asyncio
+async def test_cache_parameters_dict_normalization_tools_and_rf() -> None:
+    """Passing tools and response_format inside parameters dict derives identical cache identity."""
+    cache = SemanticCacheManager(default_ttl=300, similarity_threshold=2.0)
+    tenant_id = "t_params_norm"
+    await cache.invalidate(tenant_id)
+
+    tools = [{"type": "function", "function": {"name": "calculator"}}]
+    rf = {"type": "json_object"}
+    msgs = [{"role": "user", "content": "Compute tax"}]
+
+    # Identity calculation directly: explicit kwargs vs parameters dict
+    id_explicit = compute_cache_identity(
+        tenant_id=tenant_id,
+        provider="openai",
+        model="gpt-4o",
+        system_instructions="You are an accountant.",
+        messages=msgs,
+        tools=tools,
+        response_format=rf,
+        generation_params={"temperature": 0.2},
+    )
+    id_via_params = compute_cache_identity(
+        tenant_id=tenant_id,
+        provider="openai",
+        model="gpt-4o",
+        system_instructions="You are an accountant.",
+        messages=msgs,
+        tools=tools,
+        response_format=rf,
+        generation_params={"temperature": 0.2},
+    )
+    assert id_explicit == id_via_params
+
+    # End-to-end get/set: set via parameters dict, get via explicit kwargs
+    await cache.set(
+        prompt="Compute tax",
+        tenant_id=tenant_id,
+        response="Tax is 10%",
+        model="gpt-4o",
+        provider="openai",
+        system_instructions="You are an accountant.",
+        messages=msgs,
+        parameters={
+            "tools": tools,
+            "response_format": rf,
+            "temperature": 0.2,
+        },
+    )
+
+    # Query with explicit kwargs -> must hit cache!
+    hit_explicit = await cache.get(
+        "Compute tax",
+        tenant_id=tenant_id,
+        model="gpt-4o",
+        provider="openai",
+        system_instructions="You are an accountant.",
+        messages=msgs,
+        tools=tools,
+        response_format=rf,
+        generation_params={"temperature": 0.2},
+    )
+    assert hit_explicit is not None
+    assert hit_explicit.response == "Tax is 10%"
+    assert hit_explicit.cache_type == "exact"
+
+    # Query with parameters dict -> must hit cache!
+    hit_params = await cache.get(
+        "Compute tax",
+        tenant_id=tenant_id,
+        model="gpt-4o",
+        provider="openai",
+        system_instructions="You are an accountant.",
+        messages=msgs,
+        parameters={
+            "tools": tools,
+            "response_format": rf,
+            "temperature": 0.2,
+        },
+    )
+    assert hit_params is not None
+    assert hit_params.response == "Tax is 10%"
+    assert hit_params.cache_type == "exact"
 
 
 @pytest.mark.asyncio
