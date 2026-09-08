@@ -37,6 +37,7 @@ from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
 from app.optimizer.two_zone_compiler import get_two_zone_compiler
 from app.providers.base import ChatMessage
+from app.providers.registry import get_provider_registry
 
 logger = logging.getLogger(__name__)
 
@@ -319,17 +320,10 @@ class GatewayInferenceProxy:
             "max_tokens": request.max_tokens,
         }
 
-        # Resolve provider early for cache identity
-        provider = (
-            "gemini"
-            if "gemini" in request.model.lower()
-            else (
-                "openai"
-                if "gpt" in request.model.lower()
-                else (
-                    "anthropic" if "claude" in request.model.lower() else "openrouter"
-                )
-            )
+        # Resolve provider through the authoritative provider registry so cache
+        # identity and BYOK injection match the routing/execution provider
+        provider = get_provider_registry().resolve_provider_name_for_model(
+            request.model
         )
 
         # 2. Tier 1 Exact Match Cache
@@ -649,16 +643,8 @@ class GatewayInferenceProxy:
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
         }
-        provider = (
-            "gemini"
-            if "gemini" in request.model.lower()
-            else (
-                "openai"
-                if "gpt" in request.model.lower()
-                else (
-                    "anthropic" if "claude" in request.model.lower() else "openrouter"
-                )
-            )
+        provider = get_provider_registry().resolve_provider_name_for_model(
+            request.model
         )
 
         # 2. Tier 1 Exact Match Cache (stream instant chunks)
