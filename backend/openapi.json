@@ -3345,6 +3345,38 @@
             "title": "Stream",
             "description": "Whether to stream back partial progress via Server-Sent Events",
             "default": false
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools",
+            "description": "Optional tools/functions schema"
+          },
+          "response_format": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Format",
+            "description": "Optional response format (e.g. JSON mode / schema)"
           }
         },
         "type": "object",
