@@ -32,6 +32,7 @@ from app.providers.base import (
     ProviderRequest,
     ProviderResponse,
     StreamChunk,
+    format_anthropic_chat_messages,
 )
 from app.providers.errors import (
     ProviderAuthenticationError,
@@ -95,20 +96,23 @@ class AnthropicAdapter(LLMProvider):
             if (request.extra_params and "prompt_cache_enabled" in request.extra_params)
             else settings.PROVIDER_PROMPT_CACHE_ENABLED
         )
+        system_text, anthropic_messages = format_anthropic_chat_messages(
+            request=request,
+            default_system=default_system,
+            compiled=compiled,
+        )
         system_blocks: list[dict[str, Any]] = []
-        static_text = compiled.static_prefix or default_system
-        if compiled.is_cache_eligible and cache_enabled:
+        if compiled.is_cache_eligible and cache_enabled and system_text:
             system_blocks.append(
                 {
                     "type": "text",
-                    "text": static_text,
+                    "text": system_text,
                     "cache_control": {"type": "ephemeral"},
                 }
             )
-        else:
-            system_blocks.append({"type": "text", "text": static_text})
+        elif system_text:
+            system_blocks.append({"type": "text", "text": system_text})
 
-        user_content = compiled.dynamic_suffix or request.prompt
         anthropic_model = (
             request.model
             if "claude" in request.model.lower()
@@ -118,7 +122,7 @@ class AnthropicAdapter(LLMProvider):
         payload: dict[str, Any] = {
             "model": anthropic_model,
             "system": system_blocks,
-            "messages": [{"role": "user", "content": user_content}],
+            "messages": anthropic_messages,
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
             "stream": stream,

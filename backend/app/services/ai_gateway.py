@@ -36,6 +36,7 @@ from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
 from app.optimizer.two_zone_compiler import get_two_zone_compiler
+from app.providers.base import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +53,6 @@ class QuotaStatus(BaseModel):
     percentage_used: float
     is_suspended: bool
     warning: str | None
-
-
-class ChatMessage(BaseModel):
-    """OpenAI-compatible message format."""
-
-    role: str = Field(..., description="role: system, user, assistant")
-    content: str = Field(..., description="message content")
 
 
 class GatewayChatRequest(BaseModel):
@@ -287,16 +281,24 @@ class GatewayInferenceProxy:
             raise ValueError(error_msg or "Token budget quota exceeded")
 
         # Extract last user message for display/optimization
-        last_user_msg = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        last_user_msg = (
+            next(
+                (
+                    m.content
+                    for m in reversed(request.messages)
+                    if m.role == "user" and m.content
+                ),
+                "",
+            )
+            or ""
         )
 
         # Build generation-relevant fields for canonical cache identity
         system_instructions = "\n".join(
-            m.content for m in request.messages if m.role == "system"
+            m.content or "" for m in request.messages if m.role == "system"
         )
-        messages_as_dicts = [
-            {"role": m.role, "content": m.content} for m in request.messages
+        messages_as_dicts: list[dict[str, str]] = [
+            {"role": m.role, "content": m.content or ""} for m in request.messages
         ]
         generation_params = {
             "temperature": request.temperature,
@@ -406,6 +408,31 @@ class GatewayInferenceProxy:
         # 5. Model Generation (Wrapped in CircuitBreaker)
         upstream_response: UpstreamLLMResponse | None = None
 
+        # Prepare messages list preserving full conversation semantics
+        messages_to_send: list[ChatMessage] = []
+        found_last_user = False
+        for m in reversed(request.messages):
+            if not found_last_user and m.role == "user" and effective_query:
+                messages_to_send.append(
+                    ChatMessage(
+                        role=m.role,
+                        content=effective_query,
+                        name=m.name,
+                        tool_call_id=m.tool_call_id,
+                        tool_calls=m.tool_calls,
+                    )
+                )
+                found_last_user = True
+            else:
+                messages_to_send.append(m)
+        messages_to_send.reverse()
+
+        response_format_dict = (
+            request.response_format
+            if isinstance(request.response_format, dict)
+            else None
+        )
+
         async def call_model() -> str:
             nonlocal upstream_response
             upstream_res = await call_upstream_llm_detailed(
@@ -415,6 +442,9 @@ class GatewayInferenceProxy:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 compiled_prompt=compiled,
+                tools=request.tools,
+                messages=messages_to_send,
+                response_format=response_format_dict,
             )
             if upstream_res:
                 upstream_response = upstream_res
@@ -428,6 +458,8 @@ class GatewayInferenceProxy:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 compiled_prompt=compiled,
+                tools=request.tools,
+                messages=messages_to_send,
             )
             if legacy_text:
                 return legacy_text
@@ -575,17 +607,25 @@ class GatewayInferenceProxy:
         now_ts = int(time.time())
 
         # Extract last user message for display/optimization
-        last_user_msg = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        last_user_msg = (
+            next(
+                (
+                    m.content
+                    for m in reversed(request.messages)
+                    if m.role == "user" and m.content
+                ),
+                "",
+            )
+            or ""
         )
         raw_prompt_tokens = estimate_tokens(last_user_msg)
 
         # Build generation-relevant fields for canonical cache identity
         system_instructions = "\n".join(
-            m.content for m in request.messages if m.role == "system"
+            m.content or "" for m in request.messages if m.role == "system"
         )
-        messages_as_dicts = [
-            {"role": m.role, "content": m.content} for m in request.messages
+        messages_as_dicts: list[dict[str, str]] = [
+            {"role": m.role, "content": m.content or ""} for m in request.messages
         ]
         generation_params = {
             "temperature": request.temperature,
@@ -681,6 +721,8 @@ class GatewayInferenceProxy:
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             compiled_prompt=compiled,
+            tools=request.tools,
+            messages=request.messages,
         )
         if not output_text:
             output_text = (
