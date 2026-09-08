@@ -65,46 +65,34 @@ async def call_upstream_llm_detailed(
     else:
         compiled = compiled_prompt
 
-    model_lower = model.lower()
-    is_anthropic = "claude" in model_lower or "anthropic" in model_lower
-    is_openai = any(k in model_lower for k in ("gpt", "o1", "o3"))
-    is_groq = "groq" in model_lower or "llama" in model_lower
-    is_deepseek = "deepseek" in model_lower
-    is_openrouter = "openrouter" in model_lower or "/" in model_lower
-    is_gemini = "gemini" in model_lower or (
-        not is_anthropic
-        and not is_openai
-        and not is_groq
-        and not is_deepseek
-        and not is_openrouter
+    # Route first: the ModelRouter (via the provider registry) is the single
+    # authoritative model-to-provider resolution and selects the adapter that
+    # will actually execute this request.
+    router = get_model_router()
+    routing_policy = RoutingPolicy(
+        requested_model=model,
+        tenant_id=tenant_id,
+        allow_fallback=True,
     )
+    decision = router.route(routing_policy)
 
-    # Determine explicit key from settings or BYOK if available to support mocked settings tests
+    # Determine explicit key for the authoritatively resolved provider from
+    # tenant BYOK first, then platform fallback key (supports mocked settings
+    # tests and BYOK-prioritized credential injection).
+    provider_settings_keys = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+    }
+    settings_key = provider_settings_keys.get(decision.selected_provider)
     explicit_key: str | None = None
-    if is_anthropic:
+    if settings_key is not None:
         explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, "anthropic"
-        ) or getattr(settings, "ANTHROPIC_API_KEY", None)
-    elif is_openai:
-        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "openai") or getattr(
-            settings, "OPENAI_API_KEY", None
-        )
-    elif is_groq:
-        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "groq") or getattr(
-            settings, "GROQ_API_KEY", None
-        )
-    elif is_deepseek:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, "deepseek"
-        ) or getattr(settings, "DEEPSEEK_API_KEY", None)
-    elif is_openrouter:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, "openrouter"
-        ) or getattr(settings, "OPENROUTER_API_KEY", None)
-    elif is_gemini:
-        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "gemini") or getattr(
-            settings, "GEMINI_API_KEY", None
-        )
+            tenant_id, decision.selected_provider
+        ) or getattr(settings, settings_key, None)
 
     provider_req = ProviderRequest(
         model=model,
@@ -125,13 +113,6 @@ async def call_upstream_llm_detailed(
         },
     )
 
-    router = get_model_router()
-    routing_policy = RoutingPolicy(
-        requested_model=model,
-        tenant_id=tenant_id,
-        allow_fallback=True,
-    )
-    decision = router.route(routing_policy)
     failover_mgr = get_failover_manager()
 
     from app.telemetry.metrics import metrics
