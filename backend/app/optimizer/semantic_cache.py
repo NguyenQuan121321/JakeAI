@@ -70,6 +70,7 @@ def _compute_hash(
     model: str = "default",
     provider: str = "generic",
     version: str = "v1.0",
+    parameters: dict[str, Any] | None = None,
 ) -> str:
     """Compute deterministic SHA-256 hash for normalized prompt, tenant, and model.
 
@@ -78,7 +79,13 @@ def _compute_hash(
     """
     nfc_text = unicodedata.normalize("NFC", text.strip().lower())
     normalized = re.sub(r"\s+", " ", nfc_text)
-    payload = f"{tenant_id}:{provider}:{model}:{version}:{normalized}".encode()
+    params_str = ""
+    if parameters:
+        try:
+            params_str = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+        except Exception:
+            params_str = str(sorted(parameters.items()))
+    payload = f"{tenant_id}:{provider}:{model}:{version}:{params_str}:{normalized}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -194,11 +201,14 @@ class SemanticCacheManager:
         parameters: dict[str, Any] | None = None,
         version: str = "v1.0",
     ) -> SemanticCacheEntry | None:
-        """Query cache for exact or semantic matches with model/tenant boundaries."""
-        _ = parameters
         self.metrics.total_requests += 1
         exact_key = _compute_hash(
-            prompt, tenant_id, model=model, provider=provider, version=version
+            prompt,
+            tenant_id,
+            model=model,
+            provider=provider,
+            version=version,
+            parameters=parameters,
         )
         now = time.time()
 
@@ -210,15 +220,20 @@ class SemanticCacheManager:
                 if raw_data:
                     data = json.loads(raw_data)
                     entry = SemanticCacheEntry(**data)
-                    if (
+                    model_match = (
                         entry.model == model
-                        or model == "default"
-                        or entry.model == "default"
-                    ) and (
+                        or (model == "default" and entry.model == "default")
+                    )
+                    provider_match = (
                         entry.provider == provider
-                        or provider == "generic"
-                        or entry.provider == "generic"
-                    ):
+                        or (provider == "generic" and entry.provider == "generic")
+                    )
+                    params_match = (
+                        entry.parameters == (parameters or {})
+                        if (parameters or entry.parameters)
+                        else True
+                    )
+                    if model_match and provider_match and params_match:
                         entry.cache_type = "exact"
                         entry.similarity_score = 1.0
                         self.metrics.exact_hits += 1
@@ -237,15 +252,20 @@ class SemanticCacheManager:
         if exact_key in self._memory_exact:
             entry = self._memory_exact[exact_key]
             if (now - entry.cached_at) <= entry.ttl_seconds:
-                if (
+                model_match = (
                     entry.model == model
-                    or model == "default"
-                    or entry.model == "default"
-                ) and (
+                    or (model == "default" and entry.model == "default")
+                )
+                provider_match = (
                     entry.provider == provider
-                    or provider == "generic"
-                    or entry.provider == "generic"
-                ):
+                    or (provider == "generic" and entry.provider == "generic")
+                )
+                params_match = (
+                    entry.parameters == (parameters or {})
+                    if (parameters or entry.parameters)
+                    else True
+                )
+                if model_match and provider_match and params_match:
                     entry.cache_type = "exact"
                     entry.similarity_score = 1.0
                     self.metrics.exact_hits += 1
@@ -268,12 +288,12 @@ class SemanticCacheManager:
                 continue
             valid_entries.append(entry)
             # Strict Model/Provider Compatibility Guardrail
-            if entry.model != model and model != "default" and entry.model != "default":
+            if model != "default" and entry.model != model:
                 continue
-            if (
-                entry.provider != provider
-                and provider != "generic"
-                and entry.provider != "generic"
+            if provider != "generic" and entry.provider != provider:
+                continue
+            if (parameters is not None or entry.parameters) and entry.parameters != (
+                parameters or {}
             ):
                 continue
             if entry.version != version:
@@ -330,7 +350,12 @@ class SemanticCacheManager:
         """Store prompt and response in both exact and semantic cache tiers."""
         ttl = ttl_seconds or self.default_ttl
         exact_key = _compute_hash(
-            prompt, tenant_id, model=model, provider=provider, version=version
+            prompt,
+            tenant_id,
+            model=model,
+            provider=provider,
+            version=version,
+            parameters=parameters,
         )
         vector = _generate_synthetic_embedding(prompt)
 

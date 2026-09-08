@@ -93,13 +93,25 @@ class OpenAIAdapter(LLMProvider):
             else "gpt-4o-mini"
         )
 
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
         static_sys = compiled.static_prefix or default_system
-        if static_sys.strip():
-            messages.append({"role": "system", "content": static_sys.strip()})
-        messages.append(
-            {"role": "user", "content": compiled.dynamic_suffix or request.prompt}
-        )
+        if request.messages:
+            has_system = any(
+                m.role in ("system", "developer") for m in request.messages
+            )
+            if not has_system and static_sys.strip():
+                messages.append({"role": "system", "content": static_sys.strip()})
+            for m in request.messages:
+                entry: dict[str, Any] = {"role": m.role, "content": m.content}
+                if m.name:
+                    entry["name"] = m.name
+                messages.append(entry)
+        else:
+            if static_sys.strip():
+                messages.append({"role": "system", "content": static_sys.strip()})
+            messages.append(
+                {"role": "user", "content": compiled.dynamic_suffix or request.prompt}
+            )
 
         payload: dict[str, Any] = {
             "model": openai_model,
@@ -108,6 +120,9 @@ class OpenAIAdapter(LLMProvider):
             "max_tokens": request.max_tokens,
             "stream": stream,
         }
+        prefix_hash = compiled.static_prefix_hash if compiled.static_prefix else None
+        if prefix_hash:
+            payload["prompt_cache_key"] = prefix_hash
         if request.tools:
             payload["tools"] = request.tools
         if request.response_format:
@@ -200,6 +215,7 @@ class OpenAIAdapter(LLMProvider):
                 actual_cost_usd=costs.actual_cost_usd,
                 estimated_savings_usd=costs.savings_usd,
                 savings_percentage=costs.savings_percentage,
+                turn_count=len(request.messages) if request.messages else 1,
             )
 
             return ProviderResponse(

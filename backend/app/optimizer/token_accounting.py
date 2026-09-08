@@ -28,6 +28,16 @@ class TokenUsageRecord(BaseModel):
     cache_type: str = "none"  # "none", "exact", "semantic"
     tokens_saved: int
     actual_billed_tokens: int
+    physical_pruned_tokens: int = Field(
+        default=0, description="Tokens removed by client-side prompt pruning"
+    )
+    response_cache_avoided_tokens: int = Field(
+        default=0, description="Tokens avoided by Layer A response cache hit"
+    )
+    effective_billed_tokens: float = Field(
+        default=0.0,
+        description="Effective billed tokens accounting for provider prompt cache discounts",
+    )
     reduction_percentage: float = Field(
         ...,
         description="Percentage of tokens saved: (tokens_saved / total_baseline) * 100",
@@ -101,6 +111,8 @@ class TokenAccounting:
         completion_tokens: int,
         cache_hit: bool = False,
         cache_type: str = "none",
+        physical_pruned_tokens: int | None = None,
+        response_cache_avoided_tokens: int | None = None,
         provider_cache_hit: bool = False,
         provider_cached_tokens: int = 0,
         provider_uncached_tokens: int = 0,
@@ -127,11 +139,34 @@ class TokenAccounting:
 
         if cache_hit:
             tokens_saved = baseline_total
+            response_cache_avoided = (
+                response_cache_avoided_tokens
+                if response_cache_avoided_tokens is not None
+                else baseline_total
+            )
+            physical_pruned = 0
             actual_billed = 0
+            effective_billed = 0.0
             reduction_pct = 100.0
         else:
-            tokens_saved = max(0, raw_prompt_tokens - pruned_prompt_tokens)
+            response_cache_avoided = 0
+            physical_pruned = (
+                physical_pruned_tokens
+                if physical_pruned_tokens is not None
+                else max(0, raw_prompt_tokens - pruned_prompt_tokens)
+            )
+            provider_savings = (
+                provider_cached_tokens
+                if (provider_cache_hit or provider_cached_tokens > 0)
+                else 0
+            )
+            tokens_saved = physical_pruned + provider_savings
             actual_billed = pruned_prompt_tokens + completion_tokens
+            effective_billed = (
+                float(actual_billed - (provider_savings * 0.5))
+                if provider_savings
+                else float(actual_billed)
+            )
             reduction_pct = round((tokens_saved / baseline_total) * 100.0, 2)
 
         return TokenUsageRecord(
@@ -145,6 +180,9 @@ class TokenAccounting:
             cache_type=cache_type,
             tokens_saved=tokens_saved,
             actual_billed_tokens=actual_billed,
+            physical_pruned_tokens=physical_pruned,
+            response_cache_avoided_tokens=response_cache_avoided,
+            effective_billed_tokens=effective_billed,
             reduction_percentage=reduction_pct,
             provider_cache_hit=provider_cache_hit,
             provider_cached_tokens=provider_cached_tokens,

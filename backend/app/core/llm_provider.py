@@ -18,10 +18,12 @@ from app.core.byok import get_byok_manager
 from app.core.config import get_settings
 from app.optimizer.two_zone_compiler import CompiledPrompt, get_two_zone_compiler
 from app.providers.base import (
+    ChatMessage,
     ProviderCacheTelemetry,  # noqa: F401
     ProviderRequest,
     UpstreamLLMResponse,
 )
+from app.providers.registry import get_provider_registry
 from app.routing.failover import get_failover_manager
 from app.routing.router import RoutingPolicy, get_model_router
 
@@ -37,6 +39,7 @@ async def call_upstream_llm_detailed(
     max_tokens: int = 1024,
     compiled_prompt: CompiledPrompt | None = None,
     tools: list[dict[str, Any]] | None = None,
+    messages: list[ChatMessage] | None = None,
 ) -> UpstreamLLMResponse | None:
     """Call upstream LLM provider and capture full Tier 5 cache telemetry.
 
@@ -62,50 +65,23 @@ async def call_upstream_llm_detailed(
     else:
         compiled = compiled_prompt
 
-    model_lower = model.lower()
-    is_anthropic = "claude" in model_lower or "anthropic" in model_lower
-    is_openai = any(k in model_lower for k in ("gpt", "o1", "o3"))
-    is_groq = "groq" in model_lower or "llama" in model_lower
-    is_deepseek = "deepseek" in model_lower
-    is_openrouter = "openrouter" in model_lower or "/" in model_lower
-    is_gemini = "gemini" in model_lower or (
-        not is_anthropic
-        and not is_openai
-        and not is_groq
-        and not is_deepseek
-        and not is_openrouter
-    )
-
-    # Determine explicit key from settings or BYOK if available to support mocked settings tests
-    explicit_key: str | None = None
-    if is_anthropic:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, "anthropic"
-        ) or getattr(settings, "ANTHROPIC_API_KEY", None)
-    elif is_openai:
-        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "openai") or getattr(
-            settings, "OPENAI_API_KEY", None
-        )
-    elif is_groq:
-        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "groq") or getattr(
-            settings, "GROQ_API_KEY", None
-        )
-    elif is_deepseek:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, "deepseek"
-        ) or getattr(settings, "DEEPSEEK_API_KEY", None)
-    elif is_openrouter:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, "openrouter"
-        ) or getattr(settings, "OPENROUTER_API_KEY", None)
-    elif is_gemini:
-        explicit_key = await byok_mgr.get_decrypted_key(tenant_id, "gemini") or getattr(
-            settings, "GEMINI_API_KEY", None
-        )
+    provider_name = get_provider_registry().resolve_provider_name_for_model(model)
+    key_map = {
+        "anthropic": getattr(settings, "ANTHROPIC_API_KEY", None),
+        "openai": getattr(settings, "OPENAI_API_KEY", None),
+        "groq": getattr(settings, "GROQ_API_KEY", None),
+        "deepseek": getattr(settings, "DEEPSEEK_API_KEY", None),
+        "openrouter": getattr(settings, "OPENROUTER_API_KEY", None),
+        "gemini": getattr(settings, "GEMINI_API_KEY", None),
+    }
+    explicit_key = await byok_mgr.get_decrypted_key(
+        tenant_id, provider_name
+    ) or key_map.get(provider_name, getattr(settings, "GEMINI_API_KEY", None))
 
     provider_req = ProviderRequest(
         model=model,
         prompt=prompt,
+        messages=messages,
         system_instruction=default_system,
         temperature=temperature,
         max_tokens=max_tokens,
@@ -183,6 +159,7 @@ async def call_upstream_llm(
     max_tokens: int = 1024,
     compiled_prompt: CompiledPrompt | None = None,
     tools: list[dict[str, Any]] | None = None,
+    messages: list[ChatMessage] | None = None,
 ) -> str | None:
     """Convenience wrapper returning plain text response for backward compatibility."""
     res = await call_upstream_llm_detailed(
@@ -194,5 +171,6 @@ async def call_upstream_llm(
         max_tokens=max_tokens,
         compiled_prompt=compiled_prompt,
         tools=tools,
+        messages=messages,
     )
     return res.text if res is not None else None

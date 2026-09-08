@@ -87,3 +87,6 @@ data/
 # Logs
 logs/
 *.log
+
+# Git worktrees
+.worktrees/

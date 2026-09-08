@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import time
@@ -36,6 +37,19 @@ from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
 from app.optimizer.two_zone_compiler import get_two_zone_compiler
+from app.providers.base import ChatMessage
+from app.providers.registry import get_provider_registry
+
+__all__ = [
+    "ChatMessage",
+    "GatewayChatRequest",
+    "GatewayChatResponse",
+    "GatewayInferenceProxy",
+    "QuotaManager",
+    "QuotaStatus",
+    "get_gateway_proxy",
+    "get_quota_manager",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +68,6 @@ class QuotaStatus(BaseModel):
     warning: str | None
 
 
-class ChatMessage(BaseModel):
-    """OpenAI-compatible message format."""
-
-    role: str = Field(..., description="role: system, user, assistant")
-    content: str = Field(..., description="message content")
-
-
 class GatewayChatRequest(BaseModel):
     """OpenAI-compatible chat completions proxy request."""
 
@@ -73,6 +80,10 @@ class GatewayChatRequest(BaseModel):
     stream: bool = Field(
         default=False,
         description="Whether to stream back partial progress via Server-Sent Events",
+    )
+    tools: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Tool definitions / functions",
     )
 
 
@@ -269,6 +280,64 @@ class GatewayInferenceProxy:
             recovery_timeout_seconds=10.0,
         )
 
+    def _extract_request_cache_context(
+        self,
+        request: GatewayChatRequest,
+        tenant_id: str,
+    ) -> tuple[str, int, Any, dict[str, Any]]:
+        """Extract last user message, raw token envelope, compiled prompt, and composite cache params."""
+        last_user_msg = next(
+            (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        )
+
+        raw_prompt_tokens = sum(estimate_tokens(m.content) for m in request.messages)
+        if request.tools:
+            raw_prompt_tokens += sum(
+                estimate_tokens(json.dumps(t, sort_keys=True)) for t in request.tools
+            )
+        raw_prompt_tokens = max(1, raw_prompt_tokens)
+
+        compiler = get_two_zone_compiler()
+        compiled = compiler.partition_messages(
+            messages=request.messages,
+            tools=request.tools,
+            model=request.model,
+            tenant_id=tenant_id,
+        )
+
+        history_parts: list[str] = []
+        last_user_idx = -1
+        for idx in range(len(request.messages) - 1, -1, -1):
+            m = request.messages[idx]
+            if m.role == "user":
+                last_user_idx = idx
+                break
+
+        if last_user_idx > 0:
+            for m in request.messages[:last_user_idx]:
+                if m.role not in ("system", "developer"):
+                    history_parts.append(f"{m.role}:{m.content}")
+
+        history_hash = (
+            hashlib.sha256("\n".join(history_parts).encode()).hexdigest()
+            if history_parts
+            else ""
+        )
+        tools_hash = (
+            hashlib.sha256(json.dumps(request.tools, sort_keys=True).encode()).hexdigest()
+            if request.tools
+            else ""
+        )
+
+        cache_params = {
+            "temperature": request.temperature,
+            "system_hash": compiled.static_prefix_hash,
+            "history_hash": history_hash,
+            "tools_hash": tools_hash,
+        }
+
+        return last_user_msg, raw_prompt_tokens, compiled, cache_params
+
     async def chat_completions(
         self,
         tenant_id: str,
@@ -280,15 +349,35 @@ class GatewayInferenceProxy:
         if not allowed:
             raise ValueError(error_msg or "Token budget quota exceeded")
 
-        # Extract last user message
-        last_user_msg = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        # 2. Canonical Model-to-Provider Resolution
+        provider = get_provider_registry().resolve_provider_name_for_model(
+            request.model
+        )
+        logger.info(
+            "provider_resolved",
+            extra={
+                "model": request.model,
+                "provider": provider,
+                "tenant_id": tenant_id,
+            },
         )
 
-        # 2. Tier 1 Exact Match Cache
-        cache_entry = await self.cache_mgr.get(last_user_msg, tenant_id=tenant_id)
+        (
+            last_user_msg,
+            raw_prompt_tokens,
+            compiled,
+            cache_params,
+        ) = self._extract_request_cache_context(request, tenant_id)
+
+        # 3. Tier 1 Exact Match Cache
+        cache_entry = await self.cache_mgr.get(
+            prompt=last_user_msg,
+            tenant_id=tenant_id,
+            model=request.model,
+            provider=provider,
+            parameters=cache_params,
+        )
         now_ts = int(time.time())
-        raw_prompt_tokens = estimate_tokens(last_user_msg)
 
         if cache_entry is not None:
             # Immediate zero-cost return with exact accounting
@@ -303,6 +392,8 @@ class GatewayInferenceProxy:
                 completion_tokens=est_completion,
                 cache_hit=True,
                 cache_type=cache_entry.cache_type or "exact",
+                response_cache_avoided_tokens=raw_prompt_tokens,
+                provider_name=provider,
             )
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
             with contextlib.suppress(Exception):
@@ -338,22 +429,11 @@ class GatewayInferenceProxy:
                 reduction_percentage=record.reduction_percentage,
             )
 
-        # 3. Dynamic BYOK Key Injection (decrypt transiently in memory)
-        provider = (
-            "gemini"
-            if "gemini" in request.model.lower()
-            else (
-                "openai"
-                if "gpt" in request.model.lower()
-                else (
-                    "anthropic" if "claude" in request.model.lower() else "openrouter"
-                )
-            )
-        )
+        # 4. Dynamic BYOK Key Injection (decrypt transiently in memory)
         byok_mgr = get_byok_manager()
         byok_key = await byok_mgr.get_decrypted_key(tenant_id, provider)
 
-        # 4. Context Optimization via Tier 6 ContextOptimizer on dynamic input
+        # 5. Context Optimization via Tier 6 ContextOptimizer on dynamic input
         optimizer = get_context_optimizer()
         optimized_result = optimizer.optimize_dynamic_context(
             dynamic_context=last_user_msg,
@@ -362,9 +442,8 @@ class GatewayInferenceProxy:
         effective_query = optimized_result.content or last_user_msg
 
         # Tier 5: Two-Zone Prompt Compilation
-        compiler = get_two_zone_compiler()
-        compiled = compiler.partition_messages(request.messages)
         if effective_query and effective_query != last_user_msg:
+            compiler = get_two_zone_compiler()
             compiled = compiler.compile(
                 system_instruction=compiled.static_prefix,
                 user_query=effective_query,
@@ -372,7 +451,7 @@ class GatewayInferenceProxy:
                 tenant_id=tenant_id,
             )
 
-        # 5. Model Generation (Wrapped in CircuitBreaker)
+        # 6. Model Generation (Wrapped in CircuitBreaker)
         upstream_response: UpstreamLLMResponse | None = None
 
         async def call_model() -> str:
@@ -384,6 +463,7 @@ class GatewayInferenceProxy:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 compiled_prompt=compiled,
+                messages=request.messages,
             )
             if upstream_res:
                 upstream_response = upstream_res
@@ -397,6 +477,7 @@ class GatewayInferenceProxy:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 compiled_prompt=compiled,
+                messages=request.messages,
             )
             if legacy_text:
                 return legacy_text
@@ -426,17 +507,23 @@ class GatewayInferenceProxy:
             }
         )
 
+        context_pruning_savings = max(
+            0,
+            (optimized_result.raw_tokens or 0) - (optimized_result.optimized_tokens or 0),
+        )
+        pruned_prompt_tokens = max(1, raw_prompt_tokens - context_pruning_savings)
+        physical_pruned = max(0, raw_prompt_tokens - pruned_prompt_tokens)
+
         record = TokenAccounting.record_transaction(
             request_id=req_id,
             tenant_id=tenant_id,
             model=request.model,
-            raw_prompt_tokens=optimized_result.raw_tokens
-            or estimate_tokens(last_user_msg),
-            pruned_prompt_tokens=optimized_result.optimized_tokens
-            or estimate_tokens(effective_query),
+            raw_prompt_tokens=raw_prompt_tokens,
+            pruned_prompt_tokens=pruned_prompt_tokens,
             completion_tokens=completion_tokens,
             cache_hit=False,
             cache_type="none",
+            physical_pruned_tokens=physical_pruned,
             provider_cache_hit=telemetry.cache_hit if telemetry else False,
             provider_cached_tokens=telemetry.cached_tokens if telemetry else 0,
             provider_uncached_tokens=telemetry.uncached_input_tokens
@@ -455,14 +542,17 @@ class GatewayInferenceProxy:
             provider_name=telemetry.provider if telemetry else provider,
         )
 
-        # 6. Populate Tier 1 Cache for future hits
+        # 7. Populate Tier 1 Cache for future hits
         await self.cache_mgr.set(
             prompt=last_user_msg,
             tenant_id=tenant_id,
             response=output_text,
+            model=request.model,
+            provider=provider,
+            parameters=cache_params,
         )
 
-        # 7. Deduct token usage & record tokens saved
+        # 8. Deduct token usage & record tokens saved
         await self.quota_mgr.record_usage(
             tenant_id=tenant_id,
             prompt_tokens=record.pruned_prompt_tokens,
@@ -477,10 +567,8 @@ class GatewayInferenceProxy:
                 tenant_id=tenant_id,
                 provider=telemetry.provider if telemetry else provider,
                 model=request.model,
-                raw_tokens=optimized_result.raw_tokens
-                or estimate_tokens(last_user_msg),
-                optimized_tokens=optimized_result.optimized_tokens
-                or estimate_tokens(effective_query),
+                raw_tokens=raw_prompt_tokens,
+                optimized_tokens=record.pruned_prompt_tokens,
                 output_tokens=completion_tokens,
                 provider_usage=telemetry.model_dump() if telemetry else None,
                 provider_cached_tokens=telemetry.cached_tokens if telemetry else 0,
@@ -536,14 +624,25 @@ class GatewayInferenceProxy:
         req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         now_ts = int(time.time())
 
-        # Extract last user message
-        last_user_msg = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"), ""
+        provider = get_provider_registry().resolve_provider_name_for_model(
+            request.model
         )
-        raw_prompt_tokens = estimate_tokens(last_user_msg)
+
+        (
+            last_user_msg,
+            raw_prompt_tokens,
+            compiled,
+            cache_params,
+        ) = self._extract_request_cache_context(request, tenant_id)
 
         # 2. Tier 1 Exact Match Cache (stream instant chunks)
-        cache_entry = await self.cache_mgr.get(last_user_msg, tenant_id=tenant_id)
+        cache_entry = await self.cache_mgr.get(
+            prompt=last_user_msg,
+            tenant_id=tenant_id,
+            model=request.model,
+            provider=provider,
+            parameters=cache_params,
+        )
         if cache_entry is not None:
             words = cache_entry.response.split(" ")
             for i, word in enumerate(words):
@@ -592,14 +691,13 @@ class GatewayInferenceProxy:
                 completion_tokens=est_completion,
                 cache_hit=True,
                 cache_type=cache_entry.cache_type or "exact",
+                response_cache_avoided_tokens=raw_prompt_tokens,
+                provider_name=provider,
             )
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
             return
 
         # 3. Model Generation via Provider Stream or Fallback
-        compiler = get_two_zone_compiler()
-        compiled = compiler.partition_messages(request.messages)
-
         from app.core.llm_provider import call_upstream_llm
 
         output_text = await call_upstream_llm(
@@ -609,6 +707,7 @@ class GatewayInferenceProxy:
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             compiled_prompt=compiled,
+            messages=request.messages,
         )
         if not output_text:
             output_text = (
@@ -669,6 +768,9 @@ class GatewayInferenceProxy:
                     prompt=last_user_msg,
                     tenant_id=tenant_id,
                     response=output_text,
+                    model=request.model,
+                    provider=provider,
+                    parameters=cache_params,
                 )
 
 

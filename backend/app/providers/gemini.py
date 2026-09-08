@@ -86,10 +86,24 @@ class GeminiAdapter(LLMProvider):
             request.model if "gemini" in request.model.lower() else "gemini-1.5-flash"
         )
 
-        payload: dict[str, Any] = {
-            "contents": [
+        contents: list[dict[str, Any]] = []
+        if request.messages:
+            for m in request.messages:
+                if m.role in ("system", "developer"):
+                    continue
+                role = "model" if m.role == "assistant" else "user"
+                contents.append({"role": role, "parts": [{"text": m.content}]})
+            if not contents:
+                contents = [
+                    {"parts": [{"text": compiled.dynamic_suffix or request.prompt}]}
+                ]
+        else:
+            contents = [
                 {"parts": [{"text": compiled.dynamic_suffix or request.prompt}]}
-            ],
+            ]
+
+        payload: dict[str, Any] = {
+            "contents": contents,
             "systemInstruction": {
                 "parts": [{"text": compiled.static_prefix or default_system}]
             },
@@ -190,6 +204,7 @@ class GeminiAdapter(LLMProvider):
                 actual_cost_usd=costs.actual_cost_usd,
                 estimated_savings_usd=costs.savings_usd,
                 savings_percentage=costs.savings_percentage,
+                turn_count=len(request.messages) if request.messages else 1,
             )
 
             return ProviderResponse(

@@ -115,10 +115,23 @@ class AnthropicAdapter(LLMProvider):
             else "claude-3-5-sonnet-20241022"
         )
 
+        messages: list[dict[str, Any]] = []
+        if request.messages:
+            for m in request.messages:
+                if m.role in ("system", "developer"):
+                    if not any(b.get("text") == m.content for b in system_blocks):
+                        system_blocks.append({"type": "text", "text": m.content})
+                else:
+                    messages.append({"role": m.role, "content": m.content})
+            if not messages:
+                messages = [{"role": "user", "content": user_content}]
+        else:
+            messages = [{"role": "user", "content": user_content}]
+
         payload: dict[str, Any] = {
             "model": anthropic_model,
             "system": system_blocks,
-            "messages": [{"role": "user", "content": user_content}],
+            "messages": messages,
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
             "stream": stream,
@@ -217,6 +230,7 @@ class AnthropicAdapter(LLMProvider):
                 actual_cost_usd=costs.actual_cost_usd,
                 estimated_savings_usd=costs.savings_usd,
                 savings_percentage=costs.savings_percentage,
+                turn_count=len(request.messages) if request.messages else 1,
             )
 
             return ProviderResponse(

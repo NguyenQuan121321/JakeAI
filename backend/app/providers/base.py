@@ -65,6 +65,7 @@ class ProviderCacheTelemetry(BaseModel):
     actual_cost_usd: float = Field(default=0.0)
     estimated_savings_usd: float = Field(default=0.0)
     savings_percentage: float = Field(default=0.0)
+    turn_count: int = Field(default=1, description="Number of conversation turns in request")
 
 
 class UpstreamLLMResponse(BaseModel):
@@ -129,11 +130,22 @@ class ModelCapabilities(BaseModel):
     )
 
 
+class ChatMessage(BaseModel):
+    """OpenAI-compatible message format for multi-turn conversations."""
+
+    role: str = Field(..., description="Role: system, user, assistant, tool")
+    content: str = Field(default="", description="Message text content")
+    name: str | None = Field(default=None, description="Optional author or tool name")
+
+
 class ProviderRequest(BaseModel):
     """Unified request contract passed to LLMProvider adapters."""
 
     model: str = Field(..., description="Target model name")
     prompt: str = Field(..., description="User prompt or query")
+    messages: list[ChatMessage] | None = Field(
+        default=None, description="Structured multi-turn conversation messages"
+    )
     system_instruction: str | None = Field(
         default=None, description="System instructions / prompt"
     )
