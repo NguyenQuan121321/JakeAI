@@ -10,9 +10,13 @@ Implements rigorous token accounting across:
 
 from __future__ import annotations
 
+import json
 import time
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.optimizer.token_pruner import estimate_tokens
 
 
 class TokenUsageRecord(BaseModel):
@@ -65,6 +69,90 @@ class TokenUsageRecord(BaseModel):
     )
     provider_name: str = Field(default="generic")
 
+    # Canonical Token Accounting Dimensions (TOK-02)
+    raw_input_tokens: int = Field(
+        default=0,
+        description="Total model-visible input envelope tokens before optimization",
+    )
+    optimized_input_tokens: int = Field(
+        default=0,
+        description="Model-visible input tokens submitted to provider after optimization",
+    )
+    provider_cached_input_tokens: int = Field(
+        default=0,
+        description="Input tokens served from upstream provider KV prompt cache",
+    )
+    physical_tokens_pruned: int = Field(
+        default=0,
+        description="Physical tokens removed by local context optimization/pruning",
+    )
+    response_cache_avoided_tokens: int = Field(
+        default=0,
+        description="Tokens avoided because request was answered from response cache",
+    )
+    effective_billed_tokens: int = Field(
+        default=0,
+        description="Net tokens billed/counted against tenant quota for this request",
+    )
+    reconciled_with_provider: bool = Field(
+        default=False,
+        description="Whether usage metrics were reconciled with upstream provider telemetry",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_dimensions(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        # Raw input tokens synchronization
+        if "raw_input_tokens" in data and "raw_prompt_tokens" not in data:
+            data["raw_prompt_tokens"] = data["raw_input_tokens"]
+        elif "raw_prompt_tokens" in data and "raw_input_tokens" not in data:
+            data["raw_input_tokens"] = data["raw_prompt_tokens"]
+
+        # Optimized input tokens synchronization
+        if "optimized_input_tokens" in data and "pruned_prompt_tokens" not in data:
+            data["pruned_prompt_tokens"] = data["optimized_input_tokens"]
+        elif "pruned_prompt_tokens" in data and "optimized_input_tokens" not in data:
+            data["optimized_input_tokens"] = data["pruned_prompt_tokens"]
+
+        # Provider cached tokens synchronization
+        if (
+            "provider_cached_input_tokens" in data
+            and "provider_cached_tokens" not in data
+        ):
+            data["provider_cached_tokens"] = data["provider_cached_input_tokens"]
+        elif (
+            "provider_cached_tokens" in data
+            and "provider_cached_input_tokens" not in data
+        ):
+            data["provider_cached_input_tokens"] = data["provider_cached_tokens"]
+
+        # Effective billed tokens synchronization
+        if "effective_billed_tokens" in data and "actual_billed_tokens" not in data:
+            data["actual_billed_tokens"] = data["effective_billed_tokens"]
+        elif "actual_billed_tokens" in data and "effective_billed_tokens" not in data:
+            data["effective_billed_tokens"] = data["actual_billed_tokens"]
+
+        # Physical tokens pruned derivation
+        if "physical_tokens_pruned" not in data:
+            raw = data.get("raw_input_tokens", 0)
+            opt = data.get("optimized_input_tokens", 0)
+            data["physical_tokens_pruned"] = max(0, raw - opt)
+
+        # Response cache avoided tokens derivation
+        if "response_cache_avoided_tokens" not in data:
+            if data.get("cache_hit"):
+                data["response_cache_avoided_tokens"] = data.get(
+                    "tokens_saved",
+                    data.get("raw_input_tokens", 0) + data.get("completion_tokens", 0),
+                )
+            else:
+                data["response_cache_avoided_tokens"] = 0
+
+        return data
+
 
 class TokenBenchmarkSummary(BaseModel):
     """Aggregated benchmark report proving empirical token savings."""
@@ -91,14 +179,130 @@ class TokenBenchmarkSummary(BaseModel):
 class TokenAccounting:
     """Ledger computing and recording token optimization metrics."""
 
-    @staticmethod
+    @classmethod
+    def calculate_envelope_tokens(
+        cls,
+        messages: list[Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        system_instruction: str | None = None,
+        user_query: str | None = None,
+        dynamic_context: str | None = None,
+        rag_context: str | None = None,
+        model: str = "default",
+    ) -> int:
+        """Calculate canonical model-visible input envelope tokens.
+
+        Accounts for:
+        - system instructions and developer turns
+        - multi-turn conversation history
+        - current user query
+        - assistant turns, function/tool call schemas and payloads
+        - tool execution result messages
+        - tool definition schemas (functions)
+        - retrieved RAG context passages
+        - message framing and role delimiters
+        """
+        _ = model
+        total = 0
+        counted_contents: set[int] = set()
+
+        if messages:
+            for msg in messages:
+                role = getattr(msg, "role", "") or (
+                    msg.get("role", "") if isinstance(msg, dict) else ""
+                )
+                if role:
+                    total += estimate_tokens(str(role))
+                content = getattr(msg, "content", "") or (
+                    msg.get("content", "") if isinstance(msg, dict) else ""
+                )
+                name = getattr(msg, "name", None) or (
+                    msg.get("name") if isinstance(msg, dict) else None
+                )
+                tool_call_id = getattr(msg, "tool_call_id", None) or (
+                    msg.get("tool_call_id") if isinstance(msg, dict) else None
+                )
+                tool_calls = getattr(msg, "tool_calls", None) or (
+                    msg.get("tool_calls") if isinstance(msg, dict) else None
+                )
+
+                if content:
+                    total += estimate_tokens(str(content))
+                    counted_contents.add(id(content))
+
+                # Standard chat format framing (<|im_start|>{role}\n...<|im_end|>\n)
+                total += 4
+
+                if name:
+                    total += estimate_tokens(str(name)) + 1
+                if tool_call_id:
+                    total += estimate_tokens(str(tool_call_id)) + 1
+                if tool_calls:
+                    total += estimate_tokens(json.dumps(tool_calls, ensure_ascii=False))
+
+        # Explicit system instruction if not already counted
+        if system_instruction and id(system_instruction) not in counted_contents:
+            has_sys = bool(
+                messages
+                and any(
+                    (
+                        getattr(m, "role", "")
+                        or (m.get("role", "") if isinstance(m, dict) else "")
+                    )
+                    in ("system", "developer")
+                    for m in messages
+                )
+            )
+            if not has_sys:
+                total += estimate_tokens(system_instruction) + 4
+
+        # Explicit user query if not already counted
+        if user_query and id(user_query) not in counted_contents:
+            has_user = bool(
+                messages
+                and any(
+                    (
+                        getattr(m, "role", "")
+                        or (m.get("role", "") if isinstance(m, dict) else "")
+                    )
+                    == "user"
+                    for m in messages
+                )
+            )
+            if not has_user:
+                total += estimate_tokens(user_query) + 4
+
+        # Explicit dynamic context if provided
+        if dynamic_context and id(dynamic_context) not in counted_contents:
+            total += estimate_tokens(dynamic_context)
+
+        # Explicit RAG context if provided
+        if rag_context and id(rag_context) not in counted_contents:
+            total += estimate_tokens(rag_context)
+
+        # Tool definition schemas passed in request
+        if tools:
+            total += estimate_tokens(json.dumps(tools, ensure_ascii=False)) + 8
+
+        has_input = bool(
+            messages
+            or system_instruction
+            or user_query
+            or dynamic_context
+            or rag_context
+            or tools
+        )
+        return max(1, total) if has_input else 0
+
+    @classmethod
     def record_transaction(
+        cls,
         request_id: str,
         tenant_id: str,
         model: str,
-        raw_prompt_tokens: int,
-        pruned_prompt_tokens: int,
-        completion_tokens: int,
+        raw_prompt_tokens: int = 0,
+        pruned_prompt_tokens: int = 0,
+        completion_tokens: int = 0,
         cache_hit: bool = False,
         cache_type: str = "none",
         provider_cache_hit: bool = False,
@@ -109,51 +313,125 @@ class TokenAccounting:
         provider_cost_savings_usd: float = 0.0,
         provider_actual_cost_usd: float = 0.0,
         provider_name: str = "generic",
+        *,
+        raw_input_tokens: int | None = None,
+        optimized_input_tokens: int | None = None,
+        provider_cached_input_tokens: int | None = None,
+        physical_tokens_pruned: int | None = None,
+        response_cache_avoided_tokens: int | None = None,
+        effective_billed_tokens: int | None = None,
+        provider_telemetry: Any | None = None,
     ) -> TokenUsageRecord:
         """Calculate exact token accounting and savings for an inference call.
 
-        Formulas:
-          Baseline Total = raw_prompt_tokens + completion_tokens
-          If Layer A Cache Hit:
-            tokens_saved = Baseline Total
-            actual_billed = 0
-            reduction_percentage = 100.0%
-          If Layer A Cache Miss:
-            tokens_saved = max(0, raw_prompt_tokens - pruned_prompt_tokens)
-            actual_billed = pruned_prompt_tokens + completion_tokens
-            reduction_percentage = (tokens_saved / Baseline Total) * 100
+        Supports full TOK-02 canonical token accounting dimensions and reconciliation
+        with upstream provider telemetry.
         """
-        baseline_total = max(1, raw_prompt_tokens + completion_tokens)
+        raw_in = raw_input_tokens if raw_input_tokens is not None else raw_prompt_tokens
+        opt_in = (
+            optimized_input_tokens
+            if optimized_input_tokens is not None
+            else pruned_prompt_tokens
+        )
+        prov_cached = (
+            provider_cached_input_tokens
+            if provider_cached_input_tokens is not None
+            else provider_cached_tokens
+        )
+        prov_uncached = provider_uncached_tokens
+        prov_hit = provider_cache_hit
+        prov_write = provider_cache_write_tokens
+        prov_miss = provider_miss_reason
+        prov_savings = provider_cost_savings_usd
+        prov_cost = provider_actual_cost_usd
+        prov_name = provider_name
+        reconciled = False
+
+        # Provider Usage Reconciliation (when provider reports telemetry)
+        if provider_telemetry is not None:
+            t_uncached = getattr(provider_telemetry, "uncached_input_tokens", 0)
+            t_cached = getattr(provider_telemetry, "cached_tokens", 0)
+            t_output = getattr(provider_telemetry, "output_tokens", 0)
+            t_write = getattr(provider_telemetry, "cache_write_tokens", 0)
+            t_hit = getattr(provider_telemetry, "cache_hit", False)
+            t_miss = getattr(provider_telemetry, "miss_reason", "none")
+            t_savings = getattr(provider_telemetry, "estimated_savings_usd", 0.0)
+            t_cost = getattr(provider_telemetry, "actual_cost_usd", 0.0)
+            t_prov = getattr(provider_telemetry, "provider", "")
+
+            if t_uncached + t_cached > 0:
+                reconciled = True
+                prior_pruned = max(0, raw_in - opt_in)
+                opt_in = t_uncached + t_cached
+                raw_in = opt_in + prior_pruned
+                prov_cached = t_cached
+                prov_uncached = t_uncached
+                prov_hit = t_hit
+                prov_write = t_write
+                prov_miss = t_miss
+                prov_savings = t_savings
+                prov_cost = t_cost
+                if t_prov:
+                    prov_name = t_prov
+
+            if t_output > 0:
+                completion_tokens = t_output
+
+        baseline_total = max(1, raw_in + completion_tokens)
 
         if cache_hit:
-            tokens_saved = baseline_total
-            actual_billed = 0
+            resp_avoided = (
+                response_cache_avoided_tokens
+                if response_cache_avoided_tokens is not None
+                else baseline_total
+            )
+            phys_pruned = 0
+            billed = 0
+            saved = resp_avoided
             reduction_pct = 100.0
         else:
-            tokens_saved = max(0, raw_prompt_tokens - pruned_prompt_tokens)
-            actual_billed = pruned_prompt_tokens + completion_tokens
-            reduction_pct = round((tokens_saved / baseline_total) * 100.0, 2)
+            resp_avoided = 0
+            phys_pruned = (
+                physical_tokens_pruned
+                if physical_tokens_pruned is not None
+                else max(0, raw_in - opt_in)
+            )
+            if effective_billed_tokens is not None:
+                billed = effective_billed_tokens
+            elif prov_cached > 0:
+                billed = (opt_in - prov_cached) + completion_tokens
+            else:
+                billed = opt_in + completion_tokens
+            saved = max(0, baseline_total - billed)
+            reduction_pct = round((saved / baseline_total) * 100.0, 2)
 
         return TokenUsageRecord(
             request_id=request_id,
             tenant_id=tenant_id,
             model=model,
-            raw_prompt_tokens=raw_prompt_tokens,
-            pruned_prompt_tokens=pruned_prompt_tokens,
+            raw_prompt_tokens=raw_in,
+            pruned_prompt_tokens=opt_in,
             completion_tokens=completion_tokens,
             cache_hit=cache_hit,
             cache_type=cache_type,
-            tokens_saved=tokens_saved,
-            actual_billed_tokens=actual_billed,
+            tokens_saved=saved,
+            actual_billed_tokens=billed,
             reduction_percentage=reduction_pct,
-            provider_cache_hit=provider_cache_hit,
-            provider_cached_tokens=provider_cached_tokens,
-            provider_uncached_tokens=provider_uncached_tokens,
-            provider_cache_write_tokens=provider_cache_write_tokens,
-            provider_miss_reason=provider_miss_reason,
-            provider_cost_savings_usd=provider_cost_savings_usd,
-            provider_actual_cost_usd=provider_actual_cost_usd,
-            provider_name=provider_name,
+            provider_cache_hit=prov_hit,
+            provider_cached_tokens=prov_cached,
+            provider_uncached_tokens=prov_uncached,
+            provider_cache_write_tokens=prov_write,
+            provider_miss_reason=prov_miss,
+            provider_cost_savings_usd=prov_savings,
+            provider_actual_cost_usd=prov_cost,
+            provider_name=prov_name,
+            raw_input_tokens=raw_in,
+            optimized_input_tokens=opt_in,
+            provider_cached_input_tokens=prov_cached,
+            physical_tokens_pruned=phys_pruned,
+            response_cache_avoided_tokens=resp_avoided,
+            effective_billed_tokens=billed,
+            reconciled_with_provider=reconciled,
         )
 
     @staticmethod

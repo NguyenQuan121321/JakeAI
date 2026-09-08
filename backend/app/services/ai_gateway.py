@@ -233,6 +233,20 @@ class QuotaManager:
         self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + tokens_saved
         return self._memory_usage[mem_key]
 
+    async def get_tokens_saved(self, tenant_id: str) -> int:
+        """Get current tokens saved for the active period from Redis or memory."""
+        period = self._get_period_key()
+        redis = await self._get_redis()
+        if redis is not None:
+            try:
+                val = await redis.get(f"gateway:tokens_saved:{tenant_id}:{period}")
+                if val:
+                    return int(val)
+            except Exception as exc:
+                logger.debug("Redis read tokens_saved failed (%s)", exc)
+        mem_key = f"tokens_saved:{tenant_id}:{period}"
+        return self._memory_usage.get(mem_key, 0)
+
     async def get_status(self, tenant_id: str) -> QuotaStatus:
         """Return full quota status object for a tenant."""
         limit = await self.get_quota_limit(tenant_id)
@@ -332,7 +346,13 @@ class GatewayInferenceProxy:
             exact_only=True,
         )
         now_ts = int(time.time())
-        raw_prompt_tokens = estimate_tokens(last_user_msg)
+        # Compute canonical model-visible input envelope tokens across all dimensions
+        # (system instructions, conversation history, user query, tools, and RAG context)
+        raw_input_tokens = TokenAccounting.calculate_envelope_tokens(
+            messages=request.messages,
+            tools=request.tools,
+            model=request.model,
+        )
 
         if cache_entry is not None:
             # Immediate zero-cost return with exact accounting
@@ -342,8 +362,8 @@ class GatewayInferenceProxy:
                 request_id=req_id,
                 tenant_id=tenant_id,
                 model=request.model,
-                raw_prompt_tokens=raw_prompt_tokens,
-                pruned_prompt_tokens=0,
+                raw_input_tokens=raw_input_tokens,
+                optimized_input_tokens=0,
                 completion_tokens=est_completion,
                 cache_hit=True,
                 cache_type=cache_entry.cache_type or "exact",
@@ -354,7 +374,7 @@ class GatewayInferenceProxy:
                     request_id=req_id,
                     tenant_id=tenant_id,
                     model=request.model,
-                    raw_tokens=raw_prompt_tokens,
+                    raw_tokens=record.raw_input_tokens,
                     output_tokens=est_completion,
                     cache_type=cache_entry.cache_type or "exact",
                 )
@@ -489,33 +509,25 @@ class GatewayInferenceProxy:
             }
         )
 
+        # Compute optimized input envelope tokens after dynamic optimization
+        optimized_input_tokens = TokenAccounting.calculate_envelope_tokens(
+            messages=messages_to_send,
+            tools=request.tools,
+            model=request.model,
+        )
+        physical_tokens_pruned = max(0, raw_input_tokens - optimized_input_tokens)
+
         record = TokenAccounting.record_transaction(
             request_id=req_id,
             tenant_id=tenant_id,
             model=request.model,
-            raw_prompt_tokens=optimized_result.raw_tokens
-            or estimate_tokens(last_user_msg),
-            pruned_prompt_tokens=optimized_result.optimized_tokens
-            or estimate_tokens(effective_query),
+            raw_input_tokens=raw_input_tokens,
+            optimized_input_tokens=optimized_input_tokens,
+            physical_tokens_pruned=physical_tokens_pruned,
             completion_tokens=completion_tokens,
             cache_hit=False,
             cache_type="none",
-            provider_cache_hit=telemetry.cache_hit if telemetry else False,
-            provider_cached_tokens=telemetry.cached_tokens if telemetry else 0,
-            provider_uncached_tokens=telemetry.uncached_input_tokens
-            if telemetry
-            else 0,
-            provider_cache_write_tokens=telemetry.cache_write_tokens
-            if telemetry
-            else 0,
-            provider_miss_reason=telemetry.miss_reason
-            if telemetry
-            else "offline_fallback",
-            provider_cost_savings_usd=telemetry.estimated_savings_usd
-            if telemetry
-            else 0.0,
-            provider_actual_cost_usd=telemetry.actual_cost_usd if telemetry else 0.0,
-            provider_name=telemetry.provider if telemetry else provider,
+            provider_telemetry=telemetry,
         )
 
         # 6. Populate Tier 1 Cache for future hits
@@ -533,9 +545,12 @@ class GatewayInferenceProxy:
         )
 
         # 7. Deduct token usage & record tokens saved
+        billed_prompt_tokens = max(
+            0, record.actual_billed_tokens - record.completion_tokens
+        )
         await self.quota_mgr.record_usage(
             tenant_id=tenant_id,
-            prompt_tokens=record.pruned_prompt_tokens,
+            prompt_tokens=billed_prompt_tokens,
             completion_tokens=record.completion_tokens,
         )
         if record.tokens_saved > 0:
@@ -547,13 +562,11 @@ class GatewayInferenceProxy:
                 tenant_id=tenant_id,
                 provider=telemetry.provider if telemetry else provider,
                 model=request.model,
-                raw_tokens=optimized_result.raw_tokens
-                or estimate_tokens(last_user_msg),
-                optimized_tokens=optimized_result.optimized_tokens
-                or estimate_tokens(effective_query),
-                output_tokens=completion_tokens,
+                raw_tokens=record.raw_input_tokens,
+                optimized_tokens=record.optimized_input_tokens,
+                output_tokens=record.completion_tokens,
                 provider_usage=telemetry.model_dump() if telemetry else None,
-                provider_cached_tokens=telemetry.cached_tokens if telemetry else 0,
+                provider_cached_tokens=record.provider_cached_input_tokens,
                 provider_cache_write_tokens=telemetry.cache_write_tokens
                 if telemetry
                 else 0,
@@ -572,7 +585,7 @@ class GatewayInferenceProxy:
                 }
             ],
             usage={
-                "prompt_tokens": record.pruned_prompt_tokens,
+                "prompt_tokens": record.optimized_input_tokens,
                 "completion_tokens": record.completion_tokens,
                 "total_tokens": record.actual_billed_tokens,
             },
@@ -618,7 +631,12 @@ class GatewayInferenceProxy:
             )
             or ""
         )
-        raw_prompt_tokens = estimate_tokens(last_user_msg)
+        # Compute canonical model-visible input envelope tokens across all dimensions
+        raw_input_tokens = TokenAccounting.calculate_envelope_tokens(
+            messages=request.messages,
+            tools=request.tools,
+            model=request.model,
+        )
 
         # Build generation-relevant fields for canonical cache identity
         system_instructions = "\n".join(
@@ -699,8 +717,8 @@ class GatewayInferenceProxy:
                 request_id=req_id,
                 tenant_id=tenant_id,
                 model=request.model,
-                raw_prompt_tokens=raw_prompt_tokens,
-                pruned_prompt_tokens=0,
+                raw_input_tokens=raw_input_tokens,
+                optimized_input_tokens=0,
                 completion_tokens=est_completion,
                 cache_hit=True,
                 cache_type=cache_entry.cache_type or "exact",
@@ -773,10 +791,20 @@ class GatewayInferenceProxy:
         finally:
             # Deduct usage & populate cache even on disconnect
             completion_tokens = max(1, estimate_tokens("".join(streamed_words)))
+            record = TokenAccounting.record_transaction(
+                request_id=req_id,
+                tenant_id=tenant_id,
+                model=request.model,
+                raw_input_tokens=raw_input_tokens,
+                optimized_input_tokens=raw_input_tokens,
+                completion_tokens=completion_tokens,
+                cache_hit=False,
+                cache_type="none",
+            )
             await self.quota_mgr.record_usage(
                 tenant_id=tenant_id,
-                prompt_tokens=raw_prompt_tokens,
-                completion_tokens=completion_tokens,
+                prompt_tokens=record.optimized_input_tokens,
+                completion_tokens=record.completion_tokens,
             )
             if len(streamed_words) == len(words):
                 await self.cache_mgr.set(
