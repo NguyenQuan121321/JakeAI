@@ -233,6 +233,20 @@ class QuotaManager:
         self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + tokens_saved
         return self._memory_usage[mem_key]
 
+    async def get_tokens_saved(self, tenant_id: str) -> int:
+        """Get current tokens saved for the active period from Redis or memory."""
+        period = self._get_period_key()
+        redis = await self._get_redis()
+        if redis is not None:
+            try:
+                val = await redis.get(f"gateway:tokens_saved:{tenant_id}:{period}")
+                if val:
+                    return int(val)
+            except Exception as exc:
+                logger.debug("Redis read tokens_saved failed (%s)", exc)
+        mem_key = f"tokens_saved:{tenant_id}:{period}"
+        return self._memory_usage.get(mem_key, 0)
+
     async def get_status(self, tenant_id: str) -> QuotaStatus:
         """Return full quota status object for a tenant."""
         limit = await self.get_quota_limit(tenant_id)

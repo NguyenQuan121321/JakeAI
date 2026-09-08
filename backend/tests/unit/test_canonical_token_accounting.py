@@ -493,10 +493,8 @@ async def test_gateway_chat_completions_stream_cache_hit_accounting() -> None:
             chunks.append(chunk)
 
         assert len(chunks) > 0
-        # Check tokens saved in quota manager
-        period = quota_mgr._get_period_key()
-        saved_key = f"tokens_saved:{tenant_id}:{period}"
-        tokens_saved = quota_mgr._memory_usage.get(saved_key, 0)
+        # Check tokens saved in quota manager (Redis or memory backed)
+        tokens_saved = await quota_mgr.get_tokens_saved(tenant_id)
         assert tokens_saved > 800
         assert tokens_saved != query_tokens
 
@@ -615,3 +613,30 @@ def test_provider_reconciliation_zero_tokens_fallback() -> None:
     assert record.completion_tokens == 150
     assert record.effective_billed_tokens == 1650
     assert record.reconciled_with_provider is False
+
+
+@pytest.mark.asyncio
+async def test_quota_manager_get_tokens_saved_redis_and_memory() -> None:
+    """Verifies QuotaManager.get_tokens_saved works seamlessly via Redis and fallback memory."""
+    qm = QuotaManager()
+    tenant = "tenant-qm-tokens-saved"
+
+    # In-memory test (no redis)
+    with patch.object(qm, "_get_redis", AsyncMock(return_value=None)):
+        await qm.record_tokens_saved(tenant, 450)
+        saved = await qm.get_tokens_saved(tenant)
+        assert saved == 450
+
+    # Redis test
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=b"1250")
+    with patch.object(qm, "_get_redis", AsyncMock(return_value=mock_redis)):
+        saved_redis = await qm.get_tokens_saved(tenant)
+        assert saved_redis == 1250
+
+    # Redis error fallback to memory
+    mock_redis_err = AsyncMock()
+    mock_redis_err.get = AsyncMock(side_effect=Exception("Redis connection error"))
+    with patch.object(qm, "_get_redis", AsyncMock(return_value=mock_redis_err)):
+        saved_fallback = await qm.get_tokens_saved(tenant)
+        assert saved_fallback == 450
