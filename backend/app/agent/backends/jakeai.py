@@ -23,6 +23,7 @@ from app.agent.backends.base import (
     BackendStreamChunk,
 )
 from app.core.llm_provider import call_upstream_llm_detailed
+from app.providers.base import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,17 @@ class JakeAIBackend(AgentBackendInterface):
         # Extract system instruction and build combined prompt from messages
         system_content = request.system_instruction or ""
         conversation_history: list[str] = []
+        chat_messages: list[ChatMessage] = []
 
         for msg in request.messages:
+            chat_messages.append(
+                ChatMessage(
+                    role=msg.role,
+                    content=msg.content,
+                    name=msg.name,
+                    tool_call_id=msg.tool_call_id,
+                )
+            )
             if msg.role == "system":
                 if not system_content:
                     system_content = msg.content
@@ -70,6 +80,7 @@ class JakeAIBackend(AgentBackendInterface):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             tools=request.tools,
+            messages=chat_messages,
         )
 
         latency_ms = (time.time() - start_ts) * 1000.0

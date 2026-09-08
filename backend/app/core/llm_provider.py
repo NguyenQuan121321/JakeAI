@@ -18,6 +18,7 @@ from app.core.byok import get_byok_manager
 from app.core.config import get_settings
 from app.optimizer.two_zone_compiler import CompiledPrompt, get_two_zone_compiler
 from app.providers.base import (
+    ChatMessage,
     ProviderCacheTelemetry,  # noqa: F401
     ProviderRequest,
     UpstreamLLMResponse,
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 async def call_upstream_llm_detailed(
-    prompt: str,
+    prompt: str = "",
     tenant_id: str = "default",
     model: str = "gemini-1.5-flash",
     system_instruction: str | None = None,
@@ -37,6 +38,8 @@ async def call_upstream_llm_detailed(
     max_tokens: int = 1024,
     compiled_prompt: CompiledPrompt | None = None,
     tools: list[dict[str, Any]] | None = None,
+    messages: list[ChatMessage] | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> UpstreamLLMResponse | None:
     """Call upstream LLM provider and capture full Tier 5 cache telemetry.
 
@@ -106,6 +109,7 @@ async def call_upstream_llm_detailed(
     provider_req = ProviderRequest(
         model=model,
         prompt=prompt,
+        messages=messages,
         system_instruction=default_system,
         temperature=temperature,
         max_tokens=max_tokens,
@@ -113,6 +117,7 @@ async def call_upstream_llm_detailed(
         tools=tools,
         tenant_id=tenant_id,
         api_key=explicit_key,
+        response_format=response_format,
         extra_params={
             "prompt_cache_enabled": getattr(
                 settings, "PROVIDER_PROMPT_CACHE_ENABLED", True
@@ -175,7 +180,7 @@ async def call_upstream_llm_detailed(
 
 
 async def call_upstream_llm(
-    prompt: str,
+    prompt: str = "",
     tenant_id: str = "default",
     model: str = "gemini-1.5-flash",
     system_instruction: str | None = None,
@@ -183,6 +188,7 @@ async def call_upstream_llm(
     max_tokens: int = 1024,
     compiled_prompt: CompiledPrompt | None = None,
     tools: list[dict[str, Any]] | None = None,
+    messages: list[ChatMessage] | None = None,
 ) -> str | None:
     """Convenience wrapper returning plain text response for backward compatibility."""
     res = await call_upstream_llm_detailed(
@@ -194,5 +200,6 @@ async def call_upstream_llm(
         max_tokens=max_tokens,
         compiled_prompt=compiled_prompt,
         tools=tools,
+        messages=messages,
     )
     return res.text if res is not None else None

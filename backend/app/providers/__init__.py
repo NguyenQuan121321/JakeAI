@@ -6,12 +6,16 @@ explicit model capabilities, normalized errors, and isolated provider adapters.
 
 from app.providers.anthropic import AnthropicAdapter
 from app.providers.base import (
+    ChatMessage,
     LLMProvider,
     ModelCapabilities,
     ModelCapabilityCatalog,
     ProviderRequest,
     ProviderResponse,
     StreamChunk,
+    format_anthropic_chat_messages,
+    format_gemini_chat_contents,
+    format_openai_chat_messages,
     get_model_capabilities,
 )
 from app.providers.deepseek import DeepSeekAdapter
@@ -37,6 +41,7 @@ from app.providers.registry import ProviderRegistry, get_provider_registry
 
 __all__ = [
     "AnthropicAdapter",
+    "ChatMessage",
     "DeepSeekAdapter",
     "ErrorCategory",
     "GeminiAdapter",
@@ -59,6 +64,9 @@ __all__ = [
     "ProviderTimeoutError",
     "ProviderUnavailableError",
     "StreamChunk",
+    "format_anthropic_chat_messages",
+    "format_gemini_chat_contents",
+    "format_openai_chat_messages",
     "get_model_capabilities",
     "get_provider_registry",
     "normalize_provider_error",

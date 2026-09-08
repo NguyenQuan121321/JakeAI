@@ -35,6 +35,7 @@ from app.providers.base import (
     ProviderRequest,
     ProviderResponse,
     StreamChunk,
+    format_gemini_chat_contents,
 )
 from app.providers.errors import (
     ProviderAuthenticationError,
@@ -82,22 +83,25 @@ class GeminiAdapter(LLMProvider):
                 user_query=request.prompt,
             )
 
+        system_text, contents = format_gemini_chat_contents(
+            request=request,
+            default_system=default_system,
+            compiled=compiled,
+        )
+
         gemini_model = (
             request.model if "gemini" in request.model.lower() else "gemini-1.5-flash"
         )
 
         payload: dict[str, Any] = {
-            "contents": [
-                {"parts": [{"text": compiled.dynamic_suffix or request.prompt}]}
-            ],
-            "systemInstruction": {
-                "parts": [{"text": compiled.static_prefix or default_system}]
-            },
+            "contents": contents,
             "generationConfig": {
                 "temperature": request.temperature,
                 "maxOutputTokens": request.max_tokens,
             },
         }
+        if system_text:
+            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
         if request.extra_params:
             payload.update(request.extra_params)
 
