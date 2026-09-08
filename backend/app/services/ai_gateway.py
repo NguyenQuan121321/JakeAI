@@ -74,6 +74,12 @@ class GatewayChatRequest(BaseModel):
         default=False,
         description="Whether to stream back partial progress via Server-Sent Events",
     )
+    tools: list[dict[str, Any]] | None = Field(
+        default=None, description="Optional tools/functions schema"
+    )
+    response_format: dict[str, Any] | str | None = Field(
+        default=None, description="Optional response format (e.g. JSON mode / schema)"
+    )
 
 
 class GatewayChatResponse(BaseModel):
@@ -280,13 +286,49 @@ class GatewayInferenceProxy:
         if not allowed:
             raise ValueError(error_msg or "Token budget quota exceeded")
 
-        # Extract last user message
+        # Extract last user message for display/optimization
         last_user_msg = next(
             (m.content for m in reversed(request.messages) if m.role == "user"), ""
         )
 
+        # Build generation-relevant fields for canonical cache identity
+        system_instructions = "\n".join(
+            m.content for m in request.messages if m.role == "system"
+        )
+        messages_as_dicts = [
+            {"role": m.role, "content": m.content} for m in request.messages
+        ]
+        generation_params = {
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+
+        # Resolve provider early for cache identity
+        provider = (
+            "gemini"
+            if "gemini" in request.model.lower()
+            else (
+                "openai"
+                if "gpt" in request.model.lower()
+                else (
+                    "anthropic" if "claude" in request.model.lower() else "openrouter"
+                )
+            )
+        )
+
         # 2. Tier 1 Exact Match Cache
-        cache_entry = await self.cache_mgr.get(last_user_msg, tenant_id=tenant_id)
+        cache_entry = await self.cache_mgr.get(
+            last_user_msg,
+            tenant_id=tenant_id,
+            model=request.model,
+            provider=provider,
+            system_instructions=system_instructions,
+            messages=messages_as_dicts,
+            tools=request.tools,
+            response_format=request.response_format,
+            generation_params=generation_params,
+            exact_only=True,
+        )
         now_ts = int(time.time())
         raw_prompt_tokens = estimate_tokens(last_user_msg)
 
@@ -339,17 +381,6 @@ class GatewayInferenceProxy:
             )
 
         # 3. Dynamic BYOK Key Injection (decrypt transiently in memory)
-        provider = (
-            "gemini"
-            if "gemini" in request.model.lower()
-            else (
-                "openai"
-                if "gpt" in request.model.lower()
-                else (
-                    "anthropic" if "claude" in request.model.lower() else "openrouter"
-                )
-            )
-        )
         byok_mgr = get_byok_manager()
         byok_key = await byok_mgr.get_decrypted_key(tenant_id, provider)
 
@@ -460,6 +491,13 @@ class GatewayInferenceProxy:
             prompt=last_user_msg,
             tenant_id=tenant_id,
             response=output_text,
+            model=request.model,
+            provider=provider,
+            system_instructions=system_instructions,
+            messages=messages_as_dicts,
+            tools=request.tools,
+            response_format=request.response_format,
+            generation_params=generation_params,
         )
 
         # 7. Deduct token usage & record tokens saved
@@ -536,14 +574,48 @@ class GatewayInferenceProxy:
         req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         now_ts = int(time.time())
 
-        # Extract last user message
+        # Extract last user message for display/optimization
         last_user_msg = next(
             (m.content for m in reversed(request.messages) if m.role == "user"), ""
         )
         raw_prompt_tokens = estimate_tokens(last_user_msg)
 
+        # Build generation-relevant fields for canonical cache identity
+        system_instructions = "\n".join(
+            m.content for m in request.messages if m.role == "system"
+        )
+        messages_as_dicts = [
+            {"role": m.role, "content": m.content} for m in request.messages
+        ]
+        generation_params = {
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        provider = (
+            "gemini"
+            if "gemini" in request.model.lower()
+            else (
+                "openai"
+                if "gpt" in request.model.lower()
+                else (
+                    "anthropic" if "claude" in request.model.lower() else "openrouter"
+                )
+            )
+        )
+
         # 2. Tier 1 Exact Match Cache (stream instant chunks)
-        cache_entry = await self.cache_mgr.get(last_user_msg, tenant_id=tenant_id)
+        cache_entry = await self.cache_mgr.get(
+            last_user_msg,
+            tenant_id=tenant_id,
+            model=request.model,
+            provider=provider,
+            system_instructions=system_instructions,
+            messages=messages_as_dicts,
+            tools=request.tools,
+            response_format=request.response_format,
+            generation_params=generation_params,
+            exact_only=True,
+        )
         if cache_entry is not None:
             words = cache_entry.response.split(" ")
             for i, word in enumerate(words):
@@ -669,6 +741,13 @@ class GatewayInferenceProxy:
                     prompt=last_user_msg,
                     tenant_id=tenant_id,
                     response=output_text,
+                    model=request.model,
+                    provider=provider,
+                    system_instructions=system_instructions,
+                    messages=messages_as_dicts,
+                    tools=request.tools,
+                    response_format=request.response_format,
+                    generation_params=generation_params,
                 )
 
 
