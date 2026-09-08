@@ -33,6 +33,7 @@ from app.providers.base import (
     ProviderRequest,
     ProviderResponse,
     StreamChunk,
+    format_openai_chat_messages,
 )
 from app.providers.errors import (
     ProviderAuthenticationError,
@@ -95,12 +96,10 @@ class DeepSeekAdapter(LLMProvider):
             request.model if "deepseek" in request.model.lower() else "deepseek-chat"
         )
 
-        messages: list[dict[str, str]] = []
-        static_sys = compiled.static_prefix or default_system
-        if static_sys.strip():
-            messages.append({"role": "system", "content": static_sys.strip()})
-        messages.append(
-            {"role": "user", "content": compiled.dynamic_suffix or request.prompt}
+        messages = format_openai_chat_messages(
+            request=request,
+            default_system=default_system,
+            compiled=compiled,
         )
 
         payload: dict[str, Any] = {
