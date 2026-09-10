@@ -4175,6 +4175,24 @@
           "latency_ms": {
             "type": "number",
             "title": "Latency Ms"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Pipeline status: SUCCESS or ABSTAINED",
+            "default": "SUCCESS"
+          },
+          "abstention_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstention Reason",
+            "description": "Abstention reason code if applicable"
           }
         },
         "type": "object",

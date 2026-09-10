@@ -1,10 +1,19 @@
 """BM25 sparse keyword retrieval engine with strict multi-tenant isolation."""
 
+from __future__ import annotations
+
+import json
+import logging
 import math
 import re
 from collections import Counter
+from pathlib import Path
+from typing import Any
 
+from app.core.config import get_settings
 from app.rag.models import DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -13,11 +22,18 @@ def _tokenize(text: str) -> list[str]:
 
 
 class BM25Retriever:
-    """In-memory BM25 sparse keyword retriever with tenant-scoped inverted index."""
+    """In-memory BM25 sparse keyword retriever with tenant-scoped inverted index and disk persistence."""
 
-    def __init__(self, k1: float = 1.5, b: float = 0.75) -> None:
+    def __init__(
+        self,
+        k1: float = 1.5,
+        b: float = 0.75,
+        storage_path: str | Path | None = None,
+    ) -> None:
         self.k1 = k1
         self.b = b
+        settings = get_settings()
+        self.storage_path = Path(storage_path or settings.BM25_STORAGE_PATH)
         # tenant_id -> list of DocumentChunk
         self._corpus: dict[str, list[DocumentChunk]] = {}
         # tenant_id -> chunk_id -> Counter(token -> count)
@@ -39,11 +55,20 @@ class BM25Retriever:
                 self._doc_freqs[tenant] = {}
                 self._doc_lengths[tenant] = {}
 
-            tokens = _tokenize(chunk.content)
             cid = chunk.chunk_id
+            tokens = _tokenize(chunk.content)
             tf = Counter(tokens)
 
-            # Check if chunk already exists to prevent duplicate counting
+            # Fix re-indexing defect: decrement old document frequency counts if chunk exists
+            old_tf = self._term_freqs[tenant].get(cid)
+            if old_tf is not None:
+                for old_token in old_tf:
+                    if old_token in self._doc_freqs[tenant]:
+                        self._doc_freqs[tenant][old_token] -= 1
+                        if self._doc_freqs[tenant][old_token] <= 0:
+                            del self._doc_freqs[tenant][old_token]
+
+            # Update or append chunk in corpus
             existing_idx = next(
                 (i for i, c in enumerate(self._corpus[tenant]) if c.chunk_id == cid),
                 None,
@@ -88,6 +113,10 @@ class BM25Retriever:
         scores: list[tuple[DocumentChunk, float]] = []
 
         for chunk in tenant_chunks:
+            # Strict tenant boundary verification
+            if chunk.tenant_id != tenant_id:
+                continue
+
             cid = chunk.chunk_id
             tf = self._term_freqs[tenant_id].get(cid, Counter())
             doc_len = self._doc_lengths[tenant_id].get(cid, 0)
@@ -116,10 +145,69 @@ class BM25Retriever:
                     content=chunk.content,
                     tenant_id=chunk.tenant_id,
                     source=chunk.source,
-                    metadata=chunk.metadata,
+                    metadata=chunk.metadata.copy(),
                     score=round(score, 4),
                 )
                 scores.append((chunk_copy, score))
 
-        scores.sort(key=lambda x: x[1], reverse=True)
+        # Deterministic sorting: score descending, chunk_id ascending
+        scores.sort(key=lambda x: (-x[1], x[0].chunk_id))
         return [c for c, _ in scores[:top_k]]
+
+    def save_to_disk(self, filepath: str | Path | None = None) -> None:
+        """Persist BM25 state to disk."""
+        target = Path(filepath or self.storage_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        data: dict[str, Any] = {
+            "version": "1.0",
+            "k1": self.k1,
+            "b": self.b,
+            "corpus": {
+                tenant: [c.model_dump() for c in chunks]
+                for tenant, chunks in self._corpus.items()
+            },
+            "term_freqs": {
+                tenant: {cid: dict(counter) for cid, counter in cids.items()}
+                for tenant, cids in self._term_freqs.items()
+            },
+            "doc_freqs": self._doc_freqs,
+            "doc_lengths": self._doc_lengths,
+            "avg_lengths": self._avg_lengths,
+        }
+
+        temp_target = target.with_suffix(".tmp")
+        with open(temp_target, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        temp_target.replace(target)
+        logger.info("Saved BM25 sparse index to %s", target)
+
+    def load_from_disk(self, filepath: str | Path | None = None) -> bool:
+        """Load BM25 state from disk if available."""
+        target = Path(filepath or self.storage_path)
+        if not target.is_file():
+            return False
+
+        try:
+            with open(target, encoding="utf-8") as f:
+                data = json.load(f)
+
+            self.k1 = data.get("k1", self.k1)
+            self.b = data.get("b", self.b)
+
+            self._corpus = {
+                tenant: [DocumentChunk(**c) for c in chunks]
+                for tenant, chunks in data.get("corpus", {}).items()
+            }
+            self._term_freqs = {
+                tenant: {cid: Counter(counts) for cid, counts in cids.items()}
+                for tenant, cids in data.get("term_freqs", {}).items()
+            }
+            self._doc_freqs = data.get("doc_freqs", {})
+            self._doc_lengths = data.get("doc_lengths", {})
+            self._avg_lengths = data.get("avg_lengths", {})
+            logger.info("Loaded BM25 sparse index from %s", target)
+            return True
+        except Exception as exc:
+            logger.warning("Failed to load BM25 index from %s: %s", target, exc)
+            return False

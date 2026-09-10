@@ -1,33 +1,57 @@
 """Cross-Encoder and Reciprocal Rank Fusion (RRF) reranker for candidate passages."""
 
-import logging
-import re
-from collections.abc import Callable
-from typing import Any
+from __future__ import annotations
 
+import logging
+import math
+import re
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+from app.core.config import get_settings
 from app.rag.models import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
 
+def _sigmoid(x: float) -> float:
+    """Map real-valued cross-encoder logit into [0.0, 1.0] probability range."""
+    try:
+        return 1.0 / (1.0 + math.exp(-x))
+    except OverflowError:
+        return 0.0 if x < 0 else 1.0
+
+
 class CrossEncoderReranker:
-    """Reranks candidate passages using ONNX/FastEmbed Cross-Encoder or RRF heuristics."""
+    """Reranks candidate passages using ONNX/FastEmbed Cross-Encoder or calibrated RRF heuristics."""
 
     def __init__(
         self,
         model_name: str | None = None,
         rrf_k: int = 60,
         cross_encoder_fn: Callable[[str, list[str]], list[float]] | None = None,
+        enabled: bool = True,
     ) -> None:
-        self.model_name = model_name
+        settings = get_settings()
+        self.model_name = (
+            model_name if model_name is not None else settings.RERANKER_MODEL
+        )
         self.rrf_k = rrf_k
         self.cross_encoder_fn = cross_encoder_fn
+        self.enabled = enabled
         self._fastembed_model: Any = None
         self._fastembed_failed: bool = False
+        self.last_reranker_type: str = "none"
 
     def _get_fastembed_model(self) -> Any | None:
         """Lazily load FastEmbed TextCrossEncoder if requested and available."""
-        if self._fastembed_failed or self.cross_encoder_fn is not None:
+        if (
+            not self.enabled
+            or self._fastembed_failed
+            or self.cross_encoder_fn is not None
+        ):
             return None
         if self._fastembed_model is not None:
             return self._fastembed_model
@@ -35,13 +59,14 @@ class CrossEncoderReranker:
             return None
 
         try:
-            from fastembed import TextCrossEncoder
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
 
             self._fastembed_model = TextCrossEncoder(model_name=self.model_name)
+            logger.info("Initialized FastEmbed Cross-Encoder: %s", self.model_name)
             return self._fastembed_model
         except Exception as exc:
             logger.info(
-                "FastEmbed cross-encoder unavailable (%s). Using calibrated heuristic RRF.",
+                "FastEmbed cross-encoder unavailable (%s). Using calibrated fallback heuristic.",
                 exc,
             )
             self._fastembed_failed = True
@@ -76,16 +101,20 @@ class CrossEncoderReranker:
             rrf_scores[cid] = rrf_scores.get(cid, 0.0) + (1.0 / (self.rrf_k + rank + 1))
 
         if not chunk_map:
+            self.last_reranker_type = "empty"
             return []
 
         chunks_list = list(chunk_map.values())
         doc_texts = [c.content for c in chunks_list]
 
-        # 3. Check for external / ONNX cross-encoder
+        # 3. Evaluate Cross-Encoder (Custom FN or FastEmbed)
         ce_scores: list[float] | None = None
+        reranker_type = "fallback"
+
         if self.cross_encoder_fn is not None:
             try:
                 ce_scores = self.cross_encoder_fn(query, doc_texts)
+                reranker_type = "custom_fn"
             except Exception as exc:
                 logger.warning("Custom cross-encoder function failed: %s", exc)
 
@@ -94,22 +123,31 @@ class CrossEncoderReranker:
             if fe_model is not None:
                 try:
                     raw_scores = list(fe_model.rerank(query, doc_texts))
-                    ce_scores = [float(s) for s in raw_scores]
+                    ce_scores = [_sigmoid(float(s)) for s in raw_scores]
+                    reranker_type = "cross_encoder"
                 except Exception as exc:
                     logger.warning("FastEmbed reranking execution failed: %s", exc)
 
-        # 4. Cross-Encoder Calibration (Model or Heuristic)
+        self.last_reranker_type = reranker_type
+
+        # 4. Calibrated Scoring
         reranked: list[tuple[DocumentChunk, float]] = []
+        max_possible_rrf = 2.0 / (self.rrf_k + 1)
+
         for idx, chunk in enumerate(chunks_list):
             cid = chunk.chunk_id
             base_rrf = rrf_scores.get(cid, 0.0)
 
             if ce_scores is not None and idx < len(ce_scores):
-                # Normalized composite: 70% cross-encoder + 30% RRF rank
-                ce_norm = max(0.0, min(1.0, ce_scores[idx]))
-                final_score = min(1.0, (ce_norm * 0.7) + ((base_rrf * 10.0) * 0.3))
+                # Pure cross-encoder semantic score in [0.0, 1.0]
+                final_score = max(0.0, min(1.0, ce_scores[idx]))
             else:
-                # Calibrated Heuristic RRF fallback
+                # Calibrated Heuristic Fallback
+                rrf_norm = (
+                    min(1.0, base_rrf / max_possible_rrf)
+                    if max_possible_rrf > 0
+                    else 0.0
+                )
                 content_lower = chunk.content.lower()
                 doc_terms = set(re.findall(r"\b[a-zA-Z0-9_\-\$]{2,}\b", content_lower))
 
@@ -127,10 +165,7 @@ class CrossEncoderReranker:
 
                 final_score = min(
                     1.0,
-                    (base_rrf * 10.0) * 0.4
-                    + (overlap_ratio * 0.4)
-                    + phrase_bonus
-                    + num_match,
+                    (rrf_norm * 0.4) + (overlap_ratio * 0.4) + phrase_bonus + num_match,
                 )
 
             reranked_chunk = DocumentChunk(
@@ -138,10 +173,11 @@ class CrossEncoderReranker:
                 content=chunk.content,
                 tenant_id=chunk.tenant_id,
                 source=chunk.source,
-                metadata=chunk.metadata,
+                metadata=chunk.metadata.copy(),
                 score=round(final_score, 4),
             )
             reranked.append((reranked_chunk, final_score))
 
-        reranked.sort(key=lambda x: x[1], reverse=True)
+        # Deterministic sorting: score descending, chunk_id ascending
+        reranked.sort(key=lambda x: (-x[1], x[0].chunk_id))
         return [c for c, _ in reranked[:top_k]]

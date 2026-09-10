@@ -1,8 +1,44 @@
 """RAG and context retrieval data models."""
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class AbstentionReason(StrEnum):
+    """Canonical reasons for RAG generation abstention."""
+
+    NO_RELEVANT_EVIDENCE = "NO_RELEVANT_EVIDENCE"
+    PROVIDER_FAILURE = "PROVIDER_FAILURE"
+    GENERATION_FAILURE = "GENERATION_FAILURE"
+
+
+class ClaimEntailment(StrEnum):
+    """Grounding entailment classification for generated statements."""
+
+    SUPPORTED = "SUPPORTED"
+    UNSUPPORTED = "UNSUPPORTED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class GroundingClaim(BaseModel):
+    """Individual statement or claim extracted from generated answer for verification."""
+
+    claim_text: str = Field(description="Statement or claim text")
+    entailment: ClaimEntailment = Field(
+        default=ClaimEntailment.UNCERTAIN,
+        description="Entailment status against context evidence",
+    )
+    confidence: float = Field(
+        default=1.0, description="Verification confidence score (0.0 to 1.0)"
+    )
+    supporting_chunk_ids: list[str] = Field(
+        default_factory=list, description="IDs of passages directly supporting claim"
+    )
+    reasoning: str = Field(
+        default="", description="Verification rationale or explanation"
+    )
 
 
 class DocumentChunk(BaseModel):
@@ -45,6 +81,20 @@ class RetrievalResult(BaseModel):
     )
     latency_ms: float = Field(
         default=0.0, description="Total retrieval and reranking latency in ms"
+    )
+    retrieval_mode: str = Field(
+        default="hybrid",
+        description="Mode used: 'hybrid', 'dense_only', 'sparse_only', 'sparse_degraded'",
+    )
+    degraded: bool = Field(
+        default=False,
+        description="Whether retrieval operated in degraded fallback mode",
+    )
+    dense_candidate_count: int = Field(
+        default=0, description="Count of candidates retrieved from dense index"
+    )
+    sparse_candidate_count: int = Field(
+        default=0, description="Count of candidates retrieved from sparse index"
     )
 
 
@@ -99,4 +149,12 @@ class RAGGenerationResult(BaseModel):
     )
     latency_ms: float = Field(
         default=0.0, description="Total end-to-end RAG execution latency in ms"
+    )
+    status: str = Field(
+        default="SUCCESS",
+        description="Generation status: 'SUCCESS' or 'ABSTAINED'",
+    )
+    abstention_reason: AbstentionReason | str | None = Field(
+        default=None,
+        description="Reason code if status is ABSTAINED: 'NO_RELEVANT_EVIDENCE', 'PROVIDER_FAILURE', 'GENERATION_FAILURE'",
     )

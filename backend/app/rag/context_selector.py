@@ -7,6 +7,7 @@ The final context builder prefers:
 - low redundancy (cross-chunk Jaccard deduplication)
 - low token cost (budget-bounded packing with physical token reduction)
 - strict multi-tenant isolation boundary
+- zero score leakage into model-visible context
 """
 
 from __future__ import annotations
@@ -14,10 +15,8 @@ from __future__ import annotations
 import logging
 import re
 
-from app.optimizer.token_pruner import (
-    estimate_tokens,
-    get_token_pruner,
-)
+from app.optimizer.bpe_tokenizer import BPETokenizer, get_bpe_tokenizer
+from app.optimizer.token_pruner import get_token_pruner
 from app.rag.models import ContextSelectionResult, DocumentChunk
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ FACT_REGEX = re.compile(
     r"|\b\d+(?:[.,]\d+)?\b",
     re.IGNORECASE,
 )
-
 
 EXTRA_BOILERPLATE = [
     re.compile(r"(?i)\bfor immediate release\b"),
@@ -122,18 +120,26 @@ def _extract_protected_facts(text: str) -> set[str]:
     return {match.strip() for match in FACT_REGEX.findall(clean)}
 
 
+def _format_chunk_envelope(idx: int, chunk: DocumentChunk) -> str:
+    """Format single chunk passage without score leakage."""
+    source_label = chunk.source or f"Document {idx}"
+    return f'[{idx}] Source: {source_label}\n"{chunk.content.strip()}"'
+
+
 class ContextSelector:
-    """Selects the minimal sufficient evidence set from candidate document chunks."""
+    """Selects the minimal sufficient evidence set from candidate document chunks using BPETokenizer."""
 
     def __init__(
         self,
         min_relative_score: float = 0.30,
         redundancy_threshold: float = 0.65,
         max_context_tokens: int = 800,
+        tokenizer: BPETokenizer | None = None,
     ) -> None:
         self.min_relative_score = min_relative_score
         self.redundancy_threshold = redundancy_threshold
         self.max_context_tokens = max_context_tokens
+        self.tokenizer = tokenizer or get_bpe_tokenizer()
         self.pruner = get_token_pruner()
 
     def select_context(
@@ -195,25 +201,45 @@ class ContextSelector:
                 citations_preserved=[],
             )
 
-        # Measure raw candidate tokens across valid pool
+        # Measure raw candidate tokens across valid pool using BPETokenizer
         raw_combined_text = "\n\n".join(c.content for c in valid_candidates)
-        raw_tokens = estimate_tokens(raw_combined_text)
+        raw_tokens = self.tokenizer.count_tokens(raw_combined_text)
 
         # 2. Adaptive Relevance Thresholding
         max_score = max((c.score for c in valid_candidates), default=1.0)
         cutoff_score = max_score * score_thresh
 
         query_terms = _tokenize_terms(query)
+        query_facts = _extract_protected_facts(query)
         relevant_candidates: list[DocumentChunk] = []
         for chunk in valid_candidates:
             chunk_terms = _tokenize_terms(chunk.content)
-            has_query_term = bool(query_terms.intersection(chunk_terms))
-            # Keep chunk if score >= cutoff or contains direct query keywords
-            if chunk.score >= cutoff_score or has_query_term:
+            chunk_facts = _extract_protected_facts(chunk.content)
+            has_query_term = bool(query_terms.intersection(chunk_terms)) or bool(
+                query_facts.intersection(chunk_facts)
+            )
+            has_sufficient_score = chunk.score > 0.05 and chunk.score >= cutoff_score
+            # If query specified, require query overlap or sufficient relevance score
+            if query_terms or query_facts:
+                if has_query_term or has_sufficient_score:
+                    relevant_candidates.append(chunk)
+            elif chunk.score >= cutoff_score:
                 relevant_candidates.append(chunk)
 
-        # Sort candidate chunks by score descending
-        relevant_candidates.sort(key=lambda x: x.score, reverse=True)
+        if not relevant_candidates:
+            return ContextSelectionResult(
+                selected_chunks=[],
+                formatted_context="",
+                raw_tokens=raw_tokens,
+                selected_tokens=0,
+                tokens_saved=raw_tokens,
+                reduction_ratio=1.0 if raw_tokens > 0 else 0.0,
+                pruned_chunks_count=len(valid_candidates),
+                citations_preserved=[],
+            )
+
+        # Sort candidate chunks by score descending, tie-break by chunk_id
+        relevant_candidates.sort(key=lambda x: (-x.score, x.chunk_id))
 
         # 3. Cross-Chunk Redundancy Pruning with Protected Entity Preservation
         selected_chunks: list[DocumentChunk] = []
@@ -230,14 +256,13 @@ class ContextSelector:
                 accumulated_facts.update(chunk_facts)
                 continue
 
-            # Calculate Jaccard similarity / overlap ratio against already selected pool
+            # Calculate Jaccard overlap ratio against already selected pool
             if accumulated_terms and chunk_terms:
                 intersection_count = len(chunk_terms.intersection(accumulated_terms))
                 overlap_ratio = intersection_count / len(chunk_terms)
             else:
                 overlap_ratio = 0.0
 
-            # Check if this chunk introduces novel numerical figures, dates, or citations
             novel_facts = chunk_facts - accumulated_facts
 
             # Discard if heavily redundant AND introduces no novel factual evidence
@@ -253,46 +278,48 @@ class ContextSelector:
             accumulated_terms.update(chunk_terms)
             accumulated_facts.update(chunk_facts)
 
-        # 4. Token-Budget Bounded Packing
+        # 4. Token-Budget Bounded Packing with Full Serialized Envelope Counting
         budget_chunks: list[DocumentChunk] = []
-        current_token_count = 0
+        formatted_parts: list[str] = []
 
-        for chunk in selected_chunks:
-            chunk_token_est = estimate_tokens(chunk.content)
-            if budget_chunks and (current_token_count + chunk_token_est > budget):
+        for idx, chunk in enumerate(selected_chunks, 1):
+            tentative_part = _format_chunk_envelope(idx, chunk)
+            tentative_context = (
+                "\n\n".join([*formatted_parts, tentative_part])
+                if formatted_parts
+                else tentative_part
+            )
+
+            candidate_tokens = self.tokenizer.count_tokens(tentative_context)
+
+            if budget_chunks and candidate_tokens > budget:
                 logger.debug(
-                    "Context budget reached (%d tokens). Stopping chunk inclusion.",
-                    current_token_count,
+                    "Context budget reached (%d tokens). Stopping chunk inclusion at chunk %d.",
+                    candidate_tokens,
+                    idx,
                 )
                 break
+
             budget_chunks.append(chunk)
-            current_token_count += chunk_token_est
+            formatted_parts.append(tentative_part)
 
         # Fallback: Ensure at least the top chunk is retained if candidates existed
         if not budget_chunks and relevant_candidates:
-            budget_chunks = [relevant_candidates[0]]
+            top_chunk = relevant_candidates[0]
+            budget_chunks = [top_chunk]
+            formatted_parts = [_format_chunk_envelope(1, top_chunk)]
 
-        # 5. Format Structured Context with Citation Anchors
-        formatted_parts: list[str] = []
+        # Extract preserved citations from selected chunks
         citations_preserved: list[str] = []
-
-        for idx, chunk in enumerate(budget_chunks, 1):
-            # Extract internal citation markers e.g. [SEC-Q3-P14]
+        for chunk in budget_chunks:
             internal_citations = CITATION_TAG_REGEX.findall(chunk.content)
             for ic in internal_citations:
                 cleaned = ic.strip()
                 if cleaned and cleaned not in citations_preserved:
                     citations_preserved.append(cleaned)
 
-            source_label = chunk.source or f"Document {idx}"
-            formatted_parts.append(
-                f"[{idx}] Source: {source_label} (Score: {chunk.score:.2f})\n"
-                f'"{chunk.content.strip()}"'
-            )
-
         formatted_context = "\n\n".join(formatted_parts)
-        selected_content_text = "\n\n".join(c.content for c in budget_chunks)
-        selected_tokens = estimate_tokens(selected_content_text)
+        selected_tokens = self.tokenizer.count_tokens(formatted_context)
         tokens_saved = max(0, raw_tokens - selected_tokens)
         reduction_ratio = round(tokens_saved / raw_tokens, 4) if raw_tokens > 0 else 0.0
         pruned_count = len(candidates) - len(budget_chunks)

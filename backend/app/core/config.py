@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
 
+    # Context & Data Management (RAG) Settings
+    EMBEDDING_PROVIDER: str = "fastembed"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    EMBEDDING_DIMENSION: int = 384
+    EMBEDDING_VERSION: str = "v1.0"
+    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    BM25_STORAGE_PATH: str = "data/bm25_index.json"
+
     # Model Provider API Keys
     GEMINI_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
