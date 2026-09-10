@@ -35,7 +35,7 @@ class CrossEncoderReranker:
             return None
 
         try:
-            from fastembed import TextCrossEncoder  # type: ignore[attr-defined]
+            from fastembed import TextCrossEncoder
 
             self._fastembed_model = TextCrossEncoder(model_name=self.model_name)
             return self._fastembed_model
