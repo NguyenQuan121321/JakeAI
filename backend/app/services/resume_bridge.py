@@ -234,13 +234,12 @@ class ResumeBridgeManager:
             continued_execution: dict[str, Any] = {}
             state_data = checkpoint.get("state_data", {})
             thread_id = (
-                checkpoint.get("thread_id")
-                or state_data.get("thread_id")
-                or call_id
+                checkpoint.get("thread_id") or state_data.get("thread_id") or call_id
             )
             if state_data.get("graph_interrupted"):
                 try:
                     from langgraph.types import Command
+
                     from app.agents.graph import agent_graph
 
                     config = {"configurable": {"thread_id": thread_id}}

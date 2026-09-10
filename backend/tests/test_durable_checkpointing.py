@@ -96,19 +96,23 @@ async def test_durable_checkpointing_survives_process_restart_via_redis() -> Non
 
     # Setup Redis mock returns
     mock_redis.get.side_effect = lambda key: (
-        cp_id if key == f"agent:checkpoint:run:{run_id}"
-        else json.dumps({
-            "checkpoint_id": cp_id,
-            "checkpoint_created_at": time.time(),
-            "run_id": run_id,
-            "task_id": "task-123",
-            "tenant_id": tenant_id,
-            "user_id": "user-1",
-            "status": "paused_approval",
-            "current_iteration": 5,
-            "final_output": "In-flight analysis",
-            "metadata": {},
-        }) if key == f"agent:checkpoint:rec:{cp_id}"
+        cp_id
+        if key == f"agent:checkpoint:run:{run_id}"
+        else json.dumps(
+            {
+                "checkpoint_id": cp_id,
+                "checkpoint_created_at": time.time(),
+                "run_id": run_id,
+                "task_id": "task-123",
+                "tenant_id": tenant_id,
+                "user_id": "user-1",
+                "status": "paused_approval",
+                "current_iteration": 5,
+                "final_output": "In-flight analysis",
+                "metadata": {},
+            }
+        )
+        if key == f"agent:checkpoint:rec:{cp_id}"
         else None
     )
 

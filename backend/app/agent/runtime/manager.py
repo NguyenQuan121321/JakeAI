@@ -43,9 +43,7 @@ class AgentRuntimeManager:
         config: AgentConfig | None = None,
     ) -> None:
         self.config = config or AgentConfig()
-        self.backend = backend or JakeAIBackend(
-            default_model=self.config.default_model
-        )
+        self.backend = backend or JakeAIBackend(default_model=self.config.default_model)
         self.tool_registry = tool_registry or get_tool_registry()
         self.memory_manager = memory_manager or get_memory_manager()
         self.checkpoint_manager = checkpoint_manager or get_checkpoint_manager()

@@ -161,4 +161,3 @@ async def verifier_node(state: AgentState) -> dict[str, Any]:
             ),
         ],
     }
-

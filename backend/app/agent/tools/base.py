@@ -38,7 +38,6 @@ class ToolMetadata(BaseModel):
     )
 
 
-
 class ToolResult(BaseModel):
     """Normalized outcome returned from a tool execution."""
 

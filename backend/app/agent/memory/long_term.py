@@ -91,8 +91,10 @@ class LongTermMemory:
                     entry.key.startswith(key_prefix)
                     or q_lower in k_lower
                     or k_lower in q_lower
-                    or any(word in q_lower for word in k_lower.split("_") if len(word) > 2)
-                    or (bool(entry.summary) and q_lower in entry.summary.lower())
+                    or any(
+                        word in q_lower for word in k_lower.split("_") if len(word) > 2
+                    )
+                    or (entry.summary is not None and q_lower in entry.summary.lower())
                 )
                 if not matches:
                     continue

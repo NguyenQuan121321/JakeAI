@@ -213,7 +213,6 @@ class JakeAIBackend(AgentBackendInterface):
                 )
 
     @staticmethod
-
     def _extract_tool_calls(text: str) -> list[AgentToolCall]:
         """Extract tool calls if the model output structured JSON tool requests."""
         tool_calls: list[AgentToolCall] = []

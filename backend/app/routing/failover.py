@@ -25,6 +25,9 @@ from app.providers.errors import (
 from app.providers.registry import get_provider_registry
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from typing import Any
+
     import httpx
 
     from app.providers.base import ProviderRequest, ProviderResponse
@@ -182,14 +185,15 @@ class FailoverManager:
         request: ProviderRequest,
         decision: RoutingDecision,
         client: httpx.AsyncClient | None = None,
-    ) -> Any:
+    ) -> AsyncIterator[Any]:
         """Stream chunks from selected provider adapter."""
         adapter = self.registry.get(decision.selected_provider)
         if adapter is not None and hasattr(adapter, "stream"):
-            current_request = request.model_copy(update={"model": decision.selected_model})
+            current_request = request.model_copy(
+                update={"model": decision.selected_model}
+            )
             async for chunk in adapter.stream(current_request, client=client):
                 yield chunk
-
 
 
 _global_failover_manager: FailoverManager | None = None

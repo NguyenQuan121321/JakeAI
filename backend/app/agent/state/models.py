@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import time
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class TaskStatus(StrEnum):
@@ -147,7 +150,7 @@ class RunState(BaseModel):
 
     @classmethod
     def from_agent_state(
-        cls, state: dict[str, Any], task_id: str, run_id: str
+        cls, state: Mapping[str, Any], task_id: str, run_id: str
     ) -> RunState:
         """Construct canonical RunState from a LangGraph AgentState dictionary."""
         status_map: dict[str, RunStatus] = {
@@ -196,4 +199,3 @@ class RunState(BaseModel):
                 "critique_notes": state.get("critique_notes", ""),
             },
         )
-

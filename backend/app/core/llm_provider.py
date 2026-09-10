@@ -257,4 +257,3 @@ async def call_upstream_llm_stream(
                     yield chunk.delta
     except Exception as exc:
         logger.debug("call_upstream_llm_stream error: %s", exc)
-

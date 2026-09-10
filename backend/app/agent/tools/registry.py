@@ -121,7 +121,7 @@ class ToolRegistry:
                 tool.execute(arguments=arguments, context=ctx),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             exec_time = (time.time() - start_ts) * 1000.0
             logger.error(
                 "Tool execution timeout in '%s' after %.2fs", tool_name, timeout
@@ -175,4 +175,3 @@ def get_tool_registry() -> ToolRegistry:
         _default_tool_registry.register(FinnApiGoLimitsTool())
 
     return _default_tool_registry
-

@@ -119,7 +119,9 @@ class AgentRunner:
             run.status = RunStatus.CANCELLED
             task.status = TaskStatus.CANCELLED
             run.completed_at = time.time()
-            logger.info("Run %s was cancelled via asyncio task cancellation", run.run_id)
+            logger.info(
+                "Run %s was cancelled via asyncio task cancellation", run.run_id
+            )
             await self._broadcast_event(
                 run.run_id,
                 AgentRunEvent(

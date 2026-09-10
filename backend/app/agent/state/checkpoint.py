@@ -87,7 +87,13 @@ class CheckpointManager:
         safe_dump = dict(dump)
         if "metadata" in safe_dump and isinstance(safe_dump["metadata"], dict):
             safe_meta = dict(safe_dump["metadata"])
-            for secret_key in ("obo_token", "raw_token", "api_key", "password", "token"):
+            for secret_key in (
+                "obo_token",
+                "raw_token",
+                "api_key",
+                "password",
+                "token",
+            ):
                 if secret_key in safe_meta:
                     safe_meta[secret_key] = "[REDACTED]"
             safe_dump["metadata"] = safe_meta
@@ -119,12 +125,16 @@ class CheckpointManager:
         if redis is not None:
             try:
                 rec_json = record.model_dump_json()
-                await redis.set(f"agent:checkpoint:rec:{cp_id}", rec_json, ex=ttl_seconds)
+                await redis.set(
+                    f"agent:checkpoint:rec:{cp_id}", rec_json, ex=ttl_seconds
+                )
                 await redis.set(
                     f"agent:checkpoint:run:{run_state.run_id}", cp_id, ex=ttl_seconds
                 )
             except Exception as exc:
-                logger.debug("Redis checkpoint write failed (%s), cached in memory", exc)
+                logger.debug(
+                    "Redis checkpoint write failed (%s), cached in memory", exc
+                )
 
         logger.debug(
             "Saved checkpoint %s for run %s (tenant %s)",
@@ -186,7 +196,6 @@ class CheckpointManager:
         if not latest_id:
             return None
 
-        effective_tenant = tenant_id or "internal"
         cp = self._checkpoints.get(latest_id)
         if cp is None:
             redis = await self._get_redis()
@@ -250,12 +259,20 @@ class CheckpointManager:
             )
 
         # Reconstruct RunState from checkpoint record
-        run_dict = cp.model_dump(exclude={"checkpoint_id", "checkpoint_created_at", "short_term_memory_snapshot"})
+        run_dict = cp.model_dump(
+            exclude={
+                "checkpoint_id",
+                "checkpoint_created_at",
+                "short_term_memory_snapshot",
+            }
+        )
         resumed_run = RunState(**run_dict)
 
         # If it was interrupted / paused, preserve paused status or mark running for resumption
         if resumed_run.status == RunStatus.RUNNING:
-            logger.info("Resuming run %s restored from checkpoint %s", run_id, cp.checkpoint_id)
+            logger.info(
+                "Resuming run %s restored from checkpoint %s", run_id, cp.checkpoint_id
+            )
 
         return resumed_run
 
@@ -300,4 +317,3 @@ def get_checkpoint_manager() -> CheckpointManager:
     if _checkpoint_manager is None:
         _checkpoint_manager = CheckpointManager()
     return _checkpoint_manager
-

@@ -18,6 +18,7 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
     from app.agent.tools.registry import get_tool_registry
 
     # Determine tool name from prompt or state
+    arguments: dict[str, Any]
     if "balance" in prompt.lower():
         tool_name = "get_account_balance"
         arguments = {"account_id": f"ACC-{tenant_id[:8].upper()}-01"}

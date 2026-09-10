@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.agent.approvals.manager import ApprovalManager
 from app.agent.backends.base import (
     AgentBackendInterface,
-    AgentMessage,
     BackendRequest,
     BackendResponse,
     BackendStreamChunk,
@@ -32,7 +29,9 @@ from app.agent.tools.registry import ToolRegistry
 class MockBackend(AgentBackendInterface):
     """Mock backend capturing received request and returning programmed response."""
 
-    def __init__(self, response_text: str = '{"action": "finish", "output": "Done"}') -> None:
+    def __init__(
+        self, response_text: str = '{"action": "finish", "output": "Done"}'
+    ) -> None:
         self.response_text = response_text
         self.last_request: BackendRequest | None = None
         self.default_model = "test-model"
@@ -94,7 +93,9 @@ async def test_orc_09_loop_remembers_episodic_on_finish() -> None:
     checkpoint_manager = CheckpointManager()
     tool_registry = ToolRegistry()
     approval_manager = ApprovalManager()
-    backend = MockBackend(response_text='{"action": "finish", "output": "Quarterly revenue was $5.2M"}')
+    backend = MockBackend(
+        response_text='{"action": "finish", "output": "Quarterly revenue was $5.2M"}'
+    )
 
     planner = BoundedPlanner(backend=backend, memory_manager=memory_manager)
     loop = AgentExecutionLoop(
@@ -105,8 +106,18 @@ async def test_orc_09_loop_remembers_episodic_on_finish() -> None:
         approval_manager=approval_manager,
     )
 
-    task = TaskState(task_id="task-mem-finish", tenant_id="tenant-fin", user_id="user-fin", goal="Calculate Q3 revenue")
-    run = RunState(run_id="run-mem-finish", task_id="task-mem-finish", tenant_id="tenant-fin", user_id="user-fin")
+    task = TaskState(
+        task_id="task-mem-finish",
+        tenant_id="tenant-fin",
+        user_id="user-fin",
+        goal="Calculate Q3 revenue",
+    )
+    run = RunState(
+        run_id="run-mem-finish",
+        task_id="task-mem-finish",
+        tenant_id="tenant-fin",
+        user_id="user-fin",
+    )
 
     events = [event async for event in loop.execute(task=task, run=run)]
 
@@ -115,7 +126,9 @@ async def test_orc_09_loop_remembers_episodic_on_finish() -> None:
     assert any(e.event_type == "completed" for e in events)
 
     # Verify episodic memory was stored
-    memories = memory_manager.recall_relevant(tenant_id="tenant-fin", query_key="task_task-mem-fin")
+    memories = memory_manager.recall_relevant(
+        tenant_id="tenant-fin", query_key="task_task-mem-fin"
+    )
     assert len(memories) >= 1
     assert "Quarterly revenue was $5.2M" in memories[0].value
     assert "Completed goal: Calculate Q3 revenue" in (memories[0].summary or "")
@@ -148,8 +161,18 @@ async def test_orc_10_runner_active_task_cancellation() -> None:
         approval_manager=approval_manager,
     )
 
-    task = TaskState(task_id="task-cancel", tenant_id="tenant-canc", user_id="user-canc", goal="Slow operation")
-    run = RunState(run_id="run-cancel", task_id="task-cancel", tenant_id="tenant-canc", user_id="user-canc")
+    task = TaskState(
+        task_id="task-cancel",
+        tenant_id="tenant-canc",
+        user_id="user-canc",
+        goal="Slow operation",
+    )
+    run = RunState(
+        run_id="run-cancel",
+        task_id="task-cancel",
+        tenant_id="tenant-canc",
+        user_id="user-canc",
+    )
 
     async_run_task = asyncio.create_task(runner.start_run(task, run))
 

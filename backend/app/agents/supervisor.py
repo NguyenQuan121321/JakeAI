@@ -63,7 +63,7 @@ async def decide_supervisor_route(
             "- 'financial_specialist': Quantitative calculations, EBITDA, margins, revenues, expenses, profit/loss.\n"
             "- 'finnapigo_tool': FinnApiGo banking integrations, account balance lookup, transactions list, tenant limits.\n"
             "- 'synthesizer': General conversation, greetings, overview questions, questions not requiring financial analysis or banking tools.\n"
-            'Respond strictly with a JSON object format:\n'
+            "Respond strictly with a JSON object format:\n"
             '{"target_agent": "<agent>", "reasoning": "<short rationale>"}'
         )
         req = BackendRequest(
@@ -105,7 +105,6 @@ async def decide_supervisor_route(
 
 _retriever = get_hybrid_retriever()
 _context_selector = get_context_selector()
-
 
 
 async def supervisor_node(state: AgentState) -> dict[str, Any]:
@@ -169,4 +168,3 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
             f"Supervisor: {decision.reasoning}. Dispatching to '{target}'.",
         ],
     }
-

@@ -57,9 +57,7 @@ class FinnApiGoBalanceTool(Tool):
         )
         obo_token = exchange_obo_token(t_ctx)
 
-        account_id = arguments.get(
-            "account_id", f"ACC-{tenant_id[:8].upper()}-01"
-        )
+        account_id = arguments.get("account_id", f"ACC-{tenant_id[:8].upper()}-01")
         result_payload = {
             "account_id": account_id,
             "tenant_id": tenant_id,
@@ -122,8 +120,18 @@ class FinnApiGoTransactionsTool(Tool):
 
         limit = arguments.get("limit", 10)
         transactions = [
-            {"tx_id": "TX-9901", "amount": 12500.00, "type": "CREDIT", "desc": "Wire Inflow"},
-            {"tx_id": "TX-9902", "amount": -4300.00, "type": "DEBIT", "desc": "Payroll Processing"},
+            {
+                "tx_id": "TX-9901",
+                "amount": 12500.00,
+                "type": "CREDIT",
+                "desc": "Wire Inflow",
+            },
+            {
+                "tx_id": "TX-9902",
+                "amount": -4300.00,
+                "type": "DEBIT",
+                "desc": "Payroll Processing",
+            },
         ][:limit]
 
         result_payload = {
@@ -164,6 +172,7 @@ class FinnApiGoLimitsTool(Tool):
         arguments: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> ToolResult:
+        _ = arguments
         start_ts = time.time()
         ctx = context or {}
         tenant_id = ctx.get("tenant_id", "default_tenant")
