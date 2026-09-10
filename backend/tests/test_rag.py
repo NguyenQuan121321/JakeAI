@@ -243,6 +243,46 @@ def test_cross_encoder_empty_inputs() -> None:
     assert reranker.rerank(query="anything", dense_results=[], sparse_results=[]) == []
 
 
+def test_cross_encoder_reranker_model_initialization_and_fallback(
+    sample_chunks: list[DocumentChunk],
+) -> None:
+    """Verify CrossEncoderReranker model_name initialization and fallback execution."""
+    reranker = CrossEncoderReranker(model_name="BAAI/bge-reranker-base")
+    assert reranker.model_name == "BAAI/bge-reranker-base"
+
+    reranked = reranker.rerank(
+        query="operating margin 36.0%",
+        dense_results=[sample_chunks[1], sample_chunks[0]],
+        sparse_results=[sample_chunks[0], sample_chunks[1]],
+        top_k=2,
+    )
+    assert len(reranked) == 2
+    assert reranked[0].chunk_id == "chunk-acme-02"
+    assert reranked[0].score >= reranked[1].score
+
+
+def test_cross_encoder_reranker_with_fastembed_model(
+    sample_chunks: list[DocumentChunk],
+) -> None:
+    """Verify CrossEncoderReranker execution with active FastEmbed model."""
+    from unittest.mock import MagicMock
+
+    reranker = CrossEncoderReranker(model_name="BAAI/bge-reranker-base")
+    mock_model = MagicMock()
+    mock_model.rerank.return_value = [0.92, 0.18]
+    reranker._fastembed_model = mock_model
+
+    reranked = reranker.rerank(
+        query="operating margin",
+        dense_results=[sample_chunks[0], sample_chunks[1]],
+        sparse_results=[],
+        top_k=2,
+    )
+    assert len(reranked) == 2
+    assert reranked[0].chunk_id == sample_chunks[0].chunk_id
+    assert reranked[0].score > reranked[1].score
+
+
 @pytest.mark.asyncio
 async def test_document_ingestion_pipeline_end_to_end() -> None:
     """Verify DocumentIngestionPipeline chunks, creates deterministic IDs, and indexes."""

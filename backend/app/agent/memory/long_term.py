@@ -84,8 +84,20 @@ class LongTermMemory:
                 expired_ids.append(eid)
                 continue
 
-            if key_prefix and not entry.key.startswith(key_prefix):
-                continue
+            if key_prefix:
+                q_lower = key_prefix.lower()
+                k_lower = entry.key.lower()
+                matches = (
+                    entry.key.startswith(key_prefix)
+                    or q_lower in k_lower
+                    or k_lower in q_lower
+                    or any(
+                        word in q_lower for word in k_lower.split("_") if len(word) > 2
+                    )
+                    or (entry.summary is not None and q_lower in entry.summary.lower())
+                )
+                if not matches:
+                    continue
 
             if user_id and entry.user_id and entry.user_id != user_id:
                 continue

@@ -27,6 +27,29 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
     raw_retrieved_chunks = state.get("retrieved_chunks", [])
     citations: list[dict[str, Any]] = []
 
+    verdict = state.get("verification_verdict", "PASS")
+    critique_notes = state.get("critique_notes", "")
+
+    if verdict in ("FAILED", "REJECTED"):
+        failure_msg = (
+            f"### ❌ Security & Verification Failure Report\n\n"
+            f"**Tenant**: `{tenant_id}` | **Status**: **{verdict}**\n\n"
+            f"> ⚠️ **Execution Halted by Verifier Safety Gate**\n"
+            f"> **Reason**: {critique_notes or 'Quality or tenant isolation gates failed'}\n\n"
+            "JakeAI multi-tenant boundary and anti-hallucination policies prevented this output from being published."
+        )
+        return {
+            "current_agent": "synthesizer",
+            "workflow_phase": "verification_failed",
+            "final_response": failure_msg,
+            "mascot_state": "alert",
+            "citations": [],
+            "messages": [
+                *state.get("messages", []),
+                f"Synthesizer: Verification failed ({verdict}). Rendered safety failure report.",
+            ],
+        }
+
     markdown_parts: list[str] = [
         "### Financial & Intelligence Report\n",
         (

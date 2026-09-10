@@ -140,22 +140,77 @@ class JakeAIBackend(AgentBackendInterface):
     async def generate_stream(
         self, request: BackendRequest
     ) -> AsyncIterator[BackendStreamChunk]:
-        """Stream generation from JakeAI Provider Platform."""
-        # For stream contract normalization, call generate and yield chunk
-        full_resp = await self.generate(request)
-        if full_resp.content:
-            yield BackendStreamChunk(
-                delta_content=full_resp.content,
-                tool_call_deltas=full_resp.tool_calls or None,
-                finish_reason=full_resp.finish_reason,
-                is_complete=True,
+        """Stream generation from JakeAI Provider Platform (TASK ORC-08)."""
+        model_target = request.model or self.default_model
+
+        system_content = request.system_instruction or ""
+        conversation_history: list[str] = []
+        chat_messages: list[ChatMessage] = []
+
+        for msg in request.messages:
+            chat_messages.append(
+                ChatMessage(
+                    role=msg.role,
+                    content=msg.content,
+                    name=msg.name,
+                    tool_call_id=msg.tool_call_id,
+                )
             )
-        else:
-            yield BackendStreamChunk(
-                delta_content="",
-                finish_reason=full_resp.finish_reason,
-                is_complete=True,
-            )
+            if msg.role == "system":
+                if not system_content:
+                    system_content = msg.content
+                else:
+                    system_content += f"\n{msg.content}"
+            elif msg.role == "user":
+                conversation_history.append(f"User: {msg.content}")
+            elif msg.role == "assistant":
+                conversation_history.append(f"Assistant: {msg.content}")
+            elif msg.role == "tool":
+                conversation_history.append(
+                    f"Tool[{msg.name or 'tool'}]: {msg.content}"
+                )
+
+        combined_prompt = (
+            "\n".join(conversation_history) if conversation_history else "Hello"
+        )
+
+        streamed_any = False
+        try:
+            from app.core.llm_provider import call_upstream_llm_stream
+
+            async for delta_text in call_upstream_llm_stream(
+                prompt=combined_prompt,
+                tenant_id=request.tenant_id,
+                model=model_target,
+                system_instruction=system_content if system_content else None,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                messages=chat_messages,
+            ):
+                if delta_text:
+                    streamed_any = True
+                    yield BackendStreamChunk(
+                        delta_content=delta_text,
+                        is_complete=False,
+                    )
+        except Exception as exc:
+            logger.debug("Live provider streaming failed, falling back: %s", exc)
+
+        if not streamed_any:
+            full_resp = await self.generate(request)
+            if full_resp.content:
+                yield BackendStreamChunk(
+                    delta_content=full_resp.content,
+                    tool_call_deltas=full_resp.tool_calls or None,
+                    finish_reason=full_resp.finish_reason,
+                    is_complete=True,
+                )
+            else:
+                yield BackendStreamChunk(
+                    delta_content="",
+                    finish_reason=full_resp.finish_reason,
+                    is_complete=True,
+                )
 
     @staticmethod
     def _extract_tool_calls(text: str) -> list[AgentToolCall]:

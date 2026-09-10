@@ -184,3 +184,76 @@ async def call_upstream_llm(
         messages=messages,
     )
     return res.text if res is not None else None
+
+
+async def call_upstream_llm_stream(
+    prompt: str = "",
+    tenant_id: str = "default",
+    model: str = "gemini-1.5-flash",
+    system_instruction: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+    messages: list[ChatMessage] | None = None,
+) -> Any:
+    """Stream token deltas from upstream provider adapters."""
+    settings = get_settings()
+    byok_mgr = get_byok_manager()
+
+    default_system = (
+        system_instruction
+        or "You are JakeAI, an enterprise financial and operational AI companion."
+    )
+
+    router = get_model_router()
+    routing_policy = RoutingPolicy(
+        requested_model=model,
+        tenant_id=tenant_id,
+        allow_fallback=True,
+    )
+    decision = router.route(routing_policy)
+
+    provider_settings_keys = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+    }
+    settings_key = provider_settings_keys.get(decision.selected_provider)
+    explicit_key: str | None = None
+    if settings_key is not None:
+        explicit_key = await byok_mgr.get_decrypted_key(
+            tenant_id, decision.selected_provider
+        ) or getattr(settings, settings_key, None)
+
+    provider_req = ProviderRequest(
+        model=model,
+        prompt=prompt,
+        messages=messages,
+        system_instruction=default_system,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        tenant_id=tenant_id,
+        api_key=explicit_key,
+    )
+
+    failover_mgr = get_failover_manager()
+    timeout = httpx.Timeout(
+        connect=5.0,
+        read=settings.PROVIDER_TIMEOUT_SECONDS,
+        write=10.0,
+        pool=5.0,
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async for chunk in failover_mgr.stream_with_failover(
+                request=provider_req,
+                decision=decision,
+                client=client,
+            ):
+                if chunk and chunk.delta:
+                    yield chunk.delta
+    except Exception as exc:
+        logger.debug("call_upstream_llm_stream error: %s", exc)

@@ -21,6 +21,7 @@ from app.agent.planning.models import (
 )
 
 if TYPE_CHECKING:
+    from app.agent.memory.manager import AgentMemoryManager
     from app.agent.tools.base import ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -34,10 +35,17 @@ class BoundedPlanner:
         backend: AgentBackendInterface,
         max_iterations: int = 10,
         timeout_seconds: float = 60.0,
+        memory_manager: AgentMemoryManager | None = None,
     ) -> None:
         self.backend = backend
         self.max_iterations = max_iterations
         self.timeout_seconds = timeout_seconds
+        if memory_manager is None:
+            from app.agent.memory.manager import get_memory_manager
+
+            self.memory_manager = get_memory_manager()
+        else:
+            self.memory_manager = memory_manager
 
     def create_initial_plan(
         self,
@@ -118,6 +126,20 @@ class BoundedPlanner:
             '{"action": "finish", "output": "<final answer>", "thought": "<reasoning>"}'
         )
 
+        # Recall relevant episodic/long-term memory for tenant
+        if self.memory_manager is not None:
+            try:
+                recalled = self.memory_manager.recall_relevant(
+                    tenant_id=tenant_id,
+                    query_key=goal[:40],
+                    limit=3,
+                )
+                if recalled:
+                    facts = "\n".join(f"- {m.key}: {m.value}" for m in recalled)
+                    system_instruction += f"\n\nRelevant Context from Memory:\n{facts}"
+            except Exception as exc:
+                logger.debug("Memory recall skipped due to error: %s", exc)
+
         prompt_messages: list[AgentMessage] = [
             AgentMessage(role="system", content=system_instruction),
             *history,
@@ -128,6 +150,7 @@ class BoundedPlanner:
             tools=tool_schemas,
             temperature=0.2,
             tenant_id=tenant_id,
+            model=getattr(self.backend, "default_model", None),
         )
 
         resp = await self.backend.generate(req)

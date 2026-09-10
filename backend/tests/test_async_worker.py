@@ -36,7 +36,7 @@ from app.rag.tasks import (
     get_task_manager,
     reset_task_manager,
 )
-from app.worker import IngestionWorker
+from app.worker import IngestionWorker, main
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -376,3 +376,92 @@ async def test_task_manager_redis_branch_coverage(
     completed = await mgr.get_task(res.task_id)
     assert completed is not None
     assert completed.status == IngestionTaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_worker_start_loop_cancelled() -> None:
+    """Verify IngestionWorker handles asyncio.CancelledError during start loop."""
+    import asyncio
+
+    mgr = IngestionTaskManager(max_concurrency=2)
+    worker = IngestionWorker(task_manager=mgr, poll_interval=0.01)
+
+    task = asyncio.create_task(worker.start())
+    await asyncio.sleep(0.02)
+    assert worker._running is True
+
+    import contextlib
+
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_worker_start_loop_exception_recovery() -> None:
+    """Verify IngestionWorker loop catches generic exception, logs it, and continues."""
+    mgr = IngestionTaskManager(max_concurrency=2)
+    worker = IngestionWorker(task_manager=mgr, poll_interval=0.01)
+
+    call_count = 0
+
+    async def failing_run_once() -> bool:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("Transient worker loop error")
+        worker.stop()
+        return True
+
+    worker.run_once = failing_run_once  # type: ignore[method-assign]
+    await worker.start()
+    assert call_count >= 2
+    assert worker._running is False
+
+
+@pytest.mark.asyncio
+async def test_worker_main_entrypoint_and_interrupt() -> None:
+    """Verify worker process main() entrypoint handles signals and graceful shutdown."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    # 1. Test KeyboardInterrupt in main()
+    with patch("app.worker.IngestionWorker") as mock_worker_cls:
+        mock_worker = MagicMock()
+        mock_worker.start = AsyncMock(side_effect=KeyboardInterrupt)
+        mock_worker_cls.return_value = mock_worker
+
+        await main()
+        mock_worker.stop.assert_called_once()
+
+    # 2. Test CancelledError in main()
+    with patch("app.worker.IngestionWorker") as mock_worker_cls:
+        mock_worker = MagicMock()
+        mock_worker.start = AsyncMock(side_effect=asyncio.CancelledError)
+        mock_worker_cls.return_value = mock_worker
+
+        await main()
+        mock_worker.stop.assert_called_once()
+
+    # 3. Test POSIX signal handler registration and execution
+    captured_handlers: list[Any] = []
+    loop = asyncio.get_running_loop()
+
+    def mock_add_signal_handler(_sig: Any, handler: Any) -> None:
+        captured_handlers.append(handler)
+
+    with (
+        patch("sys.platform", "linux"),
+        patch.object(loop, "add_signal_handler", side_effect=mock_add_signal_handler),
+        patch("app.worker.IngestionWorker") as mock_worker_cls,
+    ):
+        mock_worker = MagicMock()
+        mock_worker.start = AsyncMock(return_value=None)
+        mock_worker_cls.return_value = mock_worker
+
+        await main()
+        assert len(captured_handlers) == 2
+        # Invoke registered handler to verify worker.stop() is triggered
+        captured_handlers[0]()
+        mock_worker.stop.assert_called()

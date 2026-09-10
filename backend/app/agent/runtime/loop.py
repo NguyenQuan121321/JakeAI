@@ -136,6 +136,19 @@ class AgentExecutionLoop:
                 await self.checkpoint_manager.save_checkpoint(
                     run, short_term_mem.snapshot()
                 )
+
+                # Persist completed task result into episodic long-term memory
+                try:
+                    self.memory_manager.remember_episodic(
+                        tenant_id=task.tenant_id,
+                        user_id=task.user_id,
+                        key=f"task_{task.task_id[:12]}",
+                        value=run.final_output[:500] if run.final_output else "",
+                        summary=f"Completed goal: {task.goal[:100]}",
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to store episodic memory: %s", exc)
+
                 agent_telemetry.record_run_completed(
                     tenant_id=task.tenant_id,
                     duration_ms=(time.time() - start_ts) * 1000.0,

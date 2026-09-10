@@ -1,8 +1,11 @@
-"""Shared state schemas for LangGraph multi-agent orchestration."""
+from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from typing_extensions import TypedDict
+
+if TYPE_CHECKING:
+    from app.agent.state.models import RunState
 
 
 class AgentState(TypedDict, total=False):
@@ -42,3 +45,26 @@ class AgentState(TypedDict, total=False):
     final_response: str
     mascot_state: str  # "idle", "thinking", "success", "alert"
     citations: list[dict[str, Any]]
+
+
+def run_state_to_agent_state(run: Any) -> AgentState:
+    """Convert canonical RunState instance into LangGraph AgentState dictionary."""
+    if hasattr(run, "to_agent_state"):
+        raw_dict = run.to_agent_state()
+        if isinstance(raw_dict, dict):
+            return cast("AgentState", raw_dict)
+
+    from app.agent.state.models import RunState
+
+    if isinstance(run, RunState):
+        return cast("AgentState", run.to_agent_state())
+    if isinstance(run, dict):
+        return cast("AgentState", dict(run))
+    return cast("AgentState", {})
+
+
+def agent_state_to_run_state(state: AgentState, task_id: str, run_id: str) -> RunState:
+    """Construct canonical RunState from LangGraph AgentState dictionary."""
+    from app.agent.state.models import RunState
+
+    return RunState.from_agent_state(state, task_id=task_id, run_id=run_id)

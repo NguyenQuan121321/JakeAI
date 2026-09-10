@@ -4447,10 +4447,47 @@
             "$ref": "#/components/schemas/RunStatus",
             "default": "created"
           },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
           "current_iteration": {
             "type": "integer",
             "minimum": 0.0,
             "title": "Current Iteration",
+            "default": 0
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Current Step",
             "default": 0
           },
           "max_iterations": {
@@ -4466,6 +4503,95 @@
             "type": "array",
             "title": "Steps"
           },
+          "current_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Agent"
+          },
+          "next_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Agent"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "messages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "context": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Context"
+          },
+          "tool_calls": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tool Calls"
+          },
+          "tool_results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tool Results"
+          },
+          "revision_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Revision Count",
+            "default": 0
+          },
+          "verification_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Verdict"
+          },
+          "approval_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval State"
+          },
           "pending_approval_id": {
             "anyOf": [
               {
@@ -4476,6 +4602,11 @@
               }
             ],
             "title": "Pending Approval Id"
+          },
+          "checkpoint_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Checkpoint Metadata"
           },
           "final_output": {
             "anyOf": [
@@ -4498,6 +4629,17 @@
               }
             ],
             "title": "Error"
+          },
+          "termination_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termination Reason"
           },
           "tokens_consumed": {
             "type": "integer",
@@ -4540,7 +4682,7 @@
           "user_id"
         ],
         "title": "RunState",
-        "description": "Persistent and checkpointable state of an active Agent Run."
+        "description": "Persistent, unified, and checkpointable canonical runtime state of an Agent Run (TASK ORC-03)."
       },
       "RunStatus": {
         "type": "string",

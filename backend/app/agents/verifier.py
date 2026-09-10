@@ -66,38 +66,82 @@ async def verifier_node(state: AgentState) -> dict[str, Any]:
     groundedness = eval_result.faithfulness_score
     is_grounded = groundedness >= 0.80 and eval_result.anti_hallucination_passed
 
-    # 4. Trigger Self-Correction Loop if Quality Gates Fail and Under Budget
-    if (math_error or tenant_mismatch or not is_grounded) and revision_count < 2:
-        reasons = []
-        if math_error:
-            reasons.append("Mathematical variance detected")
-        if tenant_mismatch:
-            reasons.append("Multi-tenant isolation breach")
-        if not is_grounded:
-            reasons.append(f"Groundedness below threshold ({groundedness} < 0.80)")
+    MAX_REVISIONS = 2
 
-        critique_msg = "; ".join(reasons)
+    # 4. Enforce Strict Quality and Security Gates
+    # Gate 1: Multi-tenant boundary isolation check -> immediate REJECTED
+    if tenant_mismatch:
+        rejection_msg = "Multi-tenant boundary isolation breach detected"
         return {
             "current_agent": "verifier",
-            "workflow_phase": "critique",
-            "verification_verdict": "NEEDS_REVISION",
-            "critique_notes": (
-                f"Self-RAG Critique: {critique_msg}. Recompute accurately."
-            ),
+            "workflow_phase": "verification_failed",
+            "verification_verdict": "REJECTED",
+            "critique_notes": f"Immediate rejection: {rejection_msg}.",
             "groundedness_score": groundedness,
-            "revision_count": revision_count + 1,
-            "next_agent": "supervisor",
+            "revision_count": revision_count,
+            "next_agent": "synthesizer",
             "mascot_state": "alert",
             "messages": [
                 *state.get("messages", []),
                 (
-                    f"Verifier: Rejected ({critique_msg}). "
-                    "Triggering self-correction loop."
+                    f"Verifier: Immediately REJECTED ({rejection_msg}). "
+                    "Hard security boundary breached."
                 ),
             ],
         }
 
-    # 5. Quality gates passed
+    # Gate 2: Arithmetic consistency or Groundedness failure
+    if math_error or not is_grounded:
+        reasons = []
+        if math_error:
+            reasons.append("Mathematical variance detected")
+        if not is_grounded:
+            reasons.append(f"Groundedness below threshold ({groundedness:.2f} < 0.80)")
+
+        critique_msg = "; ".join(reasons)
+
+        if revision_count < MAX_REVISIONS:
+            return {
+                "current_agent": "verifier",
+                "workflow_phase": "critique",
+                "verification_verdict": "NEEDS_REVISION",
+                "critique_notes": (
+                    f"Self-RAG Critique: {critique_msg}. Recompute accurately."
+                ),
+                "groundedness_score": groundedness,
+                "revision_count": revision_count + 1,
+                "next_agent": "supervisor",
+                "mascot_state": "alert",
+                "messages": [
+                    *state.get("messages", []),
+                    (
+                        f"Verifier: Rejected ({critique_msg}). "
+                        "Triggering self-correction loop."
+                    ),
+                ],
+            }
+        else:
+            return {
+                "current_agent": "verifier",
+                "workflow_phase": "verification_failed",
+                "verification_verdict": "FAILED",
+                "critique_notes": (
+                    f"Verification failed after {revision_count} revisions: {critique_msg}."
+                ),
+                "groundedness_score": groundedness,
+                "revision_count": revision_count,
+                "next_agent": "synthesizer",
+                "mascot_state": "alert",
+                "messages": [
+                    *state.get("messages", []),
+                    (
+                        f"Verifier: Terminal FAILED ({critique_msg}). "
+                        f"Maximum revisions ({MAX_REVISIONS}) exhausted."
+                    ),
+                ],
+            }
+
+    # 5. Quality gates passed: strictly when tenant_mismatch==False, math_error==False, is_grounded==True
     return {
         "current_agent": "verifier",
         "workflow_phase": "verification_passed",

@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from app.agents.financial_specialist import financial_specialist_node
@@ -32,8 +33,53 @@ def route_from_verifier(state: AgentState) -> str:
     return "synthesizer"
 
 
-def create_agent_graph() -> Any:
-    """Construct and compile the multi-agent LangGraph workflow."""
+class AutoConfigGraph:
+    """Wrapper ensuring thread_id configurable config is automatically provided to checkpointer."""
+
+    def __init__(self, graph: Any) -> None:
+        self._graph = graph
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._graph, item)
+
+    async def ainvoke(
+        self,
+        input: Any,
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if config is None:
+            thread_id = "default_thread"
+            if isinstance(input, dict):
+                thread_id = (
+                    input.get("conversation_id")
+                    or input.get("correlation_id")
+                    or "default_thread"
+                )
+            config = {"configurable": {"thread_id": thread_id}}
+        return await self._graph.ainvoke(input, config=config, **kwargs)
+
+    async def astream(
+        self,
+        input: Any,
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Any, None]:
+        if config is None:
+            thread_id = "default_thread"
+            if isinstance(input, dict):
+                thread_id = (
+                    input.get("conversation_id")
+                    or input.get("correlation_id")
+                    or "default_thread"
+                )
+            config = {"configurable": {"thread_id": thread_id}}
+        async for item in self._graph.astream(input, config=config, **kwargs):
+            yield item
+
+
+def create_agent_graph(checkpointer: Any = None) -> Any:
+    """Construct and compile the multi-agent LangGraph workflow with checkpointer (TASK ORC-06)."""
     workflow = StateGraph(AgentState)
 
     # Register Nodes
@@ -74,10 +120,12 @@ def create_agent_graph() -> Any:
     # Exit Edge
     workflow.add_edge("synthesizer", END)
 
-    return workflow.compile()
+    saver = checkpointer if checkpointer is not None else MemorySaver()
+    compiled = workflow.compile(checkpointer=saver)
+    return AutoConfigGraph(compiled)
 
 
-# Compiled Singleton Graph
+# Compiled Singleton Graph with Real Checkpointer
 agent_graph = create_agent_graph()
 
 
@@ -104,7 +152,8 @@ async def stream_multi_agent_workflow(
         "citations": [],
     }
 
-    async for event in agent_graph.astream(initial_state):
+    config = {"configurable": {"thread_id": conversation_id}}
+    async for event in agent_graph.astream(initial_state, config=config):
         for node_name, node_state in event.items():
             yield {
                 "node": node_name,

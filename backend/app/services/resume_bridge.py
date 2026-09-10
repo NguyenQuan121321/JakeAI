@@ -230,6 +230,31 @@ class ResumeBridgeManager:
                 tenant_id,
             )
 
+            # 6. Rehydrate and continue LangGraph execution if checkpoint was an interrupt
+            continued_execution: dict[str, Any] = {}
+            state_data = checkpoint.get("state_data", {})
+            thread_id = (
+                checkpoint.get("thread_id") or state_data.get("thread_id") or call_id
+            )
+            if state_data.get("graph_interrupted"):
+                try:
+                    from langgraph.types import Command
+
+                    from app.agents.graph import agent_graph
+
+                    config = {"configurable": {"thread_id": thread_id}}
+                    continued_res = await agent_graph.ainvoke(
+                        Command(resume=result_payload), config=config
+                    )
+                    if isinstance(continued_res, dict):
+                        continued_execution = {
+                            "final_response": continued_res.get("final_response"),
+                            "workflow_phase": continued_res.get("workflow_phase"),
+                            "mascot_state": continued_res.get("mascot_state"),
+                        }
+                except Exception as exc:
+                    logger.debug("Graph interrupt rehydration exception: %s", exc)
+
             return ResumedExecutionResult(
                 call_id=call_id,
                 status="resumed",
@@ -240,8 +265,10 @@ class ResumeBridgeManager:
                 details={
                     "result_status": result_payload.get("status", "success"),
                     "bytes_received": len(json.dumps(result_payload)),
+                    "continued_execution": continued_execution,
                 },
             )
+
         finally:
             self._in_flight_call_ids.discard(call_id)
 
