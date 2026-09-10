@@ -33,6 +33,10 @@ class ToolMetadata(BaseModel):
         default_factory=list, description="Required tenant permissions/capabilities"
     )
     risk_level: ToolRiskLevel = Field(default=ToolRiskLevel.READ_ONLY)
+    timeout_seconds: float = Field(
+        default=30.0, ge=0.1, description="Execution timeout limit in seconds"
+    )
+
 
 
 class ToolResult(BaseModel):

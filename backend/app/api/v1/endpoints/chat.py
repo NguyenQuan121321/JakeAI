@@ -297,38 +297,35 @@ async def generate_chat_stream(
                     mascot_state=final_mascot_state,
                 )
 
-            # Stream Generated Markdown Tokens (providing delta, token, and content aliases)
-            words = final_response.split(" ")
-            for i, word in enumerate(words):
-                if request and await request.is_disconnected():
-                    metrics.record_stream_cancellation(
-                        "/api/v1/chat/stream", reason="client_disconnect"
-                    )
-                    if not accounting_recorded:
-                        comp_tokens = max(1, estimate_tokens(" ".join(words[: i + 1])))
-                        TokenAccounting.record_transaction(
-                            request_id=f"stream-{conversation_id}",
-                            tenant_id=context.tenant_id,
-                            model="stream",
-                            raw_prompt_tokens=raw_prompt_tokens,
-                            pruned_prompt_tokens=raw_prompt_tokens,
-                            completion_tokens=comp_tokens,
-                            cache_hit=False,
-                            cache_type="none",
-                        )
-                        accounting_recorded = True
-                    return
-                delta = word if i == 0 else f" {word}"
-                yield _format_sse_event(
-                    "token",
-                    {
-                        "delta": delta,
-                        "token": delta,
-                        "content": delta,
-                        "conversation_id": conversation_id,
-                    },
+            # Stream Real Token Deltas (providing delta, token, and content aliases without artificial sleep)
+            if request and await request.is_disconnected():
+                metrics.record_stream_cancellation(
+                    "/api/v1/chat/stream", reason="client_disconnect"
                 )
-                await asyncio.sleep(0.002)
+                if not accounting_recorded:
+                    comp_tokens = max(1, estimate_tokens(final_response))
+                    TokenAccounting.record_transaction(
+                        request_id=f"stream-{conversation_id}",
+                        tenant_id=context.tenant_id,
+                        model="stream",
+                        raw_prompt_tokens=raw_prompt_tokens,
+                        pruned_prompt_tokens=raw_prompt_tokens,
+                        completion_tokens=comp_tokens,
+                        cache_hit=False,
+                        cache_type="none",
+                    )
+                    accounting_recorded = True
+                return
+
+            yield _format_sse_event(
+                "token",
+                {
+                    "delta": final_response,
+                    "token": final_response,
+                    "content": final_response,
+                    "conversation_id": conversation_id,
+                },
+            )
 
         # 7. Telemetry & Token Optimization Frame
         comp_tokens = max(1, estimate_tokens(final_response)) if final_response else 10

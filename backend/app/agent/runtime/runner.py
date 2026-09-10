@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from app.agent.approvals.models import ApprovalStatus
 from app.agent.backends.base import AgentMessage
 from app.agent.runtime.loop import AgentExecutionLoop
+from app.agent.runtime.models import AgentRunEvent
 from app.agent.state.models import RunState, RunStatus, TaskState, TaskStatus
 from app.agent.telemetry import agent_telemetry
 
@@ -19,7 +21,7 @@ if TYPE_CHECKING:
     from app.agent.approvals.manager import ApprovalManager
     from app.agent.memory.manager import AgentMemoryManager
     from app.agent.planning.planner import BoundedPlanner
-    from app.agent.runtime.models import AgentConfig, AgentRunEvent
+    from app.agent.runtime.models import AgentConfig
     from app.agent.state.checkpoint import CheckpointManager
     from app.agent.tools.registry import ToolRegistry
 
@@ -78,9 +80,12 @@ class AgentRunner:
             await q.put(event)
 
     def request_cancellation(self, run_id: str) -> None:
-        """Signal cooperative cancellation to an active run."""
+        """Signal cooperative and task cancellation to an active run."""
         self._cancellation_flags[run_id] = True
         logger.info("Cancellation requested for run %s", run_id)
+        task = self._active_tasks.get(run_id)
+        if task is not None and not task.done():
+            task.cancel()
 
     async def start_run(
         self,
@@ -91,6 +96,10 @@ class AgentRunner:
     ) -> None:
         """Execute run loop synchronously or via background task."""
         self._cancellation_flags[run.run_id] = False
+        current_async_task = asyncio.current_task()
+        if current_async_task is not None:
+            self._active_tasks[run.run_id] = current_async_task
+
         agent_telemetry.record_run_started(
             task.tenant_id, self.loop.config.backend_type
         )
@@ -106,6 +115,21 @@ class AgentRunner:
                 user_permissions=user_permissions,
             ):
                 await self._broadcast_event(run.run_id, event)
+        except asyncio.CancelledError:
+            run.status = RunStatus.CANCELLED
+            task.status = TaskStatus.CANCELLED
+            run.completed_at = time.time()
+            logger.info("Run %s was cancelled via asyncio task cancellation", run.run_id)
+            await self._broadcast_event(
+                run.run_id,
+                AgentRunEvent(
+                    event_type="cancelled",
+                    task_id=task.task_id,
+                    run_id=run.run_id,
+                    data={"message": "Run execution cancelled"},
+                ),
+            )
+            raise
         finally:
             # Send completion Sentinel to SSE listeners
             await self._broadcast_event(run.run_id, None)

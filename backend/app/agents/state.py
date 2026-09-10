@@ -42,3 +42,25 @@ class AgentState(TypedDict, total=False):
     final_response: str
     mascot_state: str  # "idle", "thinking", "success", "alert"
     citations: list[dict[str, Any]]
+
+
+def run_state_to_agent_state(run: Any) -> AgentState:
+    """Convert canonical RunState instance into LangGraph AgentState dictionary."""
+    if hasattr(run, "to_agent_state"):
+        return run.to_agent_state()
+
+    from app.agent.state.models import RunState
+
+    if isinstance(run, RunState):
+        return run.to_agent_state()
+    return dict(run)  # type: ignore[return-value]
+
+
+def agent_state_to_run_state(
+    state: AgentState, task_id: str, run_id: str
+) -> Any:
+    """Construct canonical RunState from LangGraph AgentState dictionary."""
+    from app.agent.state.models import RunState
+
+    return RunState.from_agent_state(state, task_id=task_id, run_id=run_id)
+

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -114,8 +115,23 @@ class ToolRegistry:
                 execution_time_ms=(time.time() - start_ts) * 1000.0,
             )
 
+        timeout = getattr(tool.metadata, "timeout_seconds", 30.0)
         try:
-            return await tool.execute(arguments=arguments, context=ctx)
+            return await asyncio.wait_for(
+                tool.execute(arguments=arguments, context=ctx),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            exec_time = (time.time() - start_ts) * 1000.0
+            logger.error(
+                "Tool execution timeout in '%s' after %.2fs", tool_name, timeout
+            )
+            return ToolResult(
+                success=False,
+                error=f"Tool '{tool_name}' timed out after {timeout:.1f}s.",
+                risk_level=tool.metadata.risk_level,
+                execution_time_ms=exec_time,
+            )
         except Exception as exc:
             exec_time = (time.time() - start_ts) * 1000.0
             logger.error("Execution exception in tool '%s': %s", tool_name, exc)
@@ -137,6 +153,11 @@ def get_tool_registry() -> ToolRegistry:
         _default_tool_registry = ToolRegistry()
         # Register built-in tools
         from app.agent.tools.builtins.file_tools import ReadFileTool
+        from app.agent.tools.builtins.finnapigo_tools import (
+            FinnApiGoBalanceTool,
+            FinnApiGoLimitsTool,
+            FinnApiGoTransactionsTool,
+        )
         from app.agent.tools.builtins.mock_tools import (
             CalculatorTool,
             MockDangerousShellTool,
@@ -149,5 +170,9 @@ def get_tool_registry() -> ToolRegistry:
         _default_tool_registry.register(CalculatorTool())
         _default_tool_registry.register(SystemTimeTool())
         _default_tool_registry.register(MockDangerousShellTool())
+        _default_tool_registry.register(FinnApiGoBalanceTool())
+        _default_tool_registry.register(FinnApiGoTransactionsTool())
+        _default_tool_registry.register(FinnApiGoLimitsTool())
 
     return _default_tool_registry
+

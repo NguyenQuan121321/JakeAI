@@ -15,33 +15,18 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
     tenant_id = state.get("tenant_id", "default_tenant")
     user_id = state.get("user_id", "anonymous")
 
-    # Determine simulated tool operation from prompt
+    from app.agent.tools.registry import get_tool_registry
+
+    # Determine tool name from prompt or state
     if "balance" in prompt.lower():
         tool_name = "get_account_balance"
-        result_payload = {
-            "account_id": f"ACC-{tenant_id[:8].upper()}-01",
-            "ledger_balance": 245800.50,
-            "available_balance": 240000.00,
-            "currency": "USD",
-            "status": "ACTIVE",
-        }
+        arguments = {"account_id": f"ACC-{tenant_id[:8].upper()}-01"}
     elif "transaction" in prompt.lower():
         tool_name = "list_transactions"
-        result_payload = {
-            "total_count": 2,
-            "transactions": [
-                {"tx_id": "TX-9901", "amount": 12500.00, "type": "CREDIT"},
-                {"tx_id": "TX-9902", "amount": -4300.00, "type": "DEBIT"},
-            ],
-        }
+        arguments = {"limit": 5}
     else:
         tool_name = "get_tenant_limits"
-        result_payload = {
-            "tenant_id": tenant_id,
-            "monthly_rate_limit": 100000,
-            "active_agents": ["supervisor", "financial_specialist", "verifier"],
-            "plan": "ENTERPRISE",
-        }
+        arguments = {}
 
     # Enforce RBAC guardrail before invoking tool
     rbac_decision = check_tool_rbac_guardrail(tool_name, state)
@@ -76,6 +61,42 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
         )
         obo_token = exchange_obo_token(ctx)
 
+    # Execute tool via canonical ToolRegistry with schema validation and timeout
+    tool_registry = get_tool_registry()
+    tool_context = {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "roles": state.get("roles", []),
+        "permissions": state.get("permissions", []),
+        "obo_token": obo_token,
+    }
+
+    tool_res = await tool_registry.execute(
+        tool_name=tool_name,
+        arguments=arguments,
+        context=tool_context,
+    )
+
+    if not tool_res.success:
+        failed_entry: dict[str, Any] = {
+            "tool_name": tool_name,
+            "status": "ERROR",
+            "reason": tool_res.error,
+            "tenant_id": tenant_id,
+            "caller_user_id": user_id,
+        }
+        return {
+            "current_agent": "finnapigo_tool",
+            "workflow_phase": "tool_failed",
+            "tool_calls": [*state.get("tool_calls", []), failed_entry],
+            "mascot_state": "alert",
+            "next_agent": "verifier",
+            "messages": [
+                *state.get("messages", []),
+                f"FinnApiGo Tool: Execution of '{tool_name}' failed: {tool_res.error}",
+            ],
+        }
+
     tool_call_entry: dict[str, Any] = {
         "tool_name": tool_name,
         "invoked_at": time.time(),
@@ -83,7 +104,8 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
         "caller_user_id": user_id,
         "delegated_actor": "jakeai-platform",
         "authorization_header": f"Bearer {obo_token[:15]}...",
-        "output": result_payload,
+        "output": tool_res.output,
+        "execution_time_ms": tool_res.execution_time_ms,
     }
 
     return {
