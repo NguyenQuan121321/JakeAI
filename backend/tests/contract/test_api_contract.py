@@ -56,6 +56,7 @@ def test_critical_endpoints_exist(runtime_openapi: dict[str, Any]) -> None:
         "/api/v1/billing/webhook": ["post"],
         "/api/v1/billing/subscription": ["get"],
         "/api/v1/analytics/dashboard": ["get"],
+        "/api/v1/analytics/metrics": ["get"],
         "/api/v1/devops/audit-pr": ["post"],
         "/v1/chat/completions": ["post"],
         "/v1/models": ["get"],
@@ -150,3 +151,49 @@ def test_backward_compatibility_no_deleted_endpoints(
     assert not missing_methods, (
         f"Breaking change detected! HTTP methods removed: {missing_methods}"
     )
+
+
+def test_metrics_snapshot_contract(runtime_openapi: dict[str, Any]) -> None:
+    """Verify telemetry metrics endpoint contract and MetricsSnapshot schema (COST-13)."""
+    metrics_path = (
+        runtime_openapi.get("paths", {}).get("/api/v1/analytics/metrics", {}).get("get")
+    )
+    assert metrics_path is not None, "GET /api/v1/analytics/metrics endpoint missing"
+
+    responses = metrics_path.get("responses", {})
+    assert "200" in responses, (
+        "Status 200 response missing for /api/v1/analytics/metrics"
+    )
+
+    ref = (
+        responses["200"]
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+        .get("$ref")
+    )
+    assert ref is not None, "Metrics endpoint response schema ref missing"
+
+    schema_name = ref.split("/")[-1]
+    schemas = runtime_openapi.get("components", {}).get("schemas", {})
+    metrics_schema = schemas.get(schema_name, {})
+
+    properties = metrics_schema.get("properties", {})
+    assert "timestamp" in properties, "Property 'timestamp' missing"
+    assert "uptime_seconds" in properties, "Property 'uptime_seconds' missing"
+    assert "http_requests_total" in properties, "Property 'http_requests_total' missing"
+    assert "estimated_cost_usd_total" in properties, (
+        "Property 'estimated_cost_usd_total' missing"
+    )
+    # Optimization telemetry fields added in COST-13 (backward-compatible, additive with defaults)
+    assert "optimization_decisions_total" in properties, (
+        "Property 'optimization_decisions_total' missing in MetricsSnapshot"
+    )
+    assert properties["optimization_decisions_total"].get("type") == "integer"
+    assert properties["optimization_decisions_total"].get("default") == 0
+
+    assert "cost_savings_usd_total" in properties, (
+        "Property 'cost_savings_usd_total' missing in MetricsSnapshot"
+    )
+    assert properties["cost_savings_usd_total"].get("type") == "number"
+    assert properties["cost_savings_usd_total"].get("default") == 0.0

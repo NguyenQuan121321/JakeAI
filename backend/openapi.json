@@ -3844,6 +3844,16 @@
             "type": "number",
             "title": "Estimated Cost Usd Total",
             "default": 0.0
+          },
+          "optimization_decisions_total": {
+            "type": "integer",
+            "title": "Optimization Decisions Total",
+            "default": 0
+          },
+          "cost_savings_usd_total": {
+            "type": "number",
+            "title": "Cost Savings Usd Total",
+            "default": 0.0
           }
         },
         "type": "object",
