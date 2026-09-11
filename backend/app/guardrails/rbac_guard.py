@@ -6,6 +6,12 @@ from typing import Any
 from app.core.context import TenantContext
 from app.guardrails.input_guard import GuardrailDecision
 
+# Public tools explicitly permitted without granular roles or permissions
+PUBLIC_TOOLS: set[str] = {
+    "calculator",
+    "system_time",
+}
+
 # Mapping of tool names to mandatory roles and permissions
 TOOL_PERMISSIONS_MAP: dict[str, dict[str, list[str]]] = {
     "get_account_balance": {
@@ -24,6 +30,30 @@ TOOL_PERMISSIONS_MAP: dict[str, dict[str, list[str]]] = {
         "permissions": ["payments:write"],
         "roles": ["admin", "treasury_lead"],
     },
+    "read_file": {
+        "permissions": ["files:read"],
+        "roles": ["admin", "tenant_admin", "developer", "engineer"],
+    },
+    "search_symbols": {
+        "permissions": ["code:read"],
+        "roles": ["admin", "tenant_admin", "developer", "engineer"],
+    },
+    "mock_dangerous_shell": {
+        "permissions": ["system:execute"],
+        "roles": ["admin"],
+    },
+    "finnapigo_balance": {
+        "permissions": ["accounts:read"],
+        "roles": ["admin", "tenant_admin", "financial_analyst"],
+    },
+    "finnapigo_transactions": {
+        "permissions": ["transactions:read"],
+        "roles": ["admin", "tenant_admin", "financial_analyst"],
+    },
+    "finnapigo_limits": {
+        "permissions": ["tenant:read"],
+        "roles": ["admin", "tenant_admin"],
+    },
 }
 
 
@@ -32,10 +62,18 @@ def check_tool_rbac_guardrail(
     context: TenantContext | Mapping[str, Any],
 ) -> GuardrailDecision:
     """Evaluate whether the caller context possesses authorization to invoke a tool."""
+    # 1. Public tools bypass role/permission mapping
+    if tool_name in PUBLIC_TOOLS:
+        return GuardrailDecision(allowed=True)
+
+    # 2. Unknown/unmapped tools fail closed (DENY)
     requirements = TOOL_PERMISSIONS_MAP.get(tool_name)
     if not requirements:
-        # Unrestricted or internal tool
-        return GuardrailDecision(allowed=True)
+        return GuardrailDecision(
+            allowed=False,
+            violation_type="RBAC_UNMAPPED_TOOL",
+            reason=f"Unauthorized: Tool '{tool_name}' has no policy mapping and fails closed.",
+        )
 
     if isinstance(context, Mapping):
         roles = list(context.get("roles", []))
@@ -44,17 +82,21 @@ def check_tool_rbac_guardrail(
         roles = context.roles
         permissions = context.permissions
 
-    # Allow internal agent executions without explicitly assigned roles
+    # 3. Empty authorization context fails closed (DENY)
     if not roles and not permissions:
-        return GuardrailDecision(allowed=True)
+        return GuardrailDecision(
+            allowed=False,
+            violation_type="RBAC_EMPTY_CONTEXT",
+            reason=f"Unauthorized: Caller context has no assigned roles or permissions for tool '{tool_name}'.",
+        )
 
-    # 1. Check if user holds any authorized role
-    authorized_roles = set(requirements["roles"])
+    # 4. Check if user holds any authorized role
+    authorized_roles = set(requirements.get("roles", []))
     if any(r in authorized_roles for r in roles):
         return GuardrailDecision(allowed=True)
 
-    # 2. Check if user holds required granular permissions
-    required_permissions = set(requirements["permissions"])
+    # 5. Check if user holds required granular permissions
+    required_permissions = set(requirements.get("permissions", []))
     if any(p in required_permissions for p in permissions):
         return GuardrailDecision(allowed=True)
 

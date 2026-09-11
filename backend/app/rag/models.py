@@ -175,3 +175,7 @@ class RAGGenerationResult(BaseModel):
         default=None,
         description="Reason code if status is ABSTAINED: 'NO_RELEVANT_EVIDENCE', 'PROVIDER_FAILURE', 'GENERATION_FAILURE'",
     )
+    correlation_id: str | None = Field(
+        default=None,
+        description="Request correlation identifier (TASK OPS-04)",
+    )

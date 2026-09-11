@@ -83,9 +83,9 @@ class BenchmarkRunner:
             return data
 
     async def run_case(
-        self, case: dict[str, Any]
+        self, case: dict[str, Any], execute_model_generation: bool = False
     ) -> tuple[EvaluationRecord, QualityScoreResult, CostMeasurement]:
-        """Execute a single workload case under Baseline vs Optimized paths."""
+        """Execute a single workload case under Baseline vs Optimized paths (TASK OPS-10)."""
         t_start = time.perf_counter()
         workload_id = case["workload_id"]
         workload_type = case["workload_type"]
@@ -120,13 +120,36 @@ class BenchmarkRunner:
         )
         provider_name = pipeline_res.compiled_prompt.metadata.get("provider", "generic")
 
-        # 3. Quality Oracle Evaluation
-        # Evaluate whether critical facts, symbols, citations exist in the compiled prompt sent to upstream LLM
+        # 3. Quality Oracle Evaluation (TASK OPS-10: Actual Model Generation vs Compiled Prompt)
         opt_text = (
             f"{pipeline_res.compiled_prompt.zone1_static_prefix}\n\n"
             f"{pipeline_res.compiled_prompt.zone2_dynamic_suffix}"
         ).strip()
-        quality_res = QualityOracle.evaluate(case=case, candidate_text=opt_text)
+
+        evaluated_text = opt_text
+        evaluated_artifact = "compiled_prompt"
+
+        if execute_model_generation:
+            try:
+                from app.core.llm_provider import call_upstream_llm_detailed
+
+                resp = await call_upstream_llm_detailed(
+                    prompt=user_query,
+                    system_instruction=sys_inst,
+                    model=model,
+                    compiled_prompt=pipeline_res.compiled_prompt,
+                    temperature=0.0,
+                    max_tokens=1024,
+                )
+                if resp and resp.text:
+                    evaluated_text = resp.text
+                    evaluated_artifact = "model_generation"
+                    output_tokens = self.tokenizer.count_tokens(resp.text)
+            except Exception:
+                evaluated_text = opt_text
+                evaluated_artifact = "compiled_prompt"
+
+        quality_res = QualityOracle.evaluate(case=case, candidate_text=evaluated_text)
 
         # 4. Cost Measurement
         cost_meas = measure_cost(
@@ -175,6 +198,7 @@ class BenchmarkRunner:
                 "multilingual_score": quality_res.multilingual_score,
                 "missing_facts": quality_res.missing_facts,
                 "fallback_used": pipeline_res.fallback_used,
+                "evaluated_artifact": evaluated_artifact,
             },
         )
 
@@ -183,6 +207,7 @@ class BenchmarkRunner:
     async def run_portfolio_benchmark(
         self,
         cache_hit_ratio: float = 0.35,
+        execute_model_generation: bool = False,
     ) -> tuple[
         BenchmarkSummary,
         list[EvaluationRecord],
@@ -196,7 +221,9 @@ class BenchmarkRunner:
         cost_measurements: list[CostMeasurement] = []
 
         for case in dataset:
-            rec, q_res, c_meas = await self.run_case(case)
+            rec, q_res, c_meas = await self.run_case(
+                case, execute_model_generation=execute_model_generation
+            )
             eval_records.append(rec)
             quality_results.append(q_res)
             cost_measurements.append(c_meas)

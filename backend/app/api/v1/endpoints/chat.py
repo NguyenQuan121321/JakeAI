@@ -371,11 +371,30 @@ async def generate_chat_stream(
                 citations = event.get("citations", [])
                 final_mascot_state = mascot
 
-        # 6. Output Guardrail & Semantic Cache Population
+        # 6. Output Guardrail & Semantic Cache Population (TASK OPS-03)
         if final_response:
-            sanitized_resp, _ = GuardrailsEngine.inspect_and_sanitize_output(
-                final_response, context.tenant_id
+            sanitized_resp, leak_detected = (
+                GuardrailsEngine.inspect_and_sanitize_output(
+                    final_response, context.tenant_id
+                )
             )
+            if leak_detected:
+                metrics.record_security_incident(
+                    "OUTPUT_DATA_LEAKAGE", context.tenant_id
+                )
+                yield _format_sse_event(
+                    "error",
+                    {
+                        "conversation_id": conversation_id,
+                        "error": "Output leakage detected",
+                        "detail": "Response blocked due to sensitive data leakage policy violation.",
+                        "mascot_state": "alert",
+                    },
+                )
+                metrics.record_stream_cancellation(
+                    "/api/v1/chat/stream", reason="security_leak_blocked"
+                )
+                return
             final_response = sanitized_resp
 
             # Store in Semantic Cache only for non-tool knowledge/RAG queries to prevent cross-user leak

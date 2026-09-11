@@ -72,6 +72,28 @@
         }
       }
     },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "Observability"
+        ],
+        "summary": "Prometheus Metrics Exposition",
+        "description": "Scrape endpoint serving platform, provider, and agent telemetry in Prometheus text format.",
+        "operationId": "get_prometheus_metrics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -3854,6 +3876,62 @@
             "type": "number",
             "title": "Cost Savings Usd Total",
             "default": 0.0
+          },
+          "safety_incidents_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Safety Incidents Total"
+          },
+          "stream_ttft_ms_avg": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Stream Ttft Ms Avg"
+          },
+          "agent_tasks_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Agent Tasks Total"
+          },
+          "agent_runs_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Agent Runs Total"
+          },
+          "agent_tool_calls_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Agent Tool Calls Total"
+          },
+          "agent_revisions_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Agent Revisions Total"
+          },
+          "agent_recovery_success_total": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Agent Recovery Success Total"
+          },
+          "agent_approval_wait_ms_avg": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Agent Approval Wait Ms Avg"
           }
         },
         "type": "object",

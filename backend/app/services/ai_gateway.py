@@ -250,6 +250,7 @@ class GatewayInferenceProxy:
         self,
         tenant_id: str,
         request: GatewayChatRequest,
+        correlation_id: str | None = None,
     ) -> GatewayChatResponse:
         """Execute chat completion with Tier 1 Redis exact cache and quota deduction."""
         # 1. Quota Pre-check
@@ -311,6 +312,20 @@ class GatewayInferenceProxy:
         )
 
         if cache_entry is not None:
+            # Output Guardrail leak check on cached response (OPS-03)
+            from app.guardrails import GuardrailsEngine
+            from app.telemetry.metrics import metrics
+
+            sanitized_cached, cache_leaked = (
+                GuardrailsEngine.inspect_and_sanitize_output(
+                    cache_entry.response, tenant_id
+                )
+            )
+            if cache_leaked:
+                metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
+                raise ValueError(
+                    "Output blocked due to security data leakage policy violation."
+                )
             # Immediate zero-cost return with exact accounting
             est_completion = max(1, estimate_tokens(cache_entry.response))
             req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -343,7 +358,7 @@ class GatewayInferenceProxy:
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": cache_entry.response,
+                            "content": sanitized_cached,
                         },
                         "finish_reason": "stop",
                     }
@@ -421,6 +436,7 @@ class GatewayInferenceProxy:
                 tools=request.tools,
                 messages=messages_to_send,
                 response_format=response_format_dict,
+                correlation_id=correlation_id,
             )
             if upstream_res:
                 upstream_response = upstream_res
@@ -436,6 +452,7 @@ class GatewayInferenceProxy:
                 compiled_prompt=compiled,
                 tools=request.tools,
                 messages=messages_to_send,
+                correlation_id=correlation_id,
             )
             if legacy_text:
                 return legacy_text
@@ -448,6 +465,20 @@ class GatewayInferenceProxy:
             )
 
         output_text = await self.breaker.call_with_fallback(call_model)
+
+        # Output Inspection & Leakage Blocking (TASK OPS-03)
+        from app.guardrails import GuardrailsEngine
+        from app.telemetry.metrics import metrics
+
+        sanitized_output, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
+            output_text, tenant_id
+        )
+        if leak_detected:
+            metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
+            raise ValueError(
+                "Output blocked due to security data leakage policy violation."
+            )
+        output_text = sanitized_output
 
         completion_tokens = max(1, estimate_tokens(output_text))
         req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -556,6 +587,7 @@ class GatewayInferenceProxy:
         tenant_id: str,
         request: GatewayChatRequest,
         raw_request: Any = None,
+        correlation_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream OpenAI-compatible chat completion chunks via SSE."""
         # 1. Quota Pre-check
@@ -623,7 +655,27 @@ class GatewayInferenceProxy:
             exact_only=True,
         )
         if cache_entry is not None:
-            words = cache_entry.response.split(" ")
+            # Output Guardrail leak check on cached response (OPS-03)
+            from app.guardrails import GuardrailsEngine
+            from app.telemetry.metrics import metrics
+
+            sanitized_cached, cache_leaked = (
+                GuardrailsEngine.inspect_and_sanitize_output(
+                    cache_entry.response, tenant_id
+                )
+            )
+            if cache_leaked:
+                metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
+                err_payload = {
+                    "error": {
+                        "message": "Output blocked due to security data leakage policy violation.",
+                        "type": "security_violation",
+                    }
+                }
+                yield f"data: {json.dumps(err_payload)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            words = sanitized_cached.split(" ")
             for i, word in enumerate(words):
                 if raw_request and await raw_request.is_disconnected():
                     return
@@ -689,12 +741,33 @@ class GatewayInferenceProxy:
             compiled_prompt=compiled,
             tools=request.tools,
             messages=request.messages,
+            correlation_id=correlation_id,
         )
         if not output_text:
             output_text = (
                 f"[JakeAI Gateway Stream via {request.model}]\n"
                 f"Processed query: {last_user_msg[:120]}"
             )
+
+        # Output Inspection & Leakage Blocking (TASK OPS-03)
+        from app.guardrails import GuardrailsEngine
+        from app.telemetry.metrics import metrics
+
+        sanitized_output, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
+            output_text, tenant_id
+        )
+        if leak_detected:
+            metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
+            err_payload = {
+                "error": {
+                    "message": "Output blocked due to security data leakage policy violation.",
+                    "type": "security_violation",
+                }
+            }
+            yield f"data: {json.dumps(err_payload)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+        output_text = sanitized_output
 
         # Stream words as SSE chunks
         words = output_text.split(" ")

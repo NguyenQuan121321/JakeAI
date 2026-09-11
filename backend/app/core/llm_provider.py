@@ -42,6 +42,7 @@ async def call_upstream_llm_detailed(
     tools: list[dict[str, Any]] | None = None,
     messages: list[ChatMessage] | None = None,
     response_format: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
 ) -> UpstreamLLMResponse | None:
     """Call upstream LLM provider and capture full Tier 5 cache telemetry.
 
@@ -88,6 +89,7 @@ async def call_upstream_llm_detailed(
         quality_requirement=classification.quality_requirement,
         allow_fallback=True,
         cost_aware_routing=getattr(settings, "COST_AWARE_ROUTING_ENABLED", False),
+        correlation_id=correlation_id,
     )
     decision = router.route(routing_policy)
 
@@ -138,6 +140,7 @@ async def call_upstream_llm_detailed(
         tenant_id=tenant_id,
         api_key=explicit_key,
         response_format=response_format,
+        correlation_id=correlation_id,
         extra_params={
             "prompt_cache_enabled": getattr(
                 settings, "PROVIDER_PROMPT_CACHE_ENABLED", True
@@ -211,6 +214,7 @@ async def call_upstream_llm(
     compiled_prompt: CompiledPrompt | None = None,
     tools: list[dict[str, Any]] | None = None,
     messages: list[ChatMessage] | None = None,
+    correlation_id: str | None = None,
 ) -> str | None:
     """Convenience wrapper returning plain text response for backward compatibility."""
     res = await call_upstream_llm_detailed(
@@ -223,6 +227,7 @@ async def call_upstream_llm(
         compiled_prompt=compiled_prompt,
         tools=tools,
         messages=messages,
+        correlation_id=correlation_id,
     )
     return res.text if res is not None else None
 

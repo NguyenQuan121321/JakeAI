@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.api.v1.api import api_router
 from app.api.v1.endpoints import coding, gateway
@@ -28,6 +28,10 @@ from app.api.v1.endpoints.health import (
 from app.core.config import get_settings
 from app.providers.errors import ErrorCategory, ProviderError
 from app.telemetry.metrics import metrics
+from app.telemetry.tracing import (
+    create_or_inherit_trace_context,
+    set_current_trace_context,
+)
 
 logger = logging.getLogger("jakeai.main")
 
@@ -103,6 +107,17 @@ def create_application() -> FastAPI:
         )
         request.state.correlation_id = correlation_id
 
+        # W3C Distributed Tracing (TASK OPS-07)
+        traceparent = request.headers.get("traceparent")
+        tracestate = request.headers.get("tracestate")
+        trace_ctx = create_or_inherit_trace_context(
+            traceparent_header=traceparent,
+            tracestate_header=tracestate,
+            fallback_correlation_id=correlation_id,
+        )
+        request.state.trace_context = trace_ctx
+        set_current_trace_context(trace_ctx)
+
         start_time = time.perf_counter()
         try:
             response: Response = await call_next(request)
@@ -111,11 +126,17 @@ def create_application() -> FastAPI:
             metrics.record_http_request(
                 request.method, request.url.path, 500, duration_ms
             )
+            set_current_trace_context(None)
             raise
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         response.headers["X-Correlation-ID"] = correlation_id
         response.headers["X-Response-Time"] = f"{duration_ms:.2f}ms"
+        response.headers["traceparent"] = trace_ctx.to_traceparent()
+        if trace_ctx.tracestate:
+            response.headers["tracestate"] = trace_ctx.tracestate
+
+        set_current_trace_context(None)
 
         metrics.record_http_request(
             request.method, request.url.path, response.status_code, duration_ms
@@ -189,6 +210,19 @@ def create_application() -> FastAPI:
         description="Direct container readiness probe.",
         tags=["Health"],
     )
+
+    @app.get(
+        "/metrics",
+        response_class=PlainTextResponse,
+        summary="Prometheus Metrics Exposition",
+        description="Scrape endpoint serving platform, provider, and agent telemetry in Prometheus text format.",
+        tags=["Observability"],
+    )
+    async def get_prometheus_metrics() -> Response:
+        return PlainTextResponse(
+            content=metrics.generate_prometheus_metrics(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     # Mount API v1 router
     app.include_router(api_router, prefix=settings.API_V1_STR)

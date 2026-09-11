@@ -253,11 +253,13 @@ class AgentExecutionLoop:
                         "user_id": task.user_id,
                         "roles": user_roles or [],
                         "permissions": user_permissions or [],
+                        "correlation_id": run.correlation_id,
                     },
                 )
                 step_duration = (time.time() - step_start) * 1000.0
-
-                agent_telemetry.record_tool_call(tool_name, task.tenant_id)
+                agent_telemetry.record_tool_call(
+                    tool_name, task.tenant_id, success=tool_res.success
+                )
                 agent_telemetry.record_step_executed(task.tenant_id)
 
                 obs_text = (
