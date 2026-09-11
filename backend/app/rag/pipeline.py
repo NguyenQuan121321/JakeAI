@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from typing import Any
 
 from app.core.config import get_settings
 from app.rag.citations import CitationGenerator
@@ -57,6 +58,13 @@ DEFAULT_RAG_SYSTEM_PROMPT = (
     "3. Reference source documents using inline citations like [^1], [^2] where applicable.\n"
     "4. If the context does not contain enough information, explicitly state that."
 )
+
+
+async def call_upstream_llm(*args: Any, **kwargs: Any) -> Any:
+    """Module-level forwarder to app.core.llm_provider.call_upstream_llm (supports monkeypatching)."""
+    from app.core.llm_provider import call_upstream_llm as _call_llm
+
+    return await _call_llm(*args, **kwargs)
 
 
 class RAGPipeline:
@@ -183,8 +191,6 @@ class RAGPipeline:
         # Step 10: Call upstream LLM provider
         raw_answer: str | None = None
         try:
-            from app.core.llm_provider import call_upstream_llm
-
             raw_answer = await call_upstream_llm(
                 prompt=prompt,
                 tenant_id=tenant_id,

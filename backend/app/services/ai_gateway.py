@@ -99,6 +99,9 @@ class QuotaManager:
 
     def __init__(self, budget_manager: FinOpsBudgetManager | None = None) -> None:
         self._budget_manager = budget_manager
+        self._memory_usage: dict[str, int] = {}
+        self._redis_available = True
+        self._redis_retry_after: float = 0.0
 
     def _get_manager(self) -> FinOpsBudgetManager:
         if self._budget_manager is not None:
@@ -112,6 +115,39 @@ class QuotaManager:
     @redis_client.setter
     def redis_client(self, value: Any | None) -> None:
         self._get_manager().redis_client = value
+
+    @staticmethod
+    def _get_period_key() -> str:
+        return time.strftime("%Y-%m")
+
+    async def _get_redis(self) -> Any | None:
+        """Lazily initialize Redis connection with fast ping check and cooldown."""
+        if self.redis_client is not None:
+            return self.redis_client
+        now = time.time()
+        if not self._redis_available and now < self._redis_retry_after:
+            return None
+        try:
+            from redis import asyncio as aioredis
+
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            client = aioredis.from_url(
+                settings.REDIS_URL,
+                decode_responses=False,
+                socket_timeout=1.0,
+                socket_connect_timeout=1.0,
+            )
+            await client.ping()
+            self.redis_client = client
+            self._redis_available = True
+            return client
+        except Exception as exc:
+            logger.debug("QuotaManager Redis unavailable (%s)", exc)
+            self._redis_available = False
+            self._redis_retry_after = now + 30.0
+            return None
 
     async def get_quota_limit(self, tenant_id: str) -> int:
         """Retrieve quota limit for a tenant."""
@@ -147,11 +183,41 @@ class QuotaManager:
         return new_tokens
 
     async def record_tokens_saved(self, tenant_id: str, tokens_saved: int) -> int:
-        """Increment tokens saved atomically in FinOps ledger."""
-        return await self._get_manager().record_tokens_saved(tenant_id, tokens_saved)
+        """Increment tokens saved atomically in FinOps ledger and Redis/memory cache."""
+        redis = await self._get_redis()
+        period = self._get_period_key()
+        if redis is not None:
+            try:
+                key = f"gateway:tokens_saved:{tenant_id}:{period}"
+                new_val = await redis.incrby(key, tokens_saved)
+                with contextlib.suppress(Exception):
+                    await self._get_manager().record_tokens_saved(
+                        tenant_id, tokens_saved
+                    )
+                return int(new_val)
+            except Exception as exc:
+                logger.debug("Redis incrby tokens_saved failed (%s)", exc)
+
+        mem_key = f"tokens_saved:{tenant_id}:{period}"
+        self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + tokens_saved
+        with contextlib.suppress(Exception):
+            await self._get_manager().record_tokens_saved(tenant_id, tokens_saved)
+        return self._memory_usage[mem_key]
 
     async def get_tokens_saved(self, tenant_id: str) -> int:
-        """Get current tokens saved for the active period from FinOps ledger."""
+        """Get current tokens saved for the active period from Redis, memory, or FinOps ledger."""
+        redis = await self._get_redis()
+        period = self._get_period_key()
+        if redis is not None:
+            try:
+                val = await redis.get(f"gateway:tokens_saved:{tenant_id}:{period}")
+                if val:
+                    return int(val)
+            except Exception as exc:
+                logger.debug("Redis read tokens_saved failed (%s)", exc)
+        mem_key = f"tokens_saved:{tenant_id}:{period}"
+        if mem_key in self._memory_usage:
+            return self._memory_usage[mem_key]
         return await self._get_manager().get_tokens_saved(tenant_id)
 
     async def get_status(self, tenant_id: str) -> QuotaStatus:

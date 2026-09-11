@@ -9,6 +9,7 @@ from app.providers.base import LLMProvider, ModelCapabilities, ModelCapabilityCa
 from app.providers.deepseek import DeepSeekAdapter
 from app.providers.gemini import GeminiAdapter
 from app.providers.groq import GroqAdapter
+from app.providers.local import LocalModelAdapter
 from app.providers.openai import OpenAIAdapter
 from app.providers.openrouter import OpenRouterAdapter
 
@@ -29,6 +30,7 @@ class ProviderRegistry:
         self.register("groq", GroqAdapter())
         self.register("deepseek", DeepSeekAdapter())
         self.register("openrouter", OpenRouterAdapter())
+        self.register("local", LocalModelAdapter())
 
     def register(self, name: str, adapter: LLMProvider) -> None:
         self._providers[name.lower().strip()] = adapter
@@ -38,6 +40,8 @@ class ProviderRegistry:
 
     def resolve_provider_name_for_model(self, model: str) -> str:
         m = model.lower().strip()
+        if "local" in m or "ollama" in m or "vllm" in m:
+            return "local"
         if "openrouter" in m or "/" in m:
             return "openrouter"
         if "claude" in m or "anthropic" in m:

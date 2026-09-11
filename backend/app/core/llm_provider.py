@@ -26,6 +26,7 @@ from app.providers.base import (
 )
 from app.routing.failover import get_failover_manager
 from app.routing.router import RoutingPolicy, get_model_router
+from app.routing.workload_classifier import get_workload_classifier
 
 logger = logging.getLogger(__name__)
 
@@ -66,16 +67,41 @@ async def call_upstream_llm_detailed(
     else:
         compiled = compiled_prompt
 
-    # Route first: the ModelRouter (via the provider registry) is the single
-    # authoritative model-to-provider resolution and selects the adapter that
-    # will actually execute this request.
+    # Route first: classify workload and pass explicit criteria to ModelRouter
+    classifier = get_workload_classifier()
+    classification = classifier.classify(
+        prompt=prompt,
+        messages=[m.model_dump() if hasattr(m, "model_dump") else m for m in messages]
+        if messages
+        else None,
+        tools=tools,
+        response_format=response_format,
+    )
+
     router = get_model_router()
     routing_policy = RoutingPolicy(
         requested_model=model,
         tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        required_capabilities=classification.required_capabilities,
+        context_tokens=classification.context_requirement,
+        quality_requirement=classification.quality_requirement,
         allow_fallback=True,
+        cost_aware_routing=getattr(settings, "COST_AWARE_ROUTING_ENABLED", False),
     )
     decision = router.route(routing_policy)
+
+    from app.telemetry.metrics import metrics
+
+    metrics.record_optimization_decision(
+        tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        selected_provider=decision.selected_provider,
+        selected_model=decision.selected_model,
+        estimated_input_cost=decision.estimated_input_cost,
+        cost_savings_usd_per_million=decision.cost_savings_usd_per_million,
+        reason="; ".join(decision.decision_reasons[:2]),
+    )
 
     # Determine explicit key for the authoritatively resolved provider from
     # tenant BYOK first, then platform fallback key (supports mocked settings
@@ -101,7 +127,7 @@ async def call_upstream_llm_detailed(
     )
 
     provider_req = ProviderRequest(
-        model=model,
+        model=decision.selected_model,
         prompt=prompt,
         messages=messages,
         system_instruction=default_system,
@@ -219,13 +245,40 @@ async def call_upstream_llm_stream(
         or "You are JakeAI, an enterprise financial and operational AI companion."
     )
 
+    classifier = get_workload_classifier()
+    classification = classifier.classify(
+        prompt=prompt,
+        messages=[m.model_dump() if hasattr(m, "model_dump") else m for m in messages]
+        if messages
+        else None,
+        tools=None,
+        response_format=None,
+    )
+
     router = get_model_router()
     routing_policy = RoutingPolicy(
         requested_model=model,
         tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        required_capabilities=classification.required_capabilities,
+        context_tokens=classification.context_requirement,
+        quality_requirement=classification.quality_requirement,
         allow_fallback=True,
+        cost_aware_routing=getattr(settings, "COST_AWARE_ROUTING_ENABLED", False),
     )
     decision = router.route(routing_policy)
+
+    from app.telemetry.metrics import metrics
+
+    metrics.record_optimization_decision(
+        tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        selected_provider=decision.selected_provider,
+        selected_model=decision.selected_model,
+        estimated_input_cost=decision.estimated_input_cost,
+        cost_savings_usd_per_million=decision.cost_savings_usd_per_million,
+        reason="; ".join(decision.decision_reasons[:2]),
+    )
 
     provider_settings_keys = {
         "anthropic": "ANTHROPIC_API_KEY",
@@ -248,7 +301,7 @@ async def call_upstream_llm_stream(
     )
 
     provider_req = ProviderRequest(
-        model=model,
+        model=decision.selected_model,
         prompt=prompt,
         messages=messages,
         system_instruction=default_system,

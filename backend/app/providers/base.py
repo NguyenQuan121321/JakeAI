@@ -798,6 +798,23 @@ class ModelCapabilityCatalog:
             cache_write_pricing=2.00,
             min_cache_tokens=0,
         ),
+        # Local / Self-Hosted Inference (COST-12)
+        "local-model": ModelCapabilities(
+            provider="local",
+            model="local-model",
+            context_window=32_768,
+            supports_streaming=True,
+            supports_tools=True,
+            supports_json=True,
+            supports_prompt_cache=False,
+            supports_embeddings=False,
+            supports_reasoning=False,
+            input_pricing=0.10,
+            output_pricing=0.20,
+            cache_pricing=0.10,
+            cache_write_pricing=0.10,
+            min_cache_tokens=0,
+        ),
     }
 
     @classmethod
