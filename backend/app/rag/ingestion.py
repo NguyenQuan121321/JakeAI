@@ -1,6 +1,9 @@
-"""RAG Document Ingestion Pipeline with RecursiveCharacterTextSplitter."""
+"""RAG Document Ingestion Pipeline with RecursiveCharacterTextSplitter and Multiformat Parsers."""
+
+from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from typing import Any
 
@@ -8,7 +11,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field, model_validator
 
 from app.rag.models import DocumentChunk
+from app.rag.normalizer import normalize_text
+from app.rag.parsers import (
+    get_parser,
+)
 from app.rag.retriever import HybridRetriever, default_hybrid_retriever
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentIngestRequest(BaseModel):
@@ -68,7 +77,7 @@ class DocumentIngestResponse(BaseModel):
 
 
 class DocumentIngestionPipeline:
-    """Pipelines raw text into chunked, embedded, and indexed DocumentChunk representations."""
+    """Pipelines documents (Text, Markdown, PDF) into chunked, embedded, and indexed DocumentChunk representations."""
 
     def __init__(self, retriever: HybridRetriever | None = None) -> None:
         self.retriever = retriever or default_hybrid_retriever
@@ -83,13 +92,15 @@ class DocumentIngestionPipeline:
         chunk_overlap: int = 50,
     ) -> list[DocumentChunk]:
         """Split text into overlapping chunks with deterministic identifiers."""
+        normalized_content = normalize_text(content)
+
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", ". ", "; ", ", ", " ", ""],
         )
 
-        raw_chunks = splitter.split_text(content)
+        raw_chunks = splitter.split_text(normalized_content)
         source_slug = (
             re.sub(r"[^a-zA-Z0-9_\-]+", "-", source.lower()).strip("-") or "doc"
         )
@@ -107,6 +118,7 @@ class DocumentIngestionPipeline:
                 "chunk_index": idx,
                 "total_chunks": len(raw_chunks),
                 "source": source,
+                "tenant_id": tenant_id,
             }
 
             chunk = DocumentChunk(
@@ -125,12 +137,20 @@ class DocumentIngestionPipeline:
         request: DocumentIngestRequest,
         tenant_id: str,
     ) -> DocumentIngestResponse:
-        """Process, chunk, and index a document for the target tenant."""
+        """Process, parse, chunk, and index a document for the target tenant."""
+        parser = get_parser(filename=request.source, is_raw_text=True)
+        parsed = parser.parse_text(
+            text=request.content,
+            filename=request.source,
+            metadata=request.metadata,
+        )
+
+        merged_metadata = {**request.metadata, **parsed.metadata}
         chunks = self.chunk_text(
-            content=request.content,
+            content=parsed.content,
             source=request.source,
             tenant_id=tenant_id,
-            metadata=request.metadata,
+            metadata=merged_metadata,
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap,
         )
@@ -145,6 +165,42 @@ class DocumentIngestionPipeline:
             indexed_chunks=len(chunks),
             chunk_ids=chunk_ids,
             source=request.source,
+            tenant_id=tenant_id,
+        )
+
+    async def ingest_file_bytes(
+        self,
+        data: bytes,
+        filename: str,
+        tenant_id: str,
+        mime_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+    ) -> DocumentIngestResponse:
+        """Ingest raw file bytes (e.g. PDF, Markdown, TXT) with MIME validation and extraction."""
+        parser = get_parser(filename=filename, mime_type=mime_type)
+        parsed = parser.parse_bytes(data=data, filename=filename, metadata=metadata)
+
+        chunks = self.chunk_text(
+            content=parsed.content,
+            source=filename,
+            tenant_id=tenant_id,
+            metadata=parsed.metadata,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+        if chunks:
+            await self.retriever.index_documents(chunks)
+
+        chunk_ids = [c.chunk_id for c in chunks]
+
+        return DocumentIngestResponse(
+            status="success",
+            indexed_chunks=len(chunks),
+            chunk_ids=chunk_ids,
+            source=filename,
             tenant_id=tenant_id,
         )
 

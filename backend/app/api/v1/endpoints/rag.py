@@ -114,6 +114,12 @@ class RAGGenerateResponse(BaseModel):
     tokens_saved: int
     reduction_ratio: float
     latency_ms: float
+    status: str = Field(
+        default="SUCCESS", description="Pipeline status: SUCCESS or ABSTAINED"
+    )
+    abstention_reason: str | None = Field(
+        default=None, description="Abstention reason code if applicable"
+    )
 
 
 @router.post(
@@ -257,4 +263,8 @@ async def generate_rag_answer(
         tokens_saved=gen_result.context_selection.tokens_saved,
         reduction_ratio=gen_result.context_selection.reduction_ratio,
         latency_ms=gen_result.latency_ms,
+        status=gen_result.status,
+        abstention_reason=str(gen_result.abstention_reason)
+        if gen_result.abstention_reason
+        else None,
     )

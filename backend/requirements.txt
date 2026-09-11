@@ -17,6 +17,8 @@ cryptography==50.0.1
 # State, Caching & Vector Store
 redis[hiredis]==8.1.0
 qdrant-client==1.19.0
+fastembed==0.8.0
+pypdf==6.18.0
 
 # HTTP Client
 httpx==0.28.1
