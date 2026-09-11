@@ -8,13 +8,17 @@ Implements:
 
 import hashlib
 import json
+import logging
 import math
 import re
 import time
 import unicodedata
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 try:
     import redis.asyncio as redis
@@ -268,6 +272,10 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     return max(0.0, min(1.0, dot_product))
 
 
+_qdrant_global_available: bool = True
+_qdrant_global_retry_after: float = 0.0
+
+
 class SemanticCacheManager:
     """Multi-tier cache manager supporting exact match and semantic vector search."""
 
@@ -276,16 +284,138 @@ class SemanticCacheManager:
         redis_client: Any | None = None,
         similarity_threshold: float = 0.95,
         default_ttl: int = 3600,
+        collection_name: str = "jakeai_semantic_cache",
+        qdrant_client: Any | None = None,
+        embedding_provider: Any | None = None,
     ) -> None:
         self.redis_client = redis_client
         self.similarity_threshold = similarity_threshold
         self.default_ttl = default_ttl
+        self.collection_name = collection_name
+        self.qdrant_client = qdrant_client
+        self._embedding_provider = embedding_provider
         # Local in-memory store for fallback / fast testing
         self._memory_exact: dict[str, SemanticCacheEntry] = {}
         self._memory_vectors: dict[str, list[SemanticCacheEntry]] = {}
         self._redis_available: bool = True
         self._redis_retry_after: float = 0.0
+        self._qdrant_available: bool = True
+        self._qdrant_retry_after: float = 0.0
         self.metrics = CacheMetrics()
+
+    @property
+    def embedding_provider(self) -> Any:
+        """Get or lazily initialize the embedding provider."""
+        if self._embedding_provider is None:
+            try:
+                from app.rag.embedding import get_embedding_provider
+
+                self._embedding_provider = get_embedding_provider()
+            except Exception as exc:
+                logger.debug("Failed to retrieve embedding provider: %s", exc)
+        return self._embedding_provider
+
+    def _embed_text(self, text: str) -> list[float]:
+        """Embed text using real dense embedding provider with fallback vector."""
+        provider = self.embedding_provider
+        if provider is not None:
+            try:
+                raw_emb = provider.embed_text(text)
+                return [float(x) for x in raw_emb]
+            except Exception as exc:
+                logger.debug(
+                    "Embedding provider embed_text error: %s; using fallback vector.",
+                    exc,
+                )
+        return _generate_synthetic_embedding(text, dim=128)
+
+    async def _get_qdrant(self) -> Any | None:
+        """Lazily initialize Qdrant client connection if available with auto-collection provisioning."""
+        global _qdrant_global_available, _qdrant_global_retry_after
+
+        if self.qdrant_client is not None:
+            return self.qdrant_client
+
+        now = time.time()
+        if (not self._qdrant_available and now < self._qdrant_retry_after) or (
+            not _qdrant_global_available and now < _qdrant_global_retry_after
+        ):
+            return None
+
+        try:
+            from qdrant_client import AsyncQdrantClient
+            from qdrant_client.http import models
+
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            dim = (
+                self.embedding_provider.dimension
+                if self.embedding_provider is not None
+                else getattr(settings, "EMBEDDING_DIMENSION", 384)
+            )
+            client = AsyncQdrantClient(
+                url=settings.QDRANT_URL,
+                timeout=1,
+                check_compatibility=False,
+            )
+            if not await client.collection_exists(self.collection_name):
+                await client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=dim,
+                        distance=models.Distance.COSINE,
+                    ),
+                )
+            self.qdrant_client = client
+            self._qdrant_available = True
+            self._qdrant_retry_after = 0.0
+            _qdrant_global_available = True
+            _qdrant_global_retry_after = 0.0
+            return self.qdrant_client
+        except Exception as exc:
+            logger.debug(
+                "Qdrant unavailable for semantic cache (%s); using in-memory store",
+                exc,
+            )
+            self._qdrant_available = False
+            self._qdrant_retry_after = time.time() + 60.0
+            _qdrant_global_available = False
+            _qdrant_global_retry_after = time.time() + 60.0
+            self.qdrant_client = None
+            return None
+
+    @staticmethod
+    def _is_compatible_for_semantic_hit(
+        entry: SemanticCacheEntry,
+        model: str,
+        provider: str,
+        version: str,
+        effective_system: str,
+        effective_tools: list[dict[str, Any]] | None,
+        effective_rf: dict[str, Any] | str | None,
+    ) -> bool:
+        """Enforce strict generation compatibility guardrails for semantic hits."""
+        if entry.model != model and model != "default" and entry.model != "default":
+            return False
+        if (
+            entry.provider != provider
+            and provider != "generic"
+            and entry.provider != "generic"
+        ):
+            return False
+        if entry.version != version:
+            return False
+        if (
+            entry.system_instructions
+            and effective_system
+            and _normalize_text(entry.system_instructions)
+            != _normalize_text(effective_system)
+        ):
+            return False
+        if entry.tools != effective_tools:
+            return False
+        return entry.response_format == effective_rf
 
     def get_metrics(self) -> dict[str, Any]:
         """Return snapshot of cache performance metrics."""
@@ -446,7 +576,83 @@ class SemanticCacheManager:
             return None
 
         # 2. Tier 2: Semantic Vector Cosine Similarity Search
-        query_vec = _generate_synthetic_embedding(prompt)
+        query_vec = self._embed_text(prompt)
+
+        # 2a. Query Qdrant if available
+        qdrant = await self._get_qdrant()
+        if qdrant is not None and self._qdrant_available:
+            try:
+                from qdrant_client.http import models
+
+                tenant_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="tenant_id",
+                            match=models.MatchValue(value=tenant_id),
+                        )
+                    ]
+                )
+                search_res = await qdrant.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vec,
+                    query_filter=tenant_filter,
+                    limit=5,
+                    score_threshold=self.similarity_threshold,
+                )
+                for hit in search_res:
+                    payload = hit.payload or {}
+                    # Defense-in-depth tenant boundary check
+                    if str(payload.get("tenant_id")) != tenant_id:
+                        continue
+                    cached_at = float(payload.get("cached_at", 0.0))
+                    ttl_sec = int(payload.get("ttl_seconds", self.default_ttl))
+                    if (now - cached_at) > ttl_sec:
+                        continue
+
+                    candidate = SemanticCacheEntry(
+                        prompt=str(payload.get("prompt", "")),
+                        response=str(payload.get("response", "")),
+                        tenant_id=tenant_id,
+                        model=str(payload.get("model", "default")),
+                        provider=str(payload.get("provider", "generic")),
+                        parameters=payload.get("parameters") or {},
+                        version=str(payload.get("version", CACHE_VERSION)),
+                        citations=payload.get("citations") or [],
+                        mascot_state=str(payload.get("mascot_state", "idle")),
+                        similarity_score=round(float(hit.score), 4),
+                        cache_type="semantic",
+                        cached_at=cached_at,
+                        ttl_seconds=ttl_sec,
+                        vector=query_vec,
+                        tokens_avoided=int(payload.get("tokens_avoided", 0)),
+                        cost_avoided_usd=float(payload.get("cost_avoided_usd", 0.0)),
+                        system_instructions=str(payload.get("system_instructions", "")),
+                        tools=payload.get("tools"),
+                        response_format=payload.get("response_format"),
+                    )
+                    if self._is_compatible_for_semantic_hit(
+                        candidate,
+                        model=model,
+                        provider=provider,
+                        version=version,
+                        effective_system=effective_system,
+                        effective_tools=effective_tools,
+                        effective_rf=effective_rf,
+                    ):
+                        self.metrics.semantic_hits += 1
+                        self.metrics.tokens_avoided += candidate.tokens_avoided
+                        self.metrics.cost_avoided_usd += candidate.cost_avoided_usd
+                        return candidate
+            except Exception as exc:
+                logger.debug(
+                    "Qdrant semantic search error: %s; falling back to in-memory store",
+                    exc,
+                )
+                if self.qdrant_client is None:
+                    self._qdrant_available = False
+                    self._qdrant_retry_after = time.time() + 60.0
+
+        # 2b. In-memory vector fallback search
         best_match: SemanticCacheEntry | None = None
         best_similarity = 0.0
 
@@ -457,34 +663,21 @@ class SemanticCacheManager:
             if (now - entry.cached_at) > entry.ttl_seconds:
                 continue
             valid_entries.append(entry)
-            # Strict Model/Provider Compatibility Guardrail
-            if entry.model != model and model != "default" and entry.model != "default":
-                continue
-            if (
-                entry.provider != provider
-                and provider != "generic"
-                and entry.provider != "generic"
+            if not self._is_compatible_for_semantic_hit(
+                entry,
+                model=model,
+                provider=provider,
+                version=version,
+                effective_system=effective_system,
+                effective_tools=effective_tools,
+                effective_rf=effective_rf,
             ):
                 continue
-            if entry.version != version:
-                continue
-            # System instructions, tools, and response format must match for semantic hit
-            if (
-                entry.system_instructions
-                and effective_system
-                and _normalize_text(entry.system_instructions)
-                != _normalize_text(effective_system)
-            ):
-                continue
-            if entry.tools != effective_tools:
-                continue
-            if entry.response_format != effective_rf:
-                continue
-
-            sim = _cosine_similarity(query_vec, entry.vector)
-            if sim > best_similarity:
-                best_similarity = sim
-                best_match = entry
+            if entry.vector is not None:
+                sim = _cosine_similarity(query_vec, entry.vector)
+                if sim > best_similarity:
+                    best_similarity = sim
+                    best_match = entry
 
         self._memory_vectors[tenant_id] = valid_entries
 
@@ -585,7 +778,7 @@ class SemanticCacheManager:
             generation_params=combined_params if combined_params else None,
             version=version,
         )
-        vector = _generate_synthetic_embedding(prompt)
+        vector = self._embed_text(prompt)
 
         entry = SemanticCacheEntry(
             prompt=prompt,
@@ -627,7 +820,34 @@ class SemanticCacheManager:
                 self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
                 self.redis_client = None
 
-        # Write to in-memory exact and semantic stores
+        # 2. Write Semantic Vector to Qdrant if available
+        qdrant = await self._get_qdrant()
+        if qdrant is not None and self._qdrant_available:
+            try:
+                from qdrant_client.http import models
+
+                point_id = str(
+                    uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}:{exact_key}")
+                )
+                payload = entry.model_dump()
+                payload.pop("vector", None)
+                await qdrant.upsert(
+                    collection_name=self.collection_name,
+                    points=[
+                        models.PointStruct(
+                            id=point_id,
+                            vector=vector,
+                            payload=payload,
+                        )
+                    ],
+                )
+            except Exception as exc:
+                logger.debug("Failed to upsert semantic entry to Qdrant: %s", exc)
+                if self.qdrant_client is None:
+                    self._qdrant_available = False
+                    self._qdrant_retry_after = time.time() + 60.0
+
+        # 3. Write to in-memory exact and semantic stores
         self._memory_exact[exact_key] = entry
         if tenant_id not in self._memory_vectors:
             self._memory_vectors[tenant_id] = []
@@ -636,9 +856,10 @@ class SemanticCacheManager:
         return entry
 
     async def invalidate(self, tenant_id: str | None = None) -> int:
-        """Invalidate cache entries for a tenant or globally."""
+        """Invalidate cache entries for a tenant or globally across all tiers."""
         cleared_count = 0
         redis_conn = await self._get_redis()
+        qdrant = await self._get_qdrant()
 
         if tenant_id:
             keys_to_delete = [
@@ -661,6 +882,27 @@ class SemanticCacheManager:
                         cleared_count = max(cleared_count, int(deleted))
                 except Exception:
                     self._redis_available = False
+
+            if qdrant is not None and self._qdrant_available:
+                try:
+                    from qdrant_client.http import models
+
+                    tenant_filter = models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="tenant_id",
+                                match=models.MatchValue(value=tenant_id),
+                            )
+                        ]
+                    )
+                    await qdrant.delete(
+                        collection_name=self.collection_name,
+                        points_selector=models.FilterSelector(filter=tenant_filter),
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to delete tenant points from Qdrant: %s", exc)
+                    if self.qdrant_client is None:
+                        self._qdrant_available = False
         else:
             cleared_count = len(self._memory_exact)
             self._memory_exact.clear()
@@ -675,6 +917,19 @@ class SemanticCacheManager:
                         cleared_count = max(cleared_count, int(deleted))
                 except Exception:
                     self._redis_available = False
+
+            if qdrant is not None and self._qdrant_available:
+                try:
+                    from qdrant_client.http import models
+
+                    await qdrant.delete(
+                        collection_name=self.collection_name,
+                        points_selector=models.FilterSelector(filter=models.Filter()),
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to clear all points from Qdrant: %s", exc)
+                    if self.qdrant_client is None:
+                        self._qdrant_available = False
 
         return cleared_count
 
