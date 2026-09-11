@@ -29,16 +29,42 @@ class ErrorCategory(StrEnum):
 
 
 _SECRET_REDACTION_PATTERNS = [
-    re.compile(r"sk-[a-zA-Z0-9_-]{10,}", re.IGNORECASE),
-    re.compile(r"AIza[0-9A-Za-z-_]{35}", re.IGNORECASE),
+    # DB connection URIs with embedded credentials (Postgres, MySQL, Redis, MongoDB, AMQP)
+    re.compile(
+        r"(?:postgres(?:ql)?|mysql|redis(?:s)?|mongodb(?:\+srv)?|amqp(?:s)?)://[^:\s]+:[^@\s]+@[^\s]+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"[a-zA-Z0-9+.-]+://[^:\s]+:[^@\s]+@[^\s]+", re.IGNORECASE),
+    # Internal infrastructure endpoints and private IP ranges
+    re.compile(
+        r"(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?",
+        re.IGNORECASE,
+    ),
+    # JWT and Auth tokens
+    re.compile(
+        r"eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9._-]{10,}",
+        re.IGNORECASE,
+    ),
     re.compile(r"Bearer\s+[a-zA-Z0-9._-]+", re.IGNORECASE),
+    re.compile(r"Basic\s+[a-zA-Z0-9+/=]{16,}", re.IGNORECASE),
+    # Cloud & Provider API Keys
+    re.compile(r"sk-[a-zA-Z0-9_-]{10,}", re.IGNORECASE),
+    re.compile(r"sk-ant-[a-zA-Z0-9_-]{10,}", re.IGNORECASE),
+    re.compile(r"AIza[0-9A-Za-z-_]{20,}", re.IGNORECASE),
+    re.compile(r"gh[pousr]_[a-zA-Z0-9]{36,}", re.IGNORECASE),
+    re.compile(r"AKIA[0-9A-Z]{16}", re.IGNORECASE),
+    # Key-value secret assignments in error strings
+    re.compile(
+        r"(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|password|passwd)\s*[:=]\s*['\"]?[a-zA-Z0-9_\-]{8,}['\"]?",
+        re.IGNORECASE,
+    ),
     re.compile(r"x-api-key:\s*[^\s]+", re.IGNORECASE),
     re.compile(r"key=[a-zA-Z0-9_-]{10,}", re.IGNORECASE),
 ]
 
 
 def sanitize_error_message(message: str) -> str:
-    """Sanitize error messages to guarantee zero provider credentials or tokens leak."""
+    """Sanitize error messages to guarantee zero provider credentials, DB strings, or tokens leak."""
     clean = str(message)
     for pattern in _SECRET_REDACTION_PATTERNS:
         clean = pattern.sub("[REDACTED_SECRET]", clean)
@@ -71,7 +97,12 @@ class ProviderError(Exception):
         self.raw_error = raw_error
 
     def __str__(self) -> str:
-        parts = [f"[{self.provider}] {self.category.value.upper()}"]
+        cat_val = (
+            self.category.value
+            if hasattr(self.category, "value")
+            else str(self.category)
+        )
+        parts = [f"[{self.provider}] {cat_val.upper()}"]
         if self.status_code:
             parts.append(f"(HTTP {self.status_code})")
         if self.model:

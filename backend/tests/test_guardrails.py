@@ -72,6 +72,28 @@ def test_rbac_guardrail_authorization() -> None:
     )
     assert check_tool_rbac_guardrail("transfer_funds", admin_context).allowed is True
 
+    # Empty context -> Fail closed (DENY)
+    empty_context = TenantContext(
+        tenant_id="tenant_fin",
+        user_id="anon",
+        roles=[],
+        permissions=[],
+    )
+    empty_denied = check_tool_rbac_guardrail("get_account_balance", empty_context)
+    assert empty_denied.allowed is False
+    assert empty_denied.violation_type == "RBAC_EMPTY_CONTEXT"
+
+    # Unknown unmapped tool -> Fail closed (DENY)
+    unmapped_denied = check_tool_rbac_guardrail("dangerous_unmapped_shell", admin_context)
+    assert unmapped_denied.allowed is False
+    assert unmapped_denied.violation_type == "RBAC_UNMAPPED_TOOL"
+
+    # Public tool -> ALLOW even with empty context
+    public_allowed = check_tool_rbac_guardrail("calculator", empty_context)
+    assert public_allowed.allowed is True
+    public_time = check_tool_rbac_guardrail("system_time", empty_context)
+    assert public_time.allowed is True
+
 
 def test_pii_masking() -> None:
     """Verify PII entities are masked with appropriate redaction tokens."""

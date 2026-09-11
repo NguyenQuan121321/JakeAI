@@ -147,8 +147,9 @@ class RAGPipeline:
         candidate_pool: int = 15,
         model: str | None = None,
         system_instruction: str | None = None,
+        correlation_id: str | None = None,
     ) -> RAGGenerationResult:
-        """Step 1-10: Execute end-to-end RAG pipeline from retrieval through synthesis, claim verification, and citation mapping."""
+        """Step 1-10: Execute end-to-end RAG pipeline from retrieval through synthesis, claim verification, and citation mapping (OPS-04)."""
         start_time = time.time()
 
         # Step 5-8: Retrieve and select minimal sufficient context
@@ -176,6 +177,7 @@ class RAGPipeline:
                 latency_ms=elapsed,
                 status="ABSTAINED",
                 abstention_reason=AbstentionReason.NO_RELEVANT_EVIDENCE,
+                correlation_id=correlation_id,
             )
 
         # Assemble grounded prompt
@@ -195,6 +197,7 @@ class RAGPipeline:
                 prompt=prompt,
                 tenant_id=tenant_id,
                 model=model or "default",
+                correlation_id=correlation_id,
             )
         except Exception as exc:
             logger.warning("Upstream LLM invocation failed: %s", exc)
@@ -208,6 +211,7 @@ class RAGPipeline:
                 latency_ms=elapsed,
                 status="ABSTAINED",
                 abstention_reason=AbstentionReason.PROVIDER_FAILURE,
+                correlation_id=correlation_id,
             )
 
         if not raw_answer:
@@ -225,6 +229,7 @@ class RAGPipeline:
                     latency_ms=elapsed,
                     status="ABSTAINED",
                     abstention_reason=AbstentionReason.PROVIDER_FAILURE,
+                    correlation_id=correlation_id,
                 )
 
             # In dev/test: perform deterministic grounded synthesis only if evidence is relevant
@@ -256,6 +261,7 @@ class RAGPipeline:
                     latency_ms=elapsed,
                     status="ABSTAINED",
                     abstention_reason=AbstentionReason.NO_RELEVANT_EVIDENCE,
+                    correlation_id=correlation_id,
                 )
 
             raw_answer = f"Based on verified records ({top_chunk.source}): {top_chunk.content.strip()}"
@@ -278,6 +284,7 @@ class RAGPipeline:
                 latency_ms=elapsed,
                 status="ABSTAINED",
                 abstention_reason=AbstentionReason.GENERATION_FAILURE,
+                correlation_id=correlation_id,
             )
 
         verified_text = (
@@ -306,6 +313,7 @@ class RAGPipeline:
             latency_ms=elapsed_ms,
             status="SUCCESS",
             abstention_reason=None,
+            correlation_id=correlation_id,
         )
 
 

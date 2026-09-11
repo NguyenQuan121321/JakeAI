@@ -184,6 +184,9 @@ class ProviderRequest(BaseModel):
     extra_params: dict[str, Any] | None = Field(
         default=None, description="Provider-specific payload overrides"
     )
+    correlation_id: str | None = Field(
+        default=None, description="Request correlation identifier (TASK OPS-04)"
+    )
 
     @model_validator(mode="after")
     def _validate_and_sync_prompt(self) -> ProviderRequest:

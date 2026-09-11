@@ -1,0 +1,23 @@
+{
+  "version": "v1",
+  "created_at": 1726000000.0,
+  "avg_quality_score": 0.88,
+  "min_pass_rate_pct": 95.0,
+  "max_quality_regression": 0.05,
+  "max_cost_regression": 0.10,
+  "retrieval_mrr": 0.75,
+  "groundedness_score": 0.88,
+  "workload_baselines": {
+    "general_chat": 0.90,
+    "financial_analysis": 0.88,
+    "sql_generation": 0.92,
+    "code_explanation": 0.89,
+    "document_qa": 0.87,
+    "summary": 0.86,
+    "agent_tool": 0.88
+  },
+  "metadata": {
+    "description": "Canonical AI quality baseline established for WORK-04 LLMOps & Safety",
+    "git_commit": "main-baseline"
+  }
+}

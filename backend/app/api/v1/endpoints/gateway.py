@@ -60,6 +60,22 @@ async def proxy_chat_completions(
     context: TenantContext = Depends(get_current_tenant),
 ) -> Any:
     """OpenAI-compatible inference proxy with Tier 1 Redis exact caching and quota deduction."""
+    from app.guardrails import GuardrailsEngine
+    from app.telemetry.metrics import metrics
+
+    # 1. Perimeter Input Guardrail & PII Inspection (OPS-02, OPS-12)
+    for msg in reversed(request.messages):
+        if msg.role == "user" and msg.content:
+            guard_res = GuardrailsEngine.inspect_input(msg.content)
+            if not guard_res.allowed:
+                metrics.record_security_incident("PROMPT_INJECTION_ATTEMPT", context.tenant_id)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Safety guardrail violation: {guard_res.reason}",
+                )
+            masked_content, _ = GuardrailsEngine.redact_pii(msg.content)
+            msg.content = masked_content
+
     proxy = get_gateway_proxy()
     if request.stream:
         return StreamingResponse(
@@ -67,6 +83,7 @@ async def proxy_chat_completions(
                 tenant_id=context.tenant_id,
                 request=request,
                 raw_request=raw_request,
+                correlation_id=context.correlation_id,
             ),
             media_type="text/event-stream",
             headers={
@@ -82,6 +99,7 @@ async def proxy_chat_completions(
         return await proxy.chat_completions(
             tenant_id=context.tenant_id,
             request=request,
+            correlation_id=context.correlation_id,
         )
     except ValueError as exc:
         raise HTTPException(

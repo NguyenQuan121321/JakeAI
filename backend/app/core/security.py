@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import logging
 import time
+import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -27,12 +28,13 @@ def verify_finnapigo_jwt(
     token: str,
     secret_key: str | None = None,
     algorithm: str | None = None,
+    correlation_id: str | None = None,
 ) -> TenantContext:
     """Decode and validate a FinnApiGo JWT access token.
 
     Verifies signature, expiration, and extracts claims supporting both
     FinnApiGo compact enterprise schema (tid, perms, role, uid) and standard
-    expanded claims (tenant_id, permissions, roles, sub).
+    expanded claims (tenant_id, permissions, roles, sub). Preserves single correlation ID (OPS-04).
     """
     settings = get_settings()
     key = secret_key or settings.JWT_SECRET_KEY
@@ -98,6 +100,8 @@ def verify_finnapigo_jwt(
     raw_perms = payload.get("permissions") or payload.get("perms") or []
     permissions = [raw_perms] if isinstance(raw_perms, str) else list(raw_perms)
 
+    # Preserve single correlation ID (TASK OPS-04)
+    cid = correlation_id or payload.get("cid") or str(uuid.uuid4())
     context = TenantContext(
         tenant_id=tenant_id,
         user_id=sub,
@@ -105,6 +109,7 @@ def verify_finnapigo_jwt(
         roles=[str(r) for r in roles],
         scopes=[str(s) for s in scopes],
         permissions=[str(p) for p in permissions],
+        correlation_id=cid,
     )
     set_current_tenant_context(context)
     return context
@@ -204,10 +209,14 @@ def verify_internal_perimeter_secret(request: Request | None) -> bool:
 
 
 async def get_current_tenant(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> TenantContext:
-    """FastAPI security dependency resolving and validating TenantContext."""
-    context = verify_finnapigo_jwt(credentials.credentials)
+    """FastAPI security dependency resolving and validating TenantContext (TASK OPS-04)."""
+    cid = getattr(request.state, "correlation_id", None) if hasattr(request, "state") else None
+    if not cid and hasattr(request, "headers"):
+        cid = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
+    context = verify_finnapigo_jwt(credentials.credentials, correlation_id=cid)
     await check_token_denylist(credentials.credentials)
     return context
 
@@ -264,6 +273,7 @@ def exchange_obo_token(
         "roles": context.roles,
         "scopes": scopes,
         "permissions": context.permissions,
+        "cid": context.correlation_id,
         "aud": target_audience,
         "iss": "jakeai-gateway",
         "act": {

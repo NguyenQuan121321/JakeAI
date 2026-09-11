@@ -125,6 +125,9 @@ class RoutingPolicy(BaseModel):
     cost_weight: float = Field(
         default=0.20, description="Weight of cost avoidance in soft score"
     )
+    correlation_id: str | None = Field(
+        default=None, description="Request correlation identifier (TASK OPS-04)"
+    )
 
 
 class RoutingDecision(BaseModel):
@@ -142,6 +145,9 @@ class RoutingDecision(BaseModel):
     estimated_output_cost: float = 0.0
     cost_savings_usd_per_million: float = 0.0
     is_observable: bool = True
+    correlation_id: str | None = Field(
+        default=None, description="Request correlation identifier (TASK OPS-04)"
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert decision to telemetry dictionary."""
@@ -154,6 +160,7 @@ class RoutingDecision(BaseModel):
             "estimated_input_cost": self.estimated_input_cost,
             "estimated_output_cost": self.estimated_output_cost,
             "cost_savings_usd_per_million": self.cost_savings_usd_per_million,
+            "correlation_id": self.correlation_id,
         }
 
 
@@ -527,6 +534,7 @@ class ModelRouter:
             estimated_output_cost=selected_cap.output_pricing,
             cost_savings_usd_per_million=cost_savings,
             is_observable=True,
+            correlation_id=policy.correlation_id,
         )
 
 

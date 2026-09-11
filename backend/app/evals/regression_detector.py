@@ -19,6 +19,7 @@ Detects and classifies regressions across 3 core pillars:
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -299,4 +300,113 @@ class RegressionDetector:
             token_regression_detected=len(t_regs) > 0,
             cost_regression_detected=len(c_regs) > 0,
             summary_message=summary,
+        )
+
+    @classmethod
+    def evaluate_live_benchmark(
+        cls,
+        summary: Any,
+        baseline_version: str = "v1",
+        baseline_override: Any | None = None,
+    ) -> RegressionReport:
+        """Evaluate live benchmark results against versioned baseline artifact (TASK OPS-16)."""
+        from app.evals.baseline_store import get_baseline_store
+
+        store = get_baseline_store()
+        baseline = baseline_override or store.load_baseline(baseline_version)
+
+        all_regressions: list[DetectedRegression] = []
+
+        # 1. Quality Regression vs Baseline
+        quality_drop = round(
+            baseline.avg_quality_score - summary.avg_quality_score, 4
+        )
+        if quality_drop > baseline.max_quality_regression:
+            all_regressions.append(
+                DetectedRegression(
+                    regression_type=RegressionType.QUALITY_REGRESSION,
+                    severity=RegressionSeverity.BLOCK,
+                    dimension="avg_quality_score",
+                    baseline_value=baseline.avg_quality_score,
+                    optimized_value=summary.avg_quality_score,
+                    delta=f"-{quality_drop:.4f}",
+                    message=f"Quality regression exceeds threshold ({quality_drop:.4f} > {baseline.max_quality_regression:.4f})",
+                )
+            )
+        elif quality_drop > cls.QUALITY_WARN_THRESHOLD:
+            all_regressions.append(
+                DetectedRegression(
+                    regression_type=RegressionType.QUALITY_REGRESSION,
+                    severity=RegressionSeverity.WARN,
+                    dimension="avg_quality_score",
+                    baseline_value=baseline.avg_quality_score,
+                    optimized_value=summary.avg_quality_score,
+                    delta=f"-{quality_drop:.4f}",
+                    message=f"Minor quality drop detected vs baseline ({quality_drop:.4f})",
+                )
+            )
+
+        # 2. Pass Rate Regression
+        if summary.pass_rate_pct < baseline.min_pass_rate_pct:
+            all_regressions.append(
+                DetectedRegression(
+                    regression_type=RegressionType.QUALITY_REGRESSION,
+                    severity=RegressionSeverity.BLOCK,
+                    dimension="pass_rate_pct",
+                    baseline_value=baseline.min_pass_rate_pct,
+                    optimized_value=summary.pass_rate_pct,
+                    delta=f"{summary.pass_rate_pct - baseline.min_pass_rate_pct:.2f}%",
+                    message=f"Benchmark pass rate below baseline threshold ({summary.pass_rate_pct:.2f}% < {baseline.min_pass_rate_pct:.2f}%)",
+                )
+            )
+
+        # 3. Cost / Token Regression
+        if summary.total_cost_saved_usd < 0:
+            all_regressions.append(
+                DetectedRegression(
+                    regression_type=RegressionType.COST_REGRESSION,
+                    severity=RegressionSeverity.BLOCK,
+                    dimension="cost_savings_usd",
+                    baseline_value=0.0,
+                    optimized_value=summary.total_cost_saved_usd,
+                    delta=f"${summary.total_cost_saved_usd:.6f}",
+                    message="Negative cost savings detected on live benchmark",
+                )
+            )
+
+        has_block = any(
+            r.severity == RegressionSeverity.BLOCK for r in all_regressions
+        )
+        has_warn = any(
+            r.severity == RegressionSeverity.WARN for r in all_regressions
+        )
+
+        if has_block:
+            verdict = RegressionSeverity.BLOCK
+            summary_msg = f"BLOCK: Live benchmark failed AI quality regression gate against baseline {baseline.version}."
+        elif has_warn:
+            verdict = RegressionSeverity.WARN
+            summary_msg = f"WARN: Live benchmark triggered quality advisories against baseline {baseline.version}."
+        else:
+            verdict = RegressionSeverity.PASS
+            summary_msg = f"PASS: Live benchmark meets all quality and regression thresholds against baseline {baseline.version}."
+
+        return RegressionReport(
+            workload_id="portfolio_benchmark",
+            verdict=verdict,
+            has_blocking_regressions=has_block,
+            regressions=all_regressions,
+            quality_regression_detected=any(
+                r.regression_type == RegressionType.QUALITY_REGRESSION
+                for r in all_regressions
+            ),
+            token_regression_detected=any(
+                r.regression_type == RegressionType.TOKEN_REGRESSION
+                for r in all_regressions
+            ),
+            cost_regression_detected=any(
+                r.regression_type == RegressionType.COST_REGRESSION
+                for r in all_regressions
+            ),
+            summary_message=summary_msg,
         )

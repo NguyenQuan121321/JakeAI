@@ -1,6 +1,7 @@
 """FinnApiGo Tool Executor agent node for upstream API integrations."""
 
 import time
+import uuid
 from typing import Any
 
 from app.agents.state import AgentState
@@ -52,6 +53,10 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
         }
 
     # Propagate On-Behalf-Of (OBO) token
+    raw_corr_id = state.get("correlation_id")
+    correlation_id: str = (
+        str(raw_corr_id) if raw_corr_id else str(uuid.uuid4())
+    )
     obo_token = state.get("obo_token")
     if not obo_token:
         ctx = TenantContext(
@@ -59,6 +64,7 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
             user_id=user_id,
             roles=state.get("roles", []),
             permissions=state.get("permissions", []),
+            correlation_id=correlation_id,
         )
         obo_token = exchange_obo_token(ctx)
 
@@ -70,6 +76,7 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
         "roles": state.get("roles", []),
         "permissions": state.get("permissions", []),
         "obo_token": obo_token,
+        "correlation_id": correlation_id,
     }
 
     tool_res = await tool_registry.execute(

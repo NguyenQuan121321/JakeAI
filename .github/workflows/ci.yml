@@ -261,6 +261,11 @@ jobs:
           cd backend
           pytest tests/evals/test_rag_regression.py -v
 
+      - name: LLMOps Safety & Canary Data Leakage Gate (WORK-04)
+        run: |
+          cd backend
+          pytest tests/evals/test_canary_leakage.py tests/evals/test_rag_metrics.py tests/evals/test_llm_judge_and_generation.py tests/evals/test_baseline_and_regression_gate.py -v
+
       - name: API Breaking Change & Schema Drift Gate (OpenAPI Contract Verification)
         run: |
           cd backend

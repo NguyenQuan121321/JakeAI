@@ -50,50 +50,77 @@ class AgentTelemetry:
         self._tool_counts: dict[str, int] = defaultdict(int)
         self._backend_counts: dict[str, int] = defaultdict(int)
 
-    def record_task_created(self, _tenant_id: str) -> None:
+    def record_task_created(self, tenant_id: str = "default") -> None:
+        from app.telemetry.metrics import metrics
         with self._lock:
             self._tasks_created += 1
+        metrics.record_agent_task("created", tenant_id)
 
-    def record_run_started(self, _tenant_id: str, backend_type: str = "jakeai") -> None:
+    def record_run_started(self, tenant_id: str = "default", backend_type: str = "jakeai") -> None:
+        from app.telemetry.metrics import metrics
         with self._lock:
             self._runs_started += 1
             self._backend_counts[backend_type] += 1
+        metrics.record_agent_run("started", tenant_id)
 
     def record_run_completed(
         self,
-        tenant_id: str,
-        duration_ms: float,
+        tenant_id: str = "default",
+        duration_ms: float = 0.0,
         tokens: int = 0,
         cost_usd: float = 0.0,
     ) -> None:
-        _ = (tenant_id, duration_ms)
+        _ = duration_ms
+        from app.telemetry.metrics import metrics
         with self._lock:
             self._runs_completed += 1
             self._tokens_consumed += tokens
             self._total_cost_usd += cost_usd
+        metrics.record_agent_run("completed", tenant_id)
 
-    def record_run_failed(self, _tenant_id: str, _reason: str | None = None) -> None:
+    def record_run_failed(self, tenant_id: str = "default", _reason: str | None = None) -> None:
+        from app.telemetry.metrics import metrics
         with self._lock:
             self._runs_failed += 1
+        metrics.record_agent_run("failed", tenant_id)
 
-    def record_run_cancelled(self, _tenant_id: str) -> None:
+    def record_run_cancelled(self, tenant_id: str = "default") -> None:
+        from app.telemetry.metrics import metrics
         with self._lock:
             self._runs_cancelled += 1
+        metrics.record_agent_run("cancelled", tenant_id)
 
-    def record_step_executed(self, _tenant_id: str) -> None:
+    def record_step_executed(self, _tenant_id: str = "default") -> None:
         with self._lock:
             self._steps_executed += 1
 
-    def record_tool_call(self, tool_name: str, _tenant_id: str) -> None:
+    def record_tool_call(
+        self, tool_name: str, tenant_id: str = "default", success: bool = True
+    ) -> None:
+        from app.telemetry.metrics import metrics
         with self._lock:
             self._tool_calls_total += 1
             self._tool_counts[tool_name] += 1
+        status = "success" if success else "failure"
+        metrics.record_agent_tool_call(tool_name, status, tenant_id)
 
-    def record_approval_requested(self, _tool_name: str, _tenant_id: str) -> None:
+    def record_revision(self, tenant_id: str = "default") -> None:
+        from app.telemetry.metrics import metrics
+        metrics.record_agent_revision(tenant_id)
+
+    def record_recovery(self, tenant_id: str = "default", success: bool = True) -> None:
+        from app.telemetry.metrics import metrics
+        metrics.record_agent_recovery(tenant_id, success)
+
+    def record_approval_wait(self, duration_ms: float, tenant_id: str = "default") -> None:
+        from app.telemetry.metrics import metrics
+        metrics.record_agent_approval_wait(duration_ms, tenant_id)
+
+    def record_approval_requested(self, _tool_name: str, _tenant_id: str = "default") -> None:
         with self._lock:
             self._approvals_requested += 1
 
-    def record_approval_decision(self, approved: bool, _tenant_id: str) -> None:
+    def record_approval_decision(self, approved: bool, _tenant_id: str = "default") -> None:
         with self._lock:
             if approved:
                 self._approvals_approved += 1

@@ -54,6 +54,14 @@ class MetricsSnapshot(BaseModel):
     estimated_cost_usd_total: float = Field(default=0.0)
     optimization_decisions_total: int = Field(default=0)
     cost_savings_usd_total: float = Field(default=0.0)
+    safety_incidents_total: dict[str, int] = Field(default_factory=dict)
+    stream_ttft_ms_avg: dict[str, float] = Field(default_factory=dict)
+    agent_tasks_total: dict[str, int] = Field(default_factory=dict)
+    agent_runs_total: dict[str, int] = Field(default_factory=dict)
+    agent_tool_calls_total: dict[str, int] = Field(default_factory=dict)
+    agent_revisions_total: dict[str, int] = Field(default_factory=dict)
+    agent_recovery_success_total: dict[str, int] = Field(default_factory=dict)
+    agent_approval_wait_ms_avg: dict[str, float] = Field(default_factory=dict)
 
 
 class MetricsCollector:
@@ -76,6 +84,7 @@ class MetricsCollector:
         self._active_streams: int = 0
         self._stream_durations: list[float] = []
         self._stream_cancellations: dict[str, int] = defaultdict(int)
+        self._stream_ttft: dict[tuple[str, str], list[float]] = defaultdict(list)
 
         # Cache & Failover metrics
         self._cache_operations: dict[tuple[str, str], int] = defaultdict(int)
@@ -84,6 +93,17 @@ class MetricsCollector:
         # Token & FinOps metrics
         self._tokens_consumed: dict[str, int] = defaultdict(int)
         self._estimated_cost_usd: float = 0.0
+
+        # Safety & Security incidents (OPS-06, OPS-12)
+        self._safety_incidents: dict[tuple[str, str, str], int] = defaultdict(int)
+
+        # Multi-tenant Agent Observability (OPS-17)
+        self._agent_tasks: dict[tuple[str, str], int] = defaultdict(int)
+        self._agent_runs: dict[tuple[str, str], int] = defaultdict(int)
+        self._agent_tool_calls: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._agent_revisions: dict[str, int] = defaultdict(int)
+        self._agent_recovery_success: dict[str, int] = defaultdict(int)
+        self._agent_approval_waits: dict[str, list[float]] = defaultdict(list)
 
         # Optimization decisions (COST-13)
         self._optimization_decisions: list[dict[str, Any]] = []
@@ -208,6 +228,251 @@ class MetricsCollector:
         with self._lock:
             return list(self._optimization_decisions)
 
+    def record_security_incident(
+        self, incident_type: str, tenant_id: str = "default", layer: str = "guardrails"
+    ) -> None:
+        """Record a safety or security incident intercepted by guardrails (OPS-06, OPS-12)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        with self._lock:
+            self._safety_incidents[
+                (str(incident_type).lower(), str(layer).lower(), t_clean)
+            ] += 1
+
+    def record_stream_ttft(
+        self, provider: str, model: str, ttft_ms: float
+    ) -> None:
+        """Record time to first token for streaming responses (OPS-06)."""
+        with self._lock:
+            ttft_list = self._stream_ttft[(str(provider).lower(), str(model).lower())]
+            ttft_list.append(ttft_ms)
+            if len(ttft_list) > 500:
+                del ttft_list[:250]
+
+    def record_agent_task(self, status: str, tenant_id: str = "default") -> None:
+        """Record an agent task status transition (OPS-17)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        with self._lock:
+            self._agent_tasks[(str(status).lower(), t_clean)] += 1
+
+    def record_agent_run(self, status: str, tenant_id: str = "default") -> None:
+        """Record an agent execution run status transition (OPS-17)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        with self._lock:
+            self._agent_runs[(str(status).lower(), t_clean)] += 1
+
+    def record_agent_tool_call(
+        self, tool_name: str, status: str, tenant_id: str = "default"
+    ) -> None:
+        """Record an agent tool execution by outcome and tenant (OPS-17)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        with self._lock:
+            self._agent_tool_calls[
+                (str(tool_name).lower(), str(status).lower(), t_clean)
+            ] += 1
+
+    def record_agent_revision(self, tenant_id: str = "default") -> None:
+        """Record an agent plan replan/revision event (OPS-17)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        with self._lock:
+            self._agent_revisions[t_clean] += 1
+
+    def record_agent_recovery(
+        self, tenant_id: str = "default", success: bool = True
+    ) -> None:
+        """Record an agent error recovery loop outcome (OPS-17)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        if success:
+            with self._lock:
+                self._agent_recovery_success[t_clean] += 1
+
+    def record_agent_approval_wait(
+        self, duration_ms: float, tenant_id: str = "default"
+    ) -> None:
+        """Record agent human approval wait duration (OPS-17)."""
+        t_clean = (str(tenant_id).strip() or "default")[:36]
+        with self._lock:
+            dur_list = self._agent_approval_waits[t_clean]
+            dur_list.append(duration_ms)
+            if len(dur_list) > 500:
+                del dur_list[:250]
+
+    def generate_prometheus_metrics(self) -> str:
+        """Generate canonical Prometheus text exposition format (OPS-06)."""
+        lines: list[str] = []
+
+        with self._lock:
+            # Uptime
+            uptime = time.time() - self._start_time
+            lines.append("# HELP jakeai_uptime_seconds Process uptime in seconds")
+            lines.append("# TYPE jakeai_uptime_seconds gauge")
+            lines.append(f"jakeai_uptime_seconds {uptime:.2f}")
+
+            # HTTP requests total
+            lines.append(
+                "# HELP jakeai_http_requests_total Total incoming HTTP requests"
+            )
+            lines.append("# TYPE jakeai_http_requests_total counter")
+            for (m, p, http_status), count in sorted(self._http_requests.items()):
+                lines.append(
+                    f'jakeai_http_requests_total{{method="{m}",path="{p}",status="{http_status}"}} {count}'
+                )
+
+            # HTTP request duration avg
+            lines.append(
+                "# HELP jakeai_http_request_duration_ms_avg Average HTTP request duration in ms"
+            )
+            lines.append("# TYPE jakeai_http_request_duration_ms_avg gauge")
+            for (m, p), d in sorted(self._http_durations.items()):
+                if d:
+                    avg_d = sum(d) / len(d)
+                    lines.append(
+                        f'jakeai_http_request_duration_ms_avg{{method="{m}",path="{p}"}} {avg_d:.2f}'
+                    )
+
+            # Provider requests total
+            lines.append(
+                "# HELP jakeai_provider_requests_total Total upstream LLM provider requests"
+            )
+            lines.append("# TYPE jakeai_provider_requests_total counter")
+            for (p, m, prov_status), count in sorted(self._provider_requests.items()):
+                lines.append(
+                    f'jakeai_provider_requests_total{{provider="{p}",model="{m}",status="{prov_status}"}} {count}'
+                )
+
+            # Provider latency avg
+            lines.append(
+                "# HELP jakeai_provider_latency_ms_avg Average provider latency in ms"
+            )
+            lines.append("# TYPE jakeai_provider_latency_ms_avg gauge")
+            for (p, m), d in sorted(self._provider_latencies.items()):
+                if d:
+                    avg_l = sum(d) / len(d)
+                    lines.append(
+                        f'jakeai_provider_latency_ms_avg{{provider="{p}",model="{m}"}} {avg_l:.2f}'
+                    )
+
+            # Provider errors
+            lines.append(
+                "# HELP jakeai_provider_errors_total Total provider errors by category"
+            )
+            lines.append("# TYPE jakeai_provider_errors_total counter")
+            for (p, c), count in sorted(self._provider_errors.items()):
+                lines.append(
+                    f'jakeai_provider_errors_total{{provider="{p}",category="{c}"}} {count}'
+                )
+
+            # Active streams & cancellations
+            lines.append(
+                "# HELP jakeai_stream_active Currently active streaming connections"
+            )
+            lines.append("# TYPE jakeai_stream_active gauge")
+            lines.append(f"jakeai_stream_active {self._active_streams}")
+
+            lines.append(
+                "# HELP jakeai_stream_cancellations_total Total stream cancellations"
+            )
+            lines.append("# TYPE jakeai_stream_cancellations_total counter")
+            for ep_reason, count in sorted(self._stream_cancellations.items()):
+                endpoint, _, reason = ep_reason.partition(":")
+                lines.append(
+                    f'jakeai_stream_cancellations_total{{endpoint="{endpoint}",reason="{reason}"}} {count}'
+                )
+
+            # Stream TTFT avg
+            lines.append(
+                "# HELP jakeai_stream_ttft_ms_avg Average time to first token in ms"
+            )
+            lines.append("# TYPE jakeai_stream_ttft_ms_avg gauge")
+            for (p, m), ttft_vals in sorted(self._stream_ttft.items()):
+                if ttft_vals:
+                    avg_ttft = sum(ttft_vals) / len(ttft_vals)
+                    lines.append(
+                        f'jakeai_stream_ttft_ms_avg{{provider="{p}",model="{m}"}} {avg_ttft:.2f}'
+                    )
+
+            # Tokens consumed
+            lines.append(
+                "# HELP jakeai_tokens_consumed_total Total tokens consumed across models"
+            )
+            lines.append("# TYPE jakeai_tokens_consumed_total counter")
+            for model_type, count in sorted(self._tokens_consumed.items()):
+                model, _, token_type = model_type.partition(":")
+                lines.append(
+                    f'jakeai_tokens_consumed_total{{model="{model}",type="{token_type or "all"}"}} {count}'
+                )
+
+            # Cost
+            lines.append(
+                "# HELP jakeai_estimated_cost_usd_total Estimated cumulative LLM inference cost in USD"
+            )
+            lines.append("# TYPE jakeai_estimated_cost_usd_total gauge")
+            lines.append(
+                f"jakeai_estimated_cost_usd_total {self._estimated_cost_usd:.6f}"
+            )
+
+            # Safety incidents (OPS-06, OPS-12)
+            lines.append(
+                "# HELP jakeai_safety_incidents_total Total safety and security incidents intercepted"
+            )
+            lines.append("# TYPE jakeai_safety_incidents_total counter")
+            for (inc_type, layer, t_id), count in sorted(
+                self._safety_incidents.items()
+            ):
+                lines.append(
+                    f'jakeai_safety_incidents_total{{incident_type="{inc_type}",layer="{layer}",tenant_id="{t_id}"}} {count}'
+                )
+
+            # Agent metrics (OPS-17)
+            lines.append(
+                "# HELP jakeai_agent_tasks_total Total agent tasks by status and tenant"
+            )
+            lines.append("# TYPE jakeai_agent_tasks_total counter")
+            for (status, t_id), count in sorted(self._agent_tasks.items()):
+                lines.append(
+                    f'jakeai_agent_tasks_total{{status="{status}",tenant_id="{t_id}"}} {count}'
+                )
+
+            lines.append(
+                "# HELP jakeai_agent_runs_total Total agent runs by status and tenant"
+            )
+            lines.append("# TYPE jakeai_agent_runs_total counter")
+            for (status, t_id), count in sorted(self._agent_runs.items()):
+                lines.append(
+                    f'jakeai_agent_runs_total{{status="{status}",tenant_id="{t_id}"}} {count}'
+                )
+
+            lines.append(
+                "# HELP jakeai_agent_tool_calls_total Total agent tool calls by tool, status, and tenant"
+            )
+            lines.append("# TYPE jakeai_agent_tool_calls_total counter")
+            for (tool, status, t_id), count in sorted(
+                self._agent_tool_calls.items()
+            ):
+                lines.append(
+                    f'jakeai_agent_tool_calls_total{{tool="{tool}",status="{status}",tenant_id="{t_id}"}} {count}'
+                )
+
+            lines.append(
+                "# HELP jakeai_agent_revisions_total Total agent plan revisions"
+            )
+            lines.append("# TYPE jakeai_agent_revisions_total counter")
+            for t_id, count in sorted(self._agent_revisions.items()):
+                lines.append(
+                    f'jakeai_agent_revisions_total{{tenant_id="{t_id}"}} {count}'
+                )
+
+            lines.append(
+                "# HELP jakeai_agent_recovery_success_total Total agent recovery loop successes"
+            )
+            lines.append("# TYPE jakeai_agent_recovery_success_total counter")
+            for t_id, count in sorted(self._agent_recovery_success.items()):
+                lines.append(
+                    f'jakeai_agent_recovery_success_total{{tenant_id="{t_id}"}} {count}'
+                )
+
+        lines.append("")
+        return "\n".join(lines)
+
     def get_snapshot(self) -> MetricsSnapshot:
         """Generate structured snapshot of all captured metrics."""
         now = time.time()
@@ -248,6 +513,32 @@ class MetricsCollector:
                 f"{src}->{dst}:{reason}": count
                 for (src, dst, reason), count in self._failover_events.items()
             }
+            safety_inc = {
+                f"{inc}:{layer}:{tid}": count
+                for (inc, layer, tid), count in self._safety_incidents.items()
+            }
+            ttft_avg = {
+                f"{p}:{m}": round(sum(vals) / len(vals), 2)
+                for (p, m), vals in self._stream_ttft.items()
+                if vals
+            }
+            agent_tasks = {
+                f"{st}:{tid}": count
+                for (st, tid), count in self._agent_tasks.items()
+            }
+            agent_runs = {
+                f"{st}:{tid}": count
+                for (st, tid), count in self._agent_runs.items()
+            }
+            agent_tools = {
+                f"{tool}:{st}:{tid}": count
+                for (tool, st, tid), count in self._agent_tool_calls.items()
+            }
+            appr_avg = {
+                tid: round(sum(vals) / len(vals), 2)
+                for tid, vals in self._agent_approval_waits.items()
+                if vals
+            }
 
             return MetricsSnapshot(
                 timestamp=now,
@@ -266,6 +557,14 @@ class MetricsCollector:
                 estimated_cost_usd_total=round(self._estimated_cost_usd, 6),
                 optimization_decisions_total=len(self._optimization_decisions),
                 cost_savings_usd_total=round(self._cost_savings_usd_total, 6),
+                safety_incidents_total=safety_inc,
+                stream_ttft_ms_avg=ttft_avg,
+                agent_tasks_total=agent_tasks,
+                agent_runs_total=agent_runs,
+                agent_tool_calls_total=agent_tools,
+                agent_revisions_total=dict(self._agent_revisions),
+                agent_recovery_success_total=dict(self._agent_recovery_success),
+                agent_approval_wait_ms_avg=appr_avg,
             )
 
     def reset(self) -> None:
@@ -280,10 +579,18 @@ class MetricsCollector:
             self._active_streams = 0
             self._stream_durations.clear()
             self._stream_cancellations.clear()
+            self._stream_ttft.clear()
             self._cache_operations.clear()
             self._failover_events.clear()
             self._tokens_consumed.clear()
             self._estimated_cost_usd = 0.0
+            self._safety_incidents.clear()
+            self._agent_tasks.clear()
+            self._agent_runs.clear()
+            self._agent_tool_calls.clear()
+            self._agent_revisions.clear()
+            self._agent_recovery_success.clear()
+            self._agent_approval_waits.clear()
             self._optimization_decisions.clear()
             self._cost_savings_usd_total = 0.0
 
