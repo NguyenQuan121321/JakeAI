@@ -151,7 +151,11 @@ class ExecutionEngine:
                 "plan_id": plan.plan_id,
                 "steps_count": len(plan.steps),
                 "steps": [
-                    {"step_id": s.step_id, "description": s.description, "dependencies": s.dependencies}
+                    {
+                        "step_id": s.step_id,
+                        "description": s.description,
+                        "dependencies": s.dependencies,
+                    }
                     for s in plan.steps
                 ],
             },
@@ -189,7 +193,9 @@ class ExecutionEngine:
             if not runnable:
                 if plan.has_failures():
                     run_state.status = RunStatus.FAILED
-                    run_state.error = "Plan execution halted due to unrecoverable step failure."
+                    run_state.error = (
+                        "Plan execution halted due to unrecoverable step failure."
+                    )
                     await self.checkpoint_manager.save_checkpoint(run_state)
                     yield AgentRunEvent(
                         event_type="failed",
@@ -203,7 +209,9 @@ class ExecutionEngine:
             # Execute independent steps concurrently via asyncio.gather() (Phase 11)
             # Only parallelize steps that are proven independent by the plan dependency graph
             if len(runnable) > 1:
-                logger.info("Executing %d independent steps concurrently", len(runnable))
+                logger.info(
+                    "Executing %d independent steps concurrently", len(runnable)
+                )
                 step_tasks = [
                     self._execute_single_step(
                         step=s,
@@ -215,7 +223,9 @@ class ExecutionEngine:
                     )
                     for s in runnable
                 ]
-                step_results = await asyncio.gather(*step_tasks, return_exceptions=False)
+                step_results = await asyncio.gather(
+                    *step_tasks, return_exceptions=False
+                )
             else:
                 s = runnable[0]
                 res = await self._execute_single_step(
@@ -263,7 +273,10 @@ class ExecutionEngine:
                     if step_res.tool_calls:
                         all_tool_calls.extend(step_res.tool_calls)
                     if isinstance(step_res.output, dict):
-                        if "revenue" in step_res.output and "operating_expenses" in step_res.output:
+                        if (
+                            "revenue" in step_res.output
+                            and "operating_expenses" in step_res.output
+                        ):
                             financial_data = step_res.output
                         if "retrieved_chunks" in step_res.output:
                             retrieved_chunks.extend(step_res.output["retrieved_chunks"])
@@ -537,7 +550,13 @@ class ExecutionEngine:
                         },
                     )
                 )
-                return step, StepResult(step_id=step.step_id, status=StepStatus.WAITING_APPROVAL), events
+                return (
+                    step,
+                    StepResult(
+                        step_id=step.step_id, status=StepStatus.WAITING_APPROVAL
+                    ),
+                    events,
+                )
 
             # Execute Tool via Canonical ToolRegistry
             events.append(
@@ -679,7 +698,9 @@ class ExecutionEngine:
         # General problem solver / ReAct model execution
         backend_req = BackendRequest(
             messages=[
-                AgentMessage(role="system", content="You are JakeAI general engineering agent."),
+                AgentMessage(
+                    role="system", content="You are JakeAI general engineering agent."
+                ),
                 AgentMessage(role="user", content=f"Execute step: {step.description}"),
             ],
             model=selected_model,

@@ -41,7 +41,9 @@ class TestAgentRegistryAndSelector:
             assert len(agent.capabilities) > 0
 
     def test_find_by_capability(self, registry: AgentRegistry) -> None:
-        financial_agents = registry.find_by_capability(AgentCapability.FINANCIAL_ANALYSIS)
+        financial_agents = registry.find_by_capability(
+            AgentCapability.FINANCIAL_ANALYSIS
+        )
         assert len(financial_agents) >= 1
         assert any(a.agent_id == "financial_specialist" for a in financial_agents)
 
@@ -69,7 +71,9 @@ class TestAgentRegistryAndSelector:
         selection = selector.select_agent_for_step(step=step, context=context)
         assert selection.agent_id == "financial_specialist"
         assert not selection.fallback_used
-        assert AgentCapability.FINANCIAL_ANALYSIS.value in selection.matched_capabilities
+        assert (
+            AgentCapability.FINANCIAL_ANALYSIS.value in selection.matched_capabilities
+        )
 
     def test_selector_falls_back_to_general_agent_for_unknown_capability(
         self, registry: AgentRegistry, tool_registry: ToolRegistry

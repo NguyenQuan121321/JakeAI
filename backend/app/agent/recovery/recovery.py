@@ -37,7 +37,10 @@ class RecoveryLimits(BaseModel):
     @classmethod
     def harmonize_aliases(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            if "max_total_recovery_seconds" in data and "max_execution_time_seconds" not in data:
+            if (
+                "max_total_recovery_seconds" in data
+                and "max_execution_time_seconds" not in data
+            ):
                 data["max_execution_time_seconds"] = data["max_total_recovery_seconds"]
             if "max_replan_cycles" in data and "max_replans" not in data:
                 data["max_replans"] = data["max_replan_cycles"]

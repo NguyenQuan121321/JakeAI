@@ -242,7 +242,9 @@ class LangGraphExecutionAdapter:
                         data={
                             "verdict": verdict,
                             "reason": node_state.get("critique_notes", ""),
-                            "groundedness_score": node_state.get("groundedness_score", 1.0),
+                            "groundedness_score": node_state.get(
+                                "groundedness_score", 1.0
+                            ),
                         },
                     )
 

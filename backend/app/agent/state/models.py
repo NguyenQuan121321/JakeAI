@@ -153,7 +153,9 @@ class RunState(BaseModel):
     completed_at: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def transition_to(self, target_status: RunStatus, reason: str | None = None) -> None:
+    def transition_to(
+        self, target_status: RunStatus, reason: str | None = None
+    ) -> None:
         """Deterministically transition run status with explicit state machine verification."""
         terminal_statuses = {
             RunStatus.COMPLETED,

@@ -149,7 +149,9 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
             plan_obj = planner.create_initial_plan(goal=prompt, tenant_id=tenant_id)
             execution_plan = plan_obj.model_dump()
         except Exception as exc:
-            logger.debug("Failed to initialize execution plan in supervisor_node: %s", exc)
+            logger.debug(
+                "Failed to initialize execution plan in supervisor_node: %s", exc
+            )
 
     # Populate contextual chunks from hybrid retriever & context selector if not already provided
     if not retrieved_chunks and prompt.strip():

@@ -70,7 +70,9 @@ class AgentRegistry:
         """Return all registered agents."""
         return list(self._agents.values())
 
-    def find_by_capability(self, capability: AgentCapability | str) -> list[AgentMetadata]:
+    def find_by_capability(
+        self, capability: AgentCapability | str
+    ) -> list[AgentMetadata]:
         """Convenience query for agents matching a specific capability."""
         cap_val = capability.value if hasattr(capability, "value") else str(capability)
         return self.find_eligible(required_capabilities=[cap_val])
@@ -92,7 +94,11 @@ class AgentRegistry:
 
             # Check capabilities
             agent_caps = set(agent.capabilities)
-            if req_caps and not req_caps.issubset(agent_caps) and not (req_caps & agent_caps):
+            if (
+                req_caps
+                and not req_caps.issubset(agent_caps)
+                and not (req_caps & agent_caps)
+            ):
                 continue
 
             # Check tools: if step requires specific tools, agent must support them

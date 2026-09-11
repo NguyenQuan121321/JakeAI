@@ -94,7 +94,9 @@ class TestExecutionPlanContract:
         assert ready[0].step_id == "step_fetch"
 
         # Mark step 1 completed
-        plan.mark_step_status("step_fetch", StepStatus.COMPLETED, observation="Price is $150")
+        plan.mark_step_status(
+            "step_fetch", StepStatus.COMPLETED, observation="Price is $150"
+        )
         assert step1.status == StepStatus.COMPLETED
         assert step1.observation == "Price is $150"
 
@@ -104,7 +106,9 @@ class TestExecutionPlanContract:
         assert ready2[0].step_id == "step_synthesize"
 
         # Mark step 2 completed
-        plan.mark_step_status("step_synthesize", StepStatus.COMPLETED, observation="Report ready")
+        plan.mark_step_status(
+            "step_synthesize", StepStatus.COMPLETED, observation="Report ready"
+        )
         assert plan.is_complete()
 
     def test_plan_independent_step_tiers(self) -> None:

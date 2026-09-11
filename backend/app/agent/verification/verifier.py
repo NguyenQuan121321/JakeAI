@@ -52,10 +52,14 @@ class CanonicalVerifier:
         for rc in retrieved_chunks:
             rc_tenant = rc.get("tenant_id")
             if rc_tenant and rc_tenant != tenant_id:
-                tenant_breaches.append(f"Retrieved chunk belongs to tenant '{rc_tenant}'")
+                tenant_breaches.append(
+                    f"Retrieved chunk belongs to tenant '{rc_tenant}'"
+                )
 
         if tenant_breaches:
-            reason = f"Multi-tenant boundary breach detected: {'; '.join(tenant_breaches)}"
+            reason = (
+                f"Multi-tenant boundary breach detected: {'; '.join(tenant_breaches)}"
+            )
             evidence["breaches"] = tenant_breaches
             logger.warning("CanonicalVerifier REJECTED execution: %s", reason)
             return VerificationResult(
@@ -150,7 +154,9 @@ class CanonicalVerifier:
                 return VerificationResult(
                     verdict=VerificationVerdict.NEEDS_REVISION,
                     reason=f"Self-RAG Critique: {critique_msg}. Recompute accurately.",
-                    violated_invariant=math_errors[0] if math_errors else grounding_reasons[0],
+                    violated_invariant=math_errors[0]
+                    if math_errors
+                    else grounding_reasons[0],
                     evidence=evidence,
                     recoverability=True,
                     recommended_recovery_action=RecoveryAction.REPLAN,
@@ -160,7 +166,9 @@ class CanonicalVerifier:
                 return VerificationResult(
                     verdict=VerificationVerdict.FAILED,
                     reason=f"Verification failed after {revision_count} revisions: {critique_msg}.",
-                    violated_invariant=math_errors[0] if math_errors else grounding_reasons[0],
+                    violated_invariant=math_errors[0]
+                    if math_errors
+                    else grounding_reasons[0],
                     evidence=evidence,
                     recoverability=False,
                     recommended_recovery_action=RecoveryAction.TERMINATE_FAILED,

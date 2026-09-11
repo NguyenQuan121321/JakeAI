@@ -123,7 +123,9 @@ class TestArchitectureInvariants:
             "correlation_id": "corr_v4",
             "obo_token": "",
             "messages": [],
-            "tool_calls": [{"tool_name": "db", "tenant_id": "tenant_b"}],  # Cross-tenant breach!
+            "tool_calls": [
+                {"tool_name": "db", "tenant_id": "tenant_b"}
+            ],  # Cross-tenant breach!
             "financial_analysis": {},
             "revision_count": 0,
             "mascot_state": "thinking",

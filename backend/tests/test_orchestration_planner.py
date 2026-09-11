@@ -37,7 +37,9 @@ class TestOrchestrationPlanner:
             ),
         ]
 
-    def test_single_step_direct_question(self, mock_tool_registry: list[ToolMetadata]) -> None:
+    def test_single_step_direct_question(
+        self, mock_tool_registry: list[ToolMetadata]
+    ) -> None:
         planner = BoundedPlanner()
         plan = planner.create_initial_plan(
             goal="What is a price-to-earnings ratio?",
@@ -50,7 +52,9 @@ class TestOrchestrationPlanner:
         assert plan.steps[0].selected_model is not None
         assert plan.steps[0].selected_provider is not None
 
-    def test_banking_transfer_dag_dependencies(self, mock_tool_registry: list[ToolMetadata]) -> None:
+    def test_banking_transfer_dag_dependencies(
+        self, mock_tool_registry: list[ToolMetadata]
+    ) -> None:
         planner = BoundedPlanner()
         plan = planner.create_initial_plan(
             goal="Transfer $500 to savings account after checking balance",
@@ -67,7 +71,9 @@ class TestOrchestrationPlanner:
         assert "get_account_balance" in step1.required_tools
         assert step2.step_id == "step_compute_financials"
 
-    def test_parallel_multi_source_dag(self, mock_tool_registry: list[ToolMetadata]) -> None:
+    def test_parallel_multi_source_dag(
+        self, mock_tool_registry: list[ToolMetadata]
+    ) -> None:
         planner = BoundedPlanner()
         plan = planner.create_initial_plan(
             goal="Compare Apple stock price from market feed and internal bank balance",
@@ -88,7 +94,9 @@ class TestOrchestrationPlanner:
         # Tier 0 has independent data fetching steps that run concurrently
         assert len(tiers[0]) == 2
 
-    def test_replanning_after_verifier_critique(self, mock_tool_registry: list[ToolMetadata]) -> None:
+    def test_replanning_after_verifier_critique(
+        self, mock_tool_registry: list[ToolMetadata]
+    ) -> None:
         planner = BoundedPlanner()
         initial_plan = planner.create_initial_plan(
             goal="Analyze quarterly margin",

@@ -115,7 +115,10 @@ class BoundedPlanner:
                 required_capabilities=[AgentCapability.BANKING_API.value],
                 candidate_agents=["finnapigo_specialist"],
                 required_tools=["get_account_balance", "list_transactions"],
-                model_requirements={"workload_class": "structured_json", "min_quality": 0.70},
+                model_requirements={
+                    "workload_class": "structured_json",
+                    "min_quality": 0.70,
+                },
                 status=PlanStepStatus.PENDING,
             )
             step_2 = PlanStep(
@@ -125,7 +128,10 @@ class BoundedPlanner:
                 dependencies=["step_source_a", "step_source_b"],
                 required_capabilities=[AgentCapability.FINANCIAL_ANALYSIS.value],
                 candidate_agents=["financial_specialist"],
-                model_requirements={"workload_class": "financial_reasoning", "min_quality": 0.85},
+                model_requirements={
+                    "workload_class": "financial_reasoning",
+                    "min_quality": 0.85,
+                },
                 status=PlanStepStatus.PENDING,
             )
             step_3 = PlanStep(
@@ -151,7 +157,10 @@ class BoundedPlanner:
                 required_capabilities=[AgentCapability.BANKING_API.value],
                 candidate_agents=["finnapigo_specialist"],
                 required_tools=["get_account_balance"],
-                model_requirements={"workload_class": "structured_json", "min_quality": 0.70},
+                model_requirements={
+                    "workload_class": "structured_json",
+                    "min_quality": 0.70,
+                },
                 status=PlanStepStatus.PENDING,
             )
             step_2 = PlanStep(
@@ -161,7 +170,10 @@ class BoundedPlanner:
                 dependencies=["step_fetch_banking"],
                 required_capabilities=[AgentCapability.FINANCIAL_ANALYSIS.value],
                 candidate_agents=["financial_specialist"],
-                model_requirements={"workload_class": "financial_reasoning", "min_quality": 0.85},
+                model_requirements={
+                    "workload_class": "financial_reasoning",
+                    "min_quality": 0.85,
+                },
                 status=PlanStepStatus.PENDING,
             )
             step_3 = PlanStep(
@@ -197,7 +209,10 @@ class BoundedPlanner:
                 dependencies=["step_dangerous_action"],
                 required_capabilities=[AgentCapability.SYNTHESIS.value],
                 candidate_agents=["synthesizer"],
-                model_requirements={"workload_class": "simple_chat", "min_quality": 0.60},
+                model_requirements={
+                    "workload_class": "simple_chat",
+                    "min_quality": 0.60,
+                },
                 status=PlanStepStatus.PENDING,
             )
             steps = [step_1, step_2]
@@ -212,7 +227,10 @@ class BoundedPlanner:
                 dependencies=[],
                 required_capabilities=[AgentCapability.FINANCIAL_ANALYSIS.value],
                 candidate_agents=["financial_specialist"],
-                model_requirements={"workload_class": "financial_reasoning", "min_quality": 0.85},
+                model_requirements={
+                    "workload_class": "financial_reasoning",
+                    "min_quality": 0.85,
+                },
                 status=PlanStepStatus.PENDING,
             )
             step_2 = PlanStep(
@@ -237,7 +255,10 @@ class BoundedPlanner:
                 dependencies=[],
                 required_capabilities=[AgentCapability.SYNTHESIS.value],
                 candidate_agents=["synthesizer", "general_agent"],
-                model_requirements={"workload_class": "simple_chat", "min_quality": 0.60},
+                model_requirements={
+                    "workload_class": "simple_chat",
+                    "min_quality": 0.60,
+                },
                 status=PlanStepStatus.PENDING,
             )
             steps = [step_1]
@@ -284,13 +305,33 @@ class BoundedPlanner:
         if isinstance(existing_plan, str):
             actual_goal = existing_plan
             actual_plan: Plan = args[0] if args else kwargs["existing_plan"]
-            actual_failed_id = str(args[1] if len(args) > 1 else (failed_step_id or kwargs.get("failed_step_id", "")))
-            actual_critique = str(args[2] if len(args) > 2 else (verifier_critique or kwargs.get("verifier_critique", "")))
+            actual_failed_id = str(
+                args[1]
+                if len(args) > 1
+                else (failed_step_id or kwargs.get("failed_step_id", ""))
+            )
+            actual_critique = str(
+                args[2]
+                if len(args) > 2
+                else (verifier_critique or kwargs.get("verifier_critique", ""))
+            )
         else:
             actual_plan = existing_plan
             actual_goal = goal or actual_plan.goal
-            actual_failed_id = str(failed_step_id or kwargs.get("failed_step_id") or (args[1] if len(args) > 1 else (args[0] if args else "")))
-            actual_critique = str(verifier_critique or kwargs.get("verifier_critique") or (args[0] if args and not failed_step_id else (args[1] if len(args) > 1 else "")))
+            actual_failed_id = str(
+                failed_step_id
+                or kwargs.get("failed_step_id")
+                or (args[1] if len(args) > 1 else (args[0] if args else ""))
+            )
+            actual_critique = str(
+                verifier_critique
+                or kwargs.get("verifier_critique")
+                or (
+                    args[0]
+                    if args and not failed_step_id
+                    else (args[1] if len(args) > 1 else "")
+                )
+            )
 
         logger.info(
             "Replanning task '%s' at step '%s' due to critique: %s",
@@ -316,7 +357,9 @@ class BoundedPlanner:
                     required_tools=s.required_tools,
                     model_requirements={
                         **s.model_requirements,
-                        "min_quality": min(1.0, s.model_requirements.get("min_quality", 0.7) + 0.1),
+                        "min_quality": min(
+                            1.0, s.model_requirements.get("min_quality", 0.7) + 0.1
+                        ),
                     },
                     status=PlanStepStatus.PENDING,
                     retries_exhausted=s.retries_exhausted + 1,
@@ -340,7 +383,9 @@ class BoundedPlanner:
                     routing_policy = RoutingPolicy(
                         requested_model="default",
                         tenant_id=tenant_id,
-                        workload_class=s.model_requirements.get("workload_class", "general"),
+                        workload_class=s.model_requirements.get(
+                            "workload_class", "general"
+                        ),
                         cost_aware_routing=True,
                     )
                     decision = self.model_router.route(routing_policy)
@@ -405,7 +450,8 @@ class BoundedPlanner:
                     break
             return NextAction(
                 action_type=NextActionType.FINISH,
-                final_output=last_obs or f"Plan successfully completed all {len(plan.steps)} steps.",
+                final_output=last_obs
+                or f"Plan successfully completed all {len(plan.steps)} steps.",
                 thought="All plan steps successfully completed.",
             )
 

@@ -37,7 +37,8 @@ class Plan(ExecutionPlan):
     def is_complete(self) -> bool:
         """Return True if all steps in plan are completed or skipped."""
         complete = bool(self.steps) and all(
-            s.status in (StepStatus.COMPLETED, StepStatus.SKIPPED, PlanStepStatus.COMPLETED)
+            s.status
+            in (StepStatus.COMPLETED, StepStatus.SKIPPED, PlanStepStatus.COMPLETED)
             for s in self.steps
         )
         self.completed = complete
