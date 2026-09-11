@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import TYPE_CHECKING, Any
@@ -20,6 +19,7 @@ from app.agent.domain.contracts import (
     TaskSpec,
 )
 from app.agent.registry.agent_registry import AgentMetadata, get_agent_registry
+from app.agent.utils.structured_output import extract_json_dict
 
 if TYPE_CHECKING:
     from app.agent.registry.agent_registry import AgentRegistry
@@ -152,7 +152,7 @@ class AgentSelector:
                     tenant_id=task_spec.tenant_id,
                 )
                 resp = await self.backend.generate(req)
-                parsed = self._extract_json_dict(resp.content)
+                parsed = extract_json_dict(resp.content)
                 if parsed and parsed.get("selected_agent_id"):
                     sel_id = str(parsed["selected_agent_id"]).strip()
                     chosen = next((a for a in eligible if a.agent_id == sel_id), None)
@@ -295,45 +295,6 @@ class AgentSelector:
             fallback_used=True,
             selection_mode="deterministic_fallback",
         )
-
-    @staticmethod
-    def _extract_json_dict(text: str) -> dict[str, Any] | None:
-        """Extract a JSON dictionary from model response text or codeblocks."""
-        if not text:
-            return None
-        text_clean = text.strip()
-        if text_clean.startswith("{") and text_clean.endswith("}"):
-            try:
-                data = json.loads(text_clean)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        if "```json" in text:
-            try:
-                sub = text.split("```json", 1)[1].split("```", 1)[0].strip()
-                data = json.loads(sub)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        if "```" in text:
-            try:
-                sub = text.split("```", 1)[1].split("```", 1)[0].strip()
-                data = json.loads(sub)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group(0))
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        return None
 
     def _degraded_heuristic_fallback(
         self,

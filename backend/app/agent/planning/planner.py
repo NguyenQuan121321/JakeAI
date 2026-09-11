@@ -25,6 +25,7 @@ from app.agent.planning.models import (
     PlanStep,
     PlanStepStatus,
 )
+from app.agent.utils.structured_output import extract_json_dict
 from app.routing.router import ModelRouter, RoutingPolicy
 from app.routing.workload_classifier import WorkloadClassifier
 
@@ -135,7 +136,7 @@ class BoundedPlanner:
                 tenant_id=tenant_id,
             )
             resp = await self.backend.generate(req)
-            parsed = self._extract_json_dict(resp.content)
+            parsed = extract_json_dict(resp.content)
             if parsed:
                 valid, err_msg, plan = self._validate_dag_plan(
                     raw_data=parsed,
@@ -170,7 +171,7 @@ class BoundedPlanner:
                 tenant_id=tenant_id,
             )
             retry_resp = await self.backend.generate(retry_req)
-            retry_parsed = self._extract_json_dict(retry_resp.content)
+            retry_parsed = extract_json_dict(retry_resp.content)
             if retry_parsed:
                 valid, retry_err, plan = self._validate_dag_plan(
                     raw_data=retry_parsed,
@@ -326,45 +327,6 @@ class BoundedPlanner:
             planner_mode="structured",
         )
         return True, "", plan
-
-    @staticmethod
-    def _extract_json_dict(text: str) -> dict[str, Any] | None:
-        """Extract a JSON dictionary from model response text or codeblocks."""
-        if not text:
-            return None
-        text_clean = text.strip()
-        if text_clean.startswith("{") and text_clean.endswith("}"):
-            try:
-                data = json.loads(text_clean)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        if "```json" in text:
-            try:
-                sub = text.split("```json", 1)[1].split("```", 1)[0].strip()
-                data = json.loads(sub)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        if "```" in text:
-            try:
-                sub = text.split("```", 1)[1].split("```", 1)[0].strip()
-                data = json.loads(sub)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group(0))
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                pass
-        return None
 
     def create_initial_plan(
         self,
