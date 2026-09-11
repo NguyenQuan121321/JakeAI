@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import mimetypes
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.rag.normalizer import normalize_text
+
+logger = logging.getLogger(__name__)
 
 
 class UnsupportedDocumentTypeError(ValueError):
@@ -140,8 +143,16 @@ class MarkdownParser(BaseDocumentParser):
                     and tokens[i + 1].type == "inline"
                 ):
                     headings.append(tokens[i + 1].content)
-        except Exception:
-            pass
+        except (ImportError, ModuleNotFoundError) as exc:
+            logger.warning(
+                "Optional Markdown heading extraction unavailable: markdown_it dependency missing (%s). Continuing without headings.",
+                type(exc).__name__,
+            )
+        except (ValueError, TypeError, AttributeError) as exc:
+            logger.warning(
+                "Optional Markdown heading extraction failed during token parsing (%s). Continuing without headings.",
+                type(exc).__name__,
+            )
 
         normalized = normalize_text(text)
         meta["byte_size"] = len(data)

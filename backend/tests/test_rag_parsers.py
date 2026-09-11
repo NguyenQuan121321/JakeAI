@@ -1,6 +1,7 @@
 """Unit tests for RAG document parsers (PlainText, Markdown, PDF) and MIME validation."""
 
 import io
+from unittest.mock import patch
 
 import pytest
 
@@ -48,6 +49,61 @@ def test_markdown_parser_headings() -> None:
     assert parsed.metadata.get("title") == "JakeAI Architecture"
     assert "enterprise platform" in parsed.content
     assert parsed.mime_type == "text/markdown"
+
+
+def test_markdown_parser_heading_extraction_import_error() -> None:
+    """Verify MarkdownParser continues parsing when markdown_it dependency is missing."""
+    parser = MarkdownParser()
+    md_content = "# Section 1\n\nSome body text here.\n\n## Section 2\n\nMore details."
+
+    with patch.dict("sys.modules", {"markdown_it": None}):
+        parsed = parser.parse_text(
+            md_content, filename="arch.md", metadata={"custom_tag": "preserved"}
+        )
+
+    # Document parsing succeeds
+    assert "Some body text here." in parsed.content
+    assert parsed.mime_type == "text/markdown"
+    # Optional headings become empty
+    assert parsed.metadata.get("headings", []) == []
+    assert "title" not in parsed.metadata
+    # Unrelated metadata is preserved intact
+    assert parsed.metadata.get("custom_tag") == "preserved"
+    assert parsed.metadata.get("byte_size") == len(md_content.encode("utf-8"))
+    assert parsed.metadata.get("char_count") == len(parsed.content)
+
+
+def test_markdown_parser_heading_extraction_parser_error() -> None:
+    """Verify MarkdownParser handles expected parser errors (ValueError, TypeError) gracefully."""
+    parser = MarkdownParser()
+    md_content = "# Heading Title\n\nContent paragraph."
+
+    with patch(
+        "markdown_it.MarkdownIt.parse", side_effect=ValueError("Corrupt token tree")
+    ):
+        parsed = parser.parse_text(
+            md_content, filename="corrupt.md", metadata={"tenant_id": "tenant-test"}
+        )
+
+    # Parsing still completes without headings
+    assert "Content paragraph." in parsed.content
+    assert parsed.metadata.get("headings", []) == []
+    assert parsed.metadata.get("tenant_id") == "tenant-test"
+
+
+def test_markdown_parser_unexpected_exception_propagates() -> None:
+    """Verify unexpected programming errors (RuntimeError, KeyError) are not silently swallowed."""
+    parser = MarkdownParser()
+    md_content = "# Critical Heading\n\nDocument body."
+
+    with (
+        patch(
+            "markdown_it.MarkdownIt.parse",
+            side_effect=RuntimeError("Unexpected fatal bug"),
+        ),
+        pytest.raises(RuntimeError, match="Unexpected fatal bug"),
+    ):
+        parser.parse_text(md_content, filename="critical.md")
 
 
 def test_pdf_parser_text_and_pages() -> None:
