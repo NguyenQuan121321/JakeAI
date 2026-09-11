@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 from app.agent.approvals.manager import ApprovalManager, get_approval_manager
 from app.agent.backends.jakeai import JakeAIBackend
+from app.agent.execution.engine import ExecutionEngine, get_execution_engine
 from app.agent.memory.manager import AgentMemoryManager, get_memory_manager
 from app.agent.planning.planner import BoundedPlanner
-from app.agent.runtime.models import AgentConfig
+from app.agent.runtime.models import AgentConfig, AgentRunEvent
 from app.agent.runtime.runner import AgentRunner
 from app.agent.state.checkpoint import CheckpointManager, get_checkpoint_manager
 from app.agent.state.models import (
@@ -24,8 +25,11 @@ from app.agent.telemetry import agent_telemetry
 from app.agent.tools.registry import ToolRegistry, get_tool_registry
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from app.agent.approvals.models import ApprovalDecision, ApprovalRequest
     from app.agent.backends.base import AgentBackendInterface
+    from app.agent.domain.contracts import TaskSpec
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ class AgentRuntimeManager:
         memory_manager: AgentMemoryManager | None = None,
         checkpoint_manager: CheckpointManager | None = None,
         approval_manager: ApprovalManager | None = None,
+        engine: ExecutionEngine | None = None,
         config: AgentConfig | None = None,
     ) -> None:
         self.config = config or AgentConfig()
@@ -48,6 +53,7 @@ class AgentRuntimeManager:
         self.memory_manager = memory_manager or get_memory_manager()
         self.checkpoint_manager = checkpoint_manager or get_checkpoint_manager()
         self.approval_manager = approval_manager or get_approval_manager()
+        self.engine = engine or get_execution_engine()
 
         self.planner = BoundedPlanner(
             backend=self.backend,
@@ -145,6 +151,33 @@ class AgentRuntimeManager:
             )
         return run
 
+    async def get_or_restore_run(self, run_id: str, tenant_id: str) -> RunState:
+        """Retrieve an execution run from memory or restore from durable checkpoint."""
+        run = self._runs.get(run_id)
+        if run is not None:
+            if run.tenant_id != tenant_id:
+                raise PermissionError(
+                    f"Tenant mismatch: Run '{run_id}' belongs to '{run.tenant_id}', "
+                    f"caller is '{tenant_id}'."
+                )
+            return run
+
+        # Attempt restoration from checkpoint manager
+        cp = await self.checkpoint_manager.load_checkpoint(run_id, tenant_id=tenant_id)
+        if cp is not None:
+            dump = cp.model_dump(
+                exclude={
+                    "checkpoint_id",
+                    "checkpoint_created_at",
+                    "short_term_memory_snapshot",
+                }
+            )
+            restored_run = RunState(**dump)
+            self._runs[run_id] = restored_run
+            return restored_run
+
+        raise KeyError(f"Run '{run_id}' not found.")
+
     async def execute_run(
         self,
         task_id: str,
@@ -164,6 +197,25 @@ class AgentRuntimeManager:
             user_permissions=user_permissions,
         )
         return run
+
+    async def execute_task_spec(
+        self,
+        spec: TaskSpec,
+        run_id: str | None = None,
+    ) -> AsyncGenerator[AgentRunEvent, None]:
+        """Execute a canonical TaskSpec through the ExecutionEngine, yielding canonical events."""
+        if spec.task_id not in self._tasks:
+            self._tasks[spec.task_id] = TaskState(
+                task_id=spec.task_id,
+                tenant_id=spec.tenant_id,
+                user_id=spec.user_id,
+                goal=spec.goal,
+                status=TaskStatus.RUNNING,
+                metadata=spec.metadata,
+            )
+
+        async for event in self.engine.execute_task(spec, run_id=run_id):
+            yield event
 
     def cancel_run(self, task_id: str, run_id: str, tenant_id: str) -> RunState:
         """Signal cooperative cancellation to a running task run."""

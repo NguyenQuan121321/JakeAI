@@ -45,6 +45,7 @@ class AgentState(TypedDict, total=False):
     final_response: str
     mascot_state: str  # "idle", "thinking", "success", "alert"
     citations: list[dict[str, Any]]
+    execution_plan: dict[str, Any]
 
 
 def run_state_to_agent_state(run: Any) -> AgentState:

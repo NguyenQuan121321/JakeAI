@@ -16,22 +16,54 @@ class TaskStatus(StrEnum):
     """Lifecycle states of an overarching Agent task."""
 
     PENDING = "pending"
+    PLANNING = "planning"
+    READY = "ready"
     RUNNING = "running"
+    EXECUTING = "executing"
     PAUSED_APPROVAL = "paused_approval"
+    WAITING_APPROVAL = "waiting_approval"
+    VERIFYING = "verifying"
+    REPLANNING = "replanning"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    TIMEOUT = "timeout"
 
 
 class RunStatus(StrEnum):
-    """Lifecycle states of an individual execution run for a task."""
+    """Lifecycle states of an individual execution run for a task (Phase 3 Canonical State)."""
 
     CREATED = "created"
+    PLANNING = "planning"
+    READY = "ready"
     RUNNING = "running"
+    EXECUTING = "executing"
     PAUSED_APPROVAL = "paused_approval"
+    WAITING_APPROVAL = "waiting_approval"
+    VERIFYING = "verifying"
+    REPLANNING = "replanning"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    TIMEOUT = "timeout"
+
+    @property
+    def is_terminal(self) -> bool:
+        """Return True if this status is terminal."""
+        return self in (
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.REJECTED,
+            RunStatus.TIMEOUT,
+        )
+
+    @property
+    def is_success(self) -> bool:
+        """Return True if status indicates terminal success."""
+        return self == RunStatus.COMPLETED
 
 
 class StepExecutionRecord(BaseModel):
@@ -109,6 +141,7 @@ class RunState(BaseModel):
     checkpoint_metadata: dict[str, Any] = Field(default_factory=dict)
 
     # Output, errors, and termination
+    plan: dict[str, Any] | None = None
     final_output: str | None = None
     error: str | None = None
     termination_reason: str | None = None
@@ -119,6 +152,106 @@ class RunState(BaseModel):
     created_at: float = Field(default_factory=time.time)
     completed_at: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def transition_to(self, target_status: RunStatus, reason: str | None = None) -> None:
+        """Deterministically transition run status with explicit state machine verification."""
+        terminal_statuses = {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.REJECTED,
+            RunStatus.TIMEOUT,
+        }
+        if self.status in terminal_statuses:
+            raise ValueError(
+                f"Invalid run state transition: cannot transition from terminal state '{self.status}' to '{target_status}'."
+            )
+
+        valid_transitions: dict[RunStatus, set[RunStatus]] = {
+            RunStatus.CREATED: {
+                RunStatus.PLANNING,
+                RunStatus.READY,
+                RunStatus.RUNNING,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+            },
+            RunStatus.PLANNING: {
+                RunStatus.READY,
+                RunStatus.RUNNING,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+            },
+            RunStatus.READY: {
+                RunStatus.RUNNING,
+                RunStatus.EXECUTING,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+            },
+            RunStatus.RUNNING: {
+                RunStatus.EXECUTING,
+                RunStatus.WAITING_APPROVAL,
+                RunStatus.PAUSED_APPROVAL,
+                RunStatus.VERIFYING,
+                RunStatus.COMPLETED,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+                RunStatus.REJECTED,
+                RunStatus.TIMEOUT,
+            },
+            RunStatus.EXECUTING: {
+                RunStatus.RUNNING,
+                RunStatus.WAITING_APPROVAL,
+                RunStatus.PAUSED_APPROVAL,
+                RunStatus.VERIFYING,
+                RunStatus.COMPLETED,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+                RunStatus.REJECTED,
+                RunStatus.TIMEOUT,
+            },
+            RunStatus.WAITING_APPROVAL: {
+                RunStatus.RUNNING,
+                RunStatus.EXECUTING,
+                RunStatus.REJECTED,
+                RunStatus.CANCELLED,
+                RunStatus.FAILED,
+            },
+            RunStatus.PAUSED_APPROVAL: {
+                RunStatus.RUNNING,
+                RunStatus.EXECUTING,
+                RunStatus.REJECTED,
+                RunStatus.CANCELLED,
+                RunStatus.FAILED,
+            },
+            RunStatus.VERIFYING: {
+                RunStatus.COMPLETED,
+                RunStatus.REPLANNING,
+                RunStatus.PLANNING,
+                RunStatus.RUNNING,
+                RunStatus.FAILED,
+                RunStatus.REJECTED,
+                RunStatus.CANCELLED,
+            },
+            RunStatus.REPLANNING: {
+                RunStatus.PLANNING,
+                RunStatus.READY,
+                RunStatus.RUNNING,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+            },
+        }
+
+        allowed = valid_transitions.get(self.status, set())
+        if target_status not in allowed:
+            raise ValueError(
+                f"Invalid run state transition from '{self.status}' to '{target_status}'."
+            )
+
+        self.status = target_status
+        if reason:
+            self.termination_reason = reason
+        if target_status in terminal_statuses:
+            self.completed_at = time.time()
 
     def to_agent_state(self) -> dict[str, Any]:
         """Convert canonical RunState to LangGraph AgentState dictionary."""
@@ -146,6 +279,7 @@ class RunState(BaseModel):
             "final_response": self.final_output or "",
             "mascot_state": self.metadata.get("mascot_state", "idle"),
             "citations": self.metadata.get("citations", []),
+            "execution_plan": self.plan,
         }
 
     @classmethod
@@ -155,14 +289,30 @@ class RunState(BaseModel):
         """Construct canonical RunState from a LangGraph AgentState dictionary."""
         status_map: dict[str, RunStatus] = {
             "completed": RunStatus.COMPLETED,
+            "verification_passed": RunStatus.COMPLETED,
             "verification_failed": RunStatus.FAILED,
             "failed": RunStatus.FAILED,
             "paused_approval": RunStatus.PAUSED_APPROVAL,
+            "waiting_approval": RunStatus.WAITING_APPROVAL,
+            "planning": RunStatus.PLANNING,
+            "ready": RunStatus.READY,
+            "verifying": RunStatus.VERIFYING,
+            "replanning": RunStatus.REPLANNING,
             "critique": RunStatus.RUNNING,
             "executing": RunStatus.RUNNING,
+            "running": RunStatus.RUNNING,
+            "cancelled": RunStatus.CANCELLED,
+            "rejected": RunStatus.REJECTED,
+            "timeout": RunStatus.TIMEOUT,
         }
         raw_phase = state.get("workflow_phase", "running")
         status = status_map.get(raw_phase, RunStatus.RUNNING)
+
+        verdict = state.get("verification_verdict")
+        if verdict == "REJECTED":
+            status = RunStatus.REJECTED
+        elif verdict == "FAILED":
+            status = RunStatus.FAILED
 
         return cls(
             run_id=run_id,

@@ -139,7 +139,7 @@ async def get_run(
     try:
         # Validate task ownership first
         manager.get_task(task_id, context.tenant_id)
-        return manager.get_run(run_id, context.tenant_id)
+        return await manager.get_or_restore_run(run_id, context.tenant_id)
     except KeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)

@@ -1,13 +1,15 @@
-"""Verifier and anti-hallucination critique node for Self-RAG evaluation."""
+"""Verifier and anti-hallucination critique node delegating to CanonicalVerifier."""
 
 from typing import Any
 
+from app.agent.domain.contracts import VerificationVerdict
+from app.agent.verification.verifier import get_canonical_verifier
 from app.agents.state import AgentState
 from app.evals.rag_evaluator import evaluate_rag_case
 
 
 async def verifier_node(state: AgentState) -> dict[str, Any]:
-    """Evaluate factual consistency, tenant boundaries, and Self-RAG."""
+    """Evaluate factual consistency, tenant boundaries, and Self-RAG via CanonicalVerifier."""
     financial_data = state.get("financial_analysis", {})
     tool_calls = state.get("tool_calls", [])
     retrieved_chunks = state.get("retrieved_chunks", [])
@@ -15,149 +17,86 @@ async def verifier_node(state: AgentState) -> dict[str, Any]:
     tenant_id = state.get("tenant_id", "")
     prompt = state.get("prompt", "")
 
-    # 1. Multi-Tenant Boundary Isolation Checks
-    tenant_mismatch = False
-    for tc in tool_calls:
-        if tc.get("tenant_id") != tenant_id:
-            tenant_mismatch = True
-    for rc in retrieved_chunks:
-        if rc.get("tenant_id") and rc.get("tenant_id") != tenant_id:
-            tenant_mismatch = True
-
-    # 2. Mathematical Consistency Checks
-    math_error = False
-    if financial_data:
-        rev = financial_data.get("revenue", 0.0)
-        exp = financial_data.get("operating_expenses", 0.0)
-        inc = financial_data.get("operating_income", 0.0)
-        if round(rev - exp, 2) != round(inc, 2):
-            math_error = True
-
-    # 3. Self-RAG Groundedness & Anti-Hallucination Evaluation
-    context_text = " ".join([c.get("content", "") for c in retrieved_chunks])
-    if not context_text:
-        context_text = prompt
-        if financial_data:
-            context_text += (
-                f" Gross Revenue: ${financial_data.get('revenue', 0.0)} "
-                f"Operating Expenses: ${financial_data.get('operating_expenses', 0.0)} "
-                f"Operating Income: ${financial_data.get('operating_income', 0.0)}"
-            )
-
-    # Generate synthetic response snippet to score groundedness
-    response_snippet = ""
-    if financial_data:
-        response_snippet = (
-            f"Gross Revenue: ${financial_data.get('revenue', 0.0)} "
-            f"Operating Expenses: ${financial_data.get('operating_expenses', 0.0)} "
-            f"Operating Income: ${financial_data.get('operating_income', 0.0)}"
-        )
-
-    eval_result = evaluate_rag_case(
-        {
-            "case_id": f"eval-{state.get('conversation_id', 'conv')}",
-            "query": prompt,
-            "context": context_text,
-            "response": response_snippet,
-            "tenant_id": tenant_id,
-        }
+    verifier = get_canonical_verifier()
+    res = verifier.verify_execution(
+        tenant_id=tenant_id,
+        goal=prompt,
+        step_outputs=[financial_data] if financial_data else [],
+        tool_calls=tool_calls,
+        retrieved_chunks=retrieved_chunks,
+        financial_data=financial_data,
+        revision_count=revision_count,
+        eval_fn=evaluate_rag_case,
     )
 
-    groundedness = eval_result.faithfulness_score
-    is_grounded = groundedness >= 0.80 and eval_result.anti_hallucination_passed
-
-    MAX_REVISIONS = 2
-
-    # 4. Enforce Strict Quality and Security Gates
-    # Gate 1: Multi-tenant boundary isolation check -> immediate REJECTED
-    if tenant_mismatch:
-        rejection_msg = "Multi-tenant boundary isolation breach detected"
+    # 1. Multi-Tenant Boundary Isolation Breach -> Immediate REJECTED
+    if res.verdict == VerificationVerdict.REJECTED:
         return {
             "current_agent": "verifier",
             "workflow_phase": "verification_failed",
             "verification_verdict": "REJECTED",
-            "critique_notes": f"Immediate rejection: {rejection_msg}.",
-            "groundedness_score": groundedness,
+            "critique_notes": f"Immediate rejection: {res.reason}.",
+            "groundedness_score": res.groundedness_score,
             "revision_count": revision_count,
             "next_agent": "synthesizer",
             "mascot_state": "alert",
             "messages": [
                 *state.get("messages", []),
                 (
-                    f"Verifier: Immediately REJECTED ({rejection_msg}). "
+                    f"Verifier: Immediately REJECTED ({res.reason}). "
                     "Hard security boundary breached."
                 ),
             ],
         }
 
-    # Gate 2: Arithmetic consistency or Groundedness failure
-    if math_error or not is_grounded:
-        reasons = []
-        if math_error:
-            reasons.append("Mathematical variance detected")
-        if not is_grounded:
-            reasons.append(f"Groundedness below threshold ({groundedness:.2f} < 0.80)")
+    # 2. Arithmetic or Groundedness failure requiring revision
+    if res.verdict == VerificationVerdict.NEEDS_REVISION:
+        return {
+            "current_agent": "verifier",
+            "workflow_phase": "critique",
+            "verification_verdict": "NEEDS_REVISION",
+            "critique_notes": f"Self-RAG Critique: {res.reason}. Recompute accurately.",
+            "groundedness_score": res.groundedness_score,
+            "revision_count": revision_count + 1,
+            "next_agent": "supervisor",
+            "mascot_state": "alert",
+            "messages": [
+                *state.get("messages", []),
+                f"Verifier: Rejected ({res.reason}). Triggering self-correction loop.",
+            ],
+        }
 
-        critique_msg = "; ".join(reasons)
-
-        if revision_count < MAX_REVISIONS:
-            return {
-                "current_agent": "verifier",
-                "workflow_phase": "critique",
-                "verification_verdict": "NEEDS_REVISION",
-                "critique_notes": (
-                    f"Self-RAG Critique: {critique_msg}. Recompute accurately."
+    # 3. Terminal Verification Failure after max revisions
+    if res.verdict == VerificationVerdict.FAILED:
+        return {
+            "current_agent": "verifier",
+            "workflow_phase": "verification_failed",
+            "verification_verdict": "FAILED",
+            "critique_notes": f"Verification failed after {revision_count} revisions: {res.reason}.",
+            "groundedness_score": res.groundedness_score,
+            "revision_count": revision_count,
+            "next_agent": "synthesizer",
+            "mascot_state": "alert",
+            "messages": [
+                *state.get("messages", []),
+                (
+                    f"Verifier: Terminal FAILED ({res.reason}). "
+                    f"Maximum revisions ({verifier.max_revisions}) exhausted."
                 ),
-                "groundedness_score": groundedness,
-                "revision_count": revision_count + 1,
-                "next_agent": "supervisor",
-                "mascot_state": "alert",
-                "messages": [
-                    *state.get("messages", []),
-                    (
-                        f"Verifier: Rejected ({critique_msg}). "
-                        "Triggering self-correction loop."
-                    ),
-                ],
-            }
-        else:
-            return {
-                "current_agent": "verifier",
-                "workflow_phase": "verification_failed",
-                "verification_verdict": "FAILED",
-                "critique_notes": (
-                    f"Verification failed after {revision_count} revisions: {critique_msg}."
-                ),
-                "groundedness_score": groundedness,
-                "revision_count": revision_count,
-                "next_agent": "synthesizer",
-                "mascot_state": "alert",
-                "messages": [
-                    *state.get("messages", []),
-                    (
-                        f"Verifier: Terminal FAILED ({critique_msg}). "
-                        f"Maximum revisions ({MAX_REVISIONS}) exhausted."
-                    ),
-                ],
-            }
+            ],
+        }
 
-    # 5. Quality gates passed: strictly when tenant_mismatch==False, math_error==False, is_grounded==True
+    # 4. Quality and Security Gates Passed
     return {
         "current_agent": "verifier",
         "workflow_phase": "verification_passed",
         "verification_verdict": "PASS",
-        "groundedness_score": groundedness,
-        "critique_notes": (
-            f"All quality gates verified. Groundedness: {groundedness:.2f}, "
-            "tenant isolation confirmed."
-        ),
+        "groundedness_score": res.groundedness_score,
+        "critique_notes": res.reason,
         "next_agent": "synthesizer",
         "mascot_state": "success",
         "messages": [
             *state.get("messages", []),
-            (
-                f"Verifier: Groundedness ({groundedness:.2f}) and "
-                "tenant isolation confirmed."
-            ),
+            f"Verifier: Groundedness ({res.groundedness_score:.2f}) and tenant isolation confirmed.",
         ],
     }
