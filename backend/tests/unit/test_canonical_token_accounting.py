@@ -132,7 +132,9 @@ def test_accounting_with_tools() -> None:
         messages=messages, tools=tools
     )
 
-    tools_json_tokens = estimate_tokens(json.dumps(tools))
+    from app.optimizer.bpe_tokenizer import get_bpe_tokenizer
+
+    tools_json_tokens = get_bpe_tokenizer().count_tokens(json.dumps(tools))
     assert tools_json_tokens > 50
     assert tokens_with_tools > base_tokens
     assert tokens_with_tools >= base_tokens + tools_json_tokens
@@ -222,8 +224,8 @@ def test_accounting_provider_cache_telemetry_reconciliation() -> None:
     assert record.raw_input_tokens == 5000  # 4500 provider input + 500 pruned
     assert record.physical_tokens_pruned == 500
     assert record.completion_tokens == 250  # reconciled from upstream output_tokens
-    # Effective billed: uncached input (1500) + completion (250)
-    assert record.effective_billed_tokens == 1750
+    # Effective billed: uncached input (1500) + cached discount (3000 * 10% = 300) + completion (250) = 2050
+    assert record.effective_billed_tokens == 2050
     assert record.provider_cost_savings_usd == 0.009
     assert record.provider_actual_cost_usd == 0.006
 
@@ -305,8 +307,11 @@ def test_conservation_of_tokens_invariant() -> None:
         cache_hit=False,
         provider_telemetry=telem,
     )
+    baseline3 = 2000 + 200
     assert rec3.provider_cached_input_tokens == 1500
-    assert rec3.effective_billed_tokens == 700  # 500 uncached + 200 completion
+    # Effective billed: 500 uncached + (1500 * 50% = 750) cached + 200 completion = 1450
+    assert rec3.effective_billed_tokens == 1450
+    assert baseline3 == rec3.effective_billed_tokens + rec3.tokens_saved
 
 
 @pytest.mark.asyncio

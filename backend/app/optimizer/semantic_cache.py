@@ -365,10 +365,16 @@ class SemanticCacheManager:
         """
         self.metrics.total_requests += 1
 
-        # Build canonical messages from prompt when callers haven't provided them
-        effective_messages = messages
-        if effective_messages is None:
+        # Build canonical messages ensuring current prompt is included
+        effective_messages = list(messages) if messages is not None else []
+        if not effective_messages:
             effective_messages = [{"role": "user", "content": prompt}]
+        elif prompt and not any(
+            (m.get("content") if isinstance(m, dict) else getattr(m, "content", ""))
+            == prompt
+            for m in effective_messages
+        ):
+            effective_messages.append({"role": "user", "content": prompt})
 
         # Extract tools, response_format, and system_instructions from parameters/generation_params if passed there
         combined_params = dict(generation_params or parameters or {})
@@ -541,10 +547,16 @@ class SemanticCacheManager:
         """
         ttl = ttl_seconds or self.default_ttl
 
-        # Build canonical messages from prompt when callers haven't provided them
-        effective_messages = messages
-        if effective_messages is None:
+        # Build canonical messages ensuring current prompt is included
+        effective_messages = list(messages) if messages is not None else []
+        if not effective_messages:
             effective_messages = [{"role": "user", "content": prompt}]
+        elif prompt and not any(
+            (m.get("content") if isinstance(m, dict) else getattr(m, "content", ""))
+            == prompt
+            for m in effective_messages
+        ):
+            effective_messages.append({"role": "user", "content": prompt})
 
         # Extract tools, response_format, and system_instructions from parameters/generation_params if passed there
         combined_params = dict(generation_params or parameters or {})
