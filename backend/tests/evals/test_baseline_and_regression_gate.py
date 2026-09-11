@@ -1,6 +1,5 @@
 """Unit tests for Baseline Store and Live Benchmark Regression Gate (TASK OPS-15 & OPS-16)."""
 
-
 from app.evals.baseline_store import BaselineMetrics, get_baseline_store
 from app.evals.benchmark_runner import BenchmarkSummary
 from app.evals.regression_detector import RegressionDetector, RegressionSeverity
@@ -8,6 +7,7 @@ from app.evals.regression_detector import RegressionDetector, RegressionSeverity
 
 def test_baseline_store_load_and_save(tmp_path):
     from app.evals.baseline_store import BaselineStore
+
     store = BaselineStore(baselines_dir=tmp_path)
 
     metrics = BaselineMetrics(

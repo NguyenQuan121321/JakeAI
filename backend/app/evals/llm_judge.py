@@ -311,4 +311,3 @@ Respond strictly in valid JSON with this exact schema:
         )
         # Reference answer must score higher than perturbed answer
         return res.baseline_score > res.optimized_score
-

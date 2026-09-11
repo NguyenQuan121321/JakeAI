@@ -84,7 +84,9 @@ def test_rbac_guardrail_authorization() -> None:
     assert empty_denied.violation_type == "RBAC_EMPTY_CONTEXT"
 
     # Unknown unmapped tool -> Fail closed (DENY)
-    unmapped_denied = check_tool_rbac_guardrail("dangerous_unmapped_shell", admin_context)
+    unmapped_denied = check_tool_rbac_guardrail(
+        "dangerous_unmapped_shell", admin_context
+    )
     assert unmapped_denied.allowed is False
     assert unmapped_denied.violation_type == "RBAC_UNMAPPED_TOOL"
 

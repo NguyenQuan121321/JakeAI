@@ -213,9 +213,15 @@ async def get_current_tenant(
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> TenantContext:
     """FastAPI security dependency resolving and validating TenantContext (TASK OPS-04)."""
-    cid = getattr(request.state, "correlation_id", None) if hasattr(request, "state") else None
+    cid = (
+        getattr(request.state, "correlation_id", None)
+        if hasattr(request, "state")
+        else None
+    )
     if not cid and hasattr(request, "headers"):
-        cid = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
+        cid = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
     context = verify_finnapigo_jwt(credentials.credentials, correlation_id=cid)
     await check_token_denylist(credentials.credentials)
     return context

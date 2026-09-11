@@ -38,9 +38,7 @@ class BatchRetrievalMetricsResult(BaseModel):
     individual_results: list[RetrievalMetricsResult] = Field(default_factory=list)
 
 
-def compute_precision_at_k(
-    retrieved: list[str], relevant: set[str], k: int
-) -> float:
+def compute_precision_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
     """Calculate Precision@K."""
     if k <= 0:
         return 0.0
@@ -51,9 +49,7 @@ def compute_precision_at_k(
     return round(hits / k, 4)
 
 
-def compute_recall_at_k(
-    retrieved: list[str], relevant: set[str], k: int
-) -> float:
+def compute_recall_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
     """Calculate Recall@K."""
     if not relevant:
         return 1.0
@@ -64,9 +60,7 @@ def compute_recall_at_k(
     return round(hits / len(relevant), 4)
 
 
-def compute_reciprocal_rank(
-    retrieved: list[str], relevant: set[str]
-) -> float:
+def compute_reciprocal_rank(retrieved: list[str], relevant: set[str]) -> float:
     """Calculate Reciprocal Rank (RR) for the first relevant document."""
     if not relevant:
         return 1.0
@@ -85,7 +79,7 @@ def compute_dcg_at_k(
     for i, doc in enumerate(top_k, start=1):
         rel = relevance_scores.get(doc, 0.0)
         # Using the standard 2^rel - 1 formulation
-        numerator = (2.0 ** rel) - 1.0
+        numerator = (2.0**rel) - 1.0
         denominator = math.log2(i + 1)
         dcg += numerator / denominator
     return dcg
@@ -103,7 +97,7 @@ def compute_ndcg_at_k(
     ideal_scores = sorted(relevance_scores.values(), reverse=True)[:k]
     idcg = 0.0
     for i, rel in enumerate(ideal_scores, start=1):
-        numerator = (2.0 ** rel) - 1.0
+        numerator = (2.0**rel) - 1.0
         denominator = math.log2(i + 1)
         idcg += numerator / denominator
 

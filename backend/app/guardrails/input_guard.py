@@ -72,24 +72,61 @@ class SemanticSafetyClassifier:
     """Semantic and heuristic safety classifier evaluating instruction overrides and intent vectors."""
 
     _OVERRIDE_VERBS = {
-        "forget", "disregard", "ignore", "override", "overwrite", "reset", "clear",
-        "drop", "cancel", "bypass", "delete", "abandon", "skip",
+        "forget",
+        "disregard",
+        "ignore",
+        "override",
+        "overwrite",
+        "reset",
+        "clear",
+        "drop",
+        "cancel",
+        "bypass",
+        "delete",
+        "abandon",
+        "skip",
     }
     _OVERRIDE_TARGETS = {
-        "instruction", "instructions", "prompt", "prompts", "rule", "rules",
-        "guideline", "guidelines", "constraint", "constraints", "policy", "policies",
-        "system", "guardrails", "safeguard", "safeguards",
+        "instruction",
+        "instructions",
+        "prompt",
+        "prompts",
+        "rule",
+        "rules",
+        "guideline",
+        "guidelines",
+        "constraint",
+        "constraints",
+        "policy",
+        "policies",
+        "system",
+        "guardrails",
+        "safeguard",
+        "safeguards",
     }
     _PERSONA_HIJACK = [
-        re.compile(r"\b(pretend|act|behave|roleplay)\s+(as|to\s+be)\s+.*(no\s+rules|unfiltered|without\s+(any\s+)?limits|evil|jailbroken)", re.IGNORECASE),
-        re.compile(r"\b(developer\s+mode\s+(enabled|on)|jailbreak\s+active)\b", re.IGNORECASE),
+        re.compile(
+            r"\b(pretend|act|behave|roleplay)\s+(as|to\s+be)\s+.*(no\s+rules|unfiltered|without\s+(any\s+)?limits|evil|jailbroken)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(developer\s+mode\s+(enabled|on)|jailbreak\s+active)\b", re.IGNORECASE
+        ),
         re.compile(r"\b(do\s+anything\s+now|always\s+say\s+yes)\b", re.IGNORECASE),
     ]
     _CROSS_LINGUAL_PATTERNS = [
         # Vietnamese adversarial vectors
-        re.compile(r"bỏ\s+qua\s+(mọi\s+)?(chỉ\s+dẫn|hướng\s+dẫn|câu\s+lệnh|quy\s+tắc)", re.IGNORECASE),
-        re.compile(r"(xuất|in|hiển\s+thị)\s+(cấu\s+hình|prompt\s+hệ\s+thống|lời\s+nhắc\s+hệ\s+thống)", re.IGNORECASE),
-        re.compile(r"chế\s+độ\s+(không\s+giới\s+hạn|nhà\s+phát\s+triển)", re.IGNORECASE),
+        re.compile(
+            r"bỏ\s+qua\s+(mọi\s+)?(chỉ\s+dẫn|hướng\s+dẫn|câu\s+lệnh|quy\s+tắc)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(xuất|in|hiển\s+thị)\s+(cấu\s+hình|prompt\s+hệ\s+thống|lời\s+nhắc\s+hệ\s+thống)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"chế\s+độ\s+(không\s+giới\s+hạn|nhà\s+phát\s+triển)", re.IGNORECASE
+        ),
     ]
 
     @classmethod
@@ -106,7 +143,10 @@ class SemanticSafetyClassifier:
                 decoded = base64.b64decode(b64).decode("utf-8", errors="ignore").lower()
                 for pat, v_type in INJECTION_PATTERNS:
                     if pat.search(decoded):
-                        return 1.0, f"OBFUSCATED_INJECTION: Base64 payload decoded to {v_type}"
+                        return (
+                            1.0,
+                            f"OBFUSCATED_INJECTION: Base64 payload decoded to {v_type}",
+                        )
             except (binascii.Error, ValueError) as exc:
                 logger.debug("Candidate string is not valid base64: %s", exc)
 
@@ -133,7 +173,9 @@ class SemanticSafetyClassifier:
                 break
 
         # 5. Delimiter or prompt smuggling markers
-        if re.search(r"(?:###\s*(?:system|override|instruction)|```system)", text_lower):
+        if re.search(
+            r"(?:###\s*(?:system|override|instruction)|```system)", text_lower
+        ):
             score += 0.35
             reason = reason or "DELIMITER_SMUGGLING"
 

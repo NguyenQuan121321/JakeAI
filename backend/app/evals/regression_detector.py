@@ -318,9 +318,7 @@ class RegressionDetector:
         all_regressions: list[DetectedRegression] = []
 
         # 1. Quality Regression vs Baseline
-        quality_drop = round(
-            baseline.avg_quality_score - summary.avg_quality_score, 4
-        )
+        quality_drop = round(baseline.avg_quality_score - summary.avg_quality_score, 4)
         if quality_drop > baseline.max_quality_regression:
             all_regressions.append(
                 DetectedRegression(
@@ -374,12 +372,8 @@ class RegressionDetector:
                 )
             )
 
-        has_block = any(
-            r.severity == RegressionSeverity.BLOCK for r in all_regressions
-        )
-        has_warn = any(
-            r.severity == RegressionSeverity.WARN for r in all_regressions
-        )
+        has_block = any(r.severity == RegressionSeverity.BLOCK for r in all_regressions)
+        has_warn = any(r.severity == RegressionSeverity.WARN for r in all_regressions)
 
         if has_block:
             verdict = RegressionSeverity.BLOCK

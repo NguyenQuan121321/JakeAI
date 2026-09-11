@@ -68,7 +68,9 @@ async def proxy_chat_completions(
         if msg.role == "user" and msg.content:
             guard_res = GuardrailsEngine.inspect_input(msg.content)
             if not guard_res.allowed:
-                metrics.record_security_incident("PROMPT_INJECTION_ATTEMPT", context.tenant_id)
+                metrics.record_security_incident(
+                    "PROMPT_INJECTION_ATTEMPT", context.tenant_id
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Safety guardrail violation: {guard_res.reason}",

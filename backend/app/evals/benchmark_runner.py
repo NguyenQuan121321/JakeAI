@@ -118,9 +118,7 @@ class BenchmarkRunner:
             pipeline_res.provider_cache_metrics.uncached_input_tokens
             or optimized_input_tokens
         )
-        provider_name = pipeline_res.compiled_prompt.metadata.get(
-            "provider", "generic"
-        )
+        provider_name = pipeline_res.compiled_prompt.metadata.get("provider", "generic")
 
         # 3. Quality Oracle Evaluation (TASK OPS-10: Actual Model Generation vs Compiled Prompt)
         opt_text = (
@@ -151,9 +149,7 @@ class BenchmarkRunner:
                 evaluated_text = opt_text
                 evaluated_artifact = "compiled_prompt"
 
-        quality_res = QualityOracle.evaluate(
-            case=case, candidate_text=evaluated_text
-        )
+        quality_res = QualityOracle.evaluate(case=case, candidate_text=evaluated_text)
 
         # 4. Cost Measurement
         cost_meas = measure_cost(

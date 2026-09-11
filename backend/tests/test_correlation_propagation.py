@@ -51,6 +51,7 @@ def test_router_correlation_id_propagation():
 async def test_llm_provider_correlation_id_propagation():
     from app.core.llm_provider import call_upstream_llm_detailed
     from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
     cid = "corr-test-provider-9999"
 
     mock_resp = UpstreamLLMResponse(
@@ -116,10 +117,16 @@ async def test_agent_execution_loop_correlation_id_propagation():
     )
 
     # First iteration: tool call; second iteration: finish
-    mock_planner.determine_next_action = AsyncMock(side_effect=[
-        NextAction(action_type=NextActionType.TOOL_CALL, tool_name="calculator", tool_args={"expression": "1+1"}),
-        NextAction(action_type=NextActionType.FINISH, final_output="2"),
-    ])
+    mock_planner.determine_next_action = AsyncMock(
+        side_effect=[
+            NextAction(
+                action_type=NextActionType.TOOL_CALL,
+                tool_name="calculator",
+                tool_args={"expression": "1+1"},
+            ),
+            NextAction(action_type=NextActionType.FINISH, final_output="2"),
+        ]
+    )
 
     captured_contexts = []
     mock_tool_registry = MagicMock()

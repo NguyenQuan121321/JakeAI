@@ -62,7 +62,9 @@ async def test_llm_judge_real_model_invocation():
         telemetry=ProviderCacheTelemetry(),
     )
 
-    with patch("app.core.llm_provider.call_upstream_llm_detailed", new_callable=AsyncMock) as mock_call:
+    with patch(
+        "app.core.llm_provider.call_upstream_llm_detailed", new_callable=AsyncMock
+    ) as mock_call:
         mock_call.return_value = mock_resp
 
         res = await judge.async_evaluate_pair_with_llm(
@@ -105,7 +107,9 @@ async def test_benchmark_runner_actual_model_generation():
         telemetry=ProviderCacheTelemetry(),
     )
 
-    with patch("app.core.llm_provider.call_upstream_llm_detailed", new_callable=AsyncMock) as mock_call:
+    with patch(
+        "app.core.llm_provider.call_upstream_llm_detailed", new_callable=AsyncMock
+    ) as mock_call:
         mock_call.return_value = mock_resp
 
         rec_gen, q_res, _ = await runner.run_case(case, execute_model_generation=True)

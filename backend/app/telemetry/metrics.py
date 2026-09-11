@@ -238,9 +238,7 @@ class MetricsCollector:
                 (str(incident_type).lower(), str(layer).lower(), t_clean)
             ] += 1
 
-    def record_stream_ttft(
-        self, provider: str, model: str, ttft_ms: float
-    ) -> None:
+    def record_stream_ttft(self, provider: str, model: str, ttft_ms: float) -> None:
         """Record time to first token for streaming responses (OPS-06)."""
         with self._lock:
             ttft_list = self._stream_ttft[(str(provider).lower(), str(model).lower())]
@@ -445,9 +443,7 @@ class MetricsCollector:
                 "# HELP jakeai_agent_tool_calls_total Total agent tool calls by tool, status, and tenant"
             )
             lines.append("# TYPE jakeai_agent_tool_calls_total counter")
-            for (tool, status, t_id), count in sorted(
-                self._agent_tool_calls.items()
-            ):
+            for (tool, status, t_id), count in sorted(self._agent_tool_calls.items()):
                 lines.append(
                     f'jakeai_agent_tool_calls_total{{tool="{tool}",status="{status}",tenant_id="{t_id}"}} {count}'
                 )
@@ -523,12 +519,10 @@ class MetricsCollector:
                 if vals
             }
             agent_tasks = {
-                f"{st}:{tid}": count
-                for (st, tid), count in self._agent_tasks.items()
+                f"{st}:{tid}": count for (st, tid), count in self._agent_tasks.items()
             }
             agent_runs = {
-                f"{st}:{tid}": count
-                for (st, tid), count in self._agent_runs.items()
+                f"{st}:{tid}": count for (st, tid), count in self._agent_runs.items()
             }
             agent_tools = {
                 f"{tool}:{st}:{tid}": count

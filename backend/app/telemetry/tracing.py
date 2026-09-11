@@ -96,7 +96,9 @@ def create_or_inherit_trace_context(
         )
 
     # Derive trace_id from correlation_id if valid hex 32 chars, else generate random
-    if fallback_correlation_id and re.match(r"^[0-9a-fA-F]{32}$", fallback_correlation_id):
+    if fallback_correlation_id and re.match(
+        r"^[0-9a-fA-F]{32}$", fallback_correlation_id
+    ):
         trace_id = fallback_correlation_id.lower()
     else:
         trace_id = secrets.token_hex(16)
@@ -132,9 +134,7 @@ class Span:
 
 
 @contextmanager
-def trace_span(
-    name: str, attributes: dict[str, Any] | None = None
-) -> Iterator[Span]:
+def trace_span(name: str, attributes: dict[str, Any] | None = None) -> Iterator[Span]:
     """Synchronous context manager creating a child span under active trace context."""
     parent_ctx = get_current_trace_context()
     if parent_ctx:

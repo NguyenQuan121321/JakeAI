@@ -315,12 +315,17 @@ class GatewayInferenceProxy:
             # Output Guardrail leak check on cached response (OPS-03)
             from app.guardrails import GuardrailsEngine
             from app.telemetry.metrics import metrics
-            sanitized_cached, cache_leaked = GuardrailsEngine.inspect_and_sanitize_output(
-                cache_entry.response, tenant_id
+
+            sanitized_cached, cache_leaked = (
+                GuardrailsEngine.inspect_and_sanitize_output(
+                    cache_entry.response, tenant_id
+                )
             )
             if cache_leaked:
                 metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
-                raise ValueError("Output blocked due to security data leakage policy violation.")
+                raise ValueError(
+                    "Output blocked due to security data leakage policy violation."
+                )
             # Immediate zero-cost return with exact accounting
             est_completion = max(1, estimate_tokens(cache_entry.response))
             req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -464,12 +469,15 @@ class GatewayInferenceProxy:
         # Output Inspection & Leakage Blocking (TASK OPS-03)
         from app.guardrails import GuardrailsEngine
         from app.telemetry.metrics import metrics
+
         sanitized_output, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
             output_text, tenant_id
         )
         if leak_detected:
             metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
-            raise ValueError("Output blocked due to security data leakage policy violation.")
+            raise ValueError(
+                "Output blocked due to security data leakage policy violation."
+            )
         output_text = sanitized_output
 
         completion_tokens = max(1, estimate_tokens(output_text))
@@ -650,8 +658,11 @@ class GatewayInferenceProxy:
             # Output Guardrail leak check on cached response (OPS-03)
             from app.guardrails import GuardrailsEngine
             from app.telemetry.metrics import metrics
-            sanitized_cached, cache_leaked = GuardrailsEngine.inspect_and_sanitize_output(
-                cache_entry.response, tenant_id
+
+            sanitized_cached, cache_leaked = (
+                GuardrailsEngine.inspect_and_sanitize_output(
+                    cache_entry.response, tenant_id
+                )
             )
             if cache_leaked:
                 metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
@@ -741,6 +752,7 @@ class GatewayInferenceProxy:
         # Output Inspection & Leakage Blocking (TASK OPS-03)
         from app.guardrails import GuardrailsEngine
         from app.telemetry.metrics import metrics
+
         sanitized_output, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
             output_text, tenant_id
         )

@@ -14,12 +14,68 @@ from pydantic import BaseModel, Field
 ClaimStatus = Literal["supported", "unsupported", "uncertain"]
 
 STOPWORDS = {
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with",
-    "by", "of", "from", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "this", "that", "these", "those",
-    "it", "its", "they", "them", "their", "we", "our", "you", "your", "i", "me",
-    "my", "as", "if", "then", "so", "than", "too", "very", "can", "will", "just",
-    "should", "now", "here", "there", "based", "according", "reported", "shows"
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "with",
+    "by",
+    "of",
+    "from",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
+    "its",
+    "they",
+    "them",
+    "their",
+    "we",
+    "our",
+    "you",
+    "your",
+    "i",
+    "me",
+    "my",
+    "as",
+    "if",
+    "then",
+    "so",
+    "than",
+    "too",
+    "very",
+    "can",
+    "will",
+    "just",
+    "should",
+    "now",
+    "here",
+    "there",
+    "based",
+    "according",
+    "reported",
+    "shows",
 }
 
 _NUM_PATTERN = re.compile(r"\$?\b\d+(?:[.,]\d+)?%?")
@@ -43,12 +99,27 @@ def segment_claims(text: str) -> list[str]:
     claims: list[str] = []
 
     conversational_prefixes = (
-        "hello", "hi", "sure", "certainly", "here is", "here are", "based on",
-        "according to", "in summary", "to summarize", "in conclusion", "overall"
+        "hello",
+        "hi",
+        "sure",
+        "certainly",
+        "here is",
+        "here are",
+        "based on",
+        "according to",
+        "in summary",
+        "to summarize",
+        "in conclusion",
+        "overall",
     )
     conversational_phrases = (
-        "let me know", "feel free", "hope this helps", "if you need",
-        "more details", "further questions", "reach out"
+        "let me know",
+        "feel free",
+        "hope this helps",
+        "if you need",
+        "more details",
+        "further questions",
+        "reach out",
     )
 
     for s in raw_sentences:
@@ -57,7 +128,10 @@ def segment_claims(text: str) -> list[str]:
             continue
         lower = clean.lower()
         # Skip introductory framing
-        if any(lower.startswith(p) for p in conversational_prefixes) and len(clean.split()) <= 10:
+        if (
+            any(lower.startswith(p) for p in conversational_prefixes)
+            and len(clean.split()) <= 10
+        ):
             continue
         # Skip conversational closing remarks
         if any(phrase in lower for phrase in conversational_phrases):
@@ -180,7 +254,11 @@ def evaluate_groundedness(
             status = "uncertain"
             uncertain_count += 1
             confidence = round(best_overlap_ratio, 2)
-            missing = list(claim_kws - passage_data[best_passage_idx][0]) if best_passage_idx is not None else []
+            missing = (
+                list(claim_kws - passage_data[best_passage_idx][0])
+                if best_passage_idx is not None
+                else []
+            )
         else:
             status = "unsupported"
             unsupported_count += 1
@@ -202,7 +280,9 @@ def evaluate_groundedness(
     unsupp_rate = round(unsupported_count / total, 4)
     uncert_rate = round(uncertain_count / total, 4)
     # Groundedness score weights supported claims fully and uncertain claims halfway
-    grounded_score = round(min(1.0, max(0.0, (supported_count + 0.5 * uncertain_count) / total)), 4)
+    grounded_score = round(
+        min(1.0, max(0.0, (supported_count + 0.5 * uncertain_count) / total)), 4
+    )
 
     # Citation correctness check
     citation_correctness = 1.0
@@ -210,7 +290,9 @@ def evaluate_groundedness(
         correct_cites = 0
         for cite in citations:
             passage_idx = cite.get("passage_index")
-            if isinstance(passage_idx, int) and 0 <= passage_idx < len(context_passages):
+            if isinstance(passage_idx, int) and 0 <= passage_idx < len(
+                context_passages
+            ):
                 correct_cites += 1
         citation_correctness = round(correct_cites / len(citations), 4)
 

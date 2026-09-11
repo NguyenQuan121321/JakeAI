@@ -1,6 +1,5 @@
 """Unit tests for RAG Retrieval Metrics and Groundedness Evaluation Engines (TASK OPS-08 & OPS-11)."""
 
-
 from app.evals.groundedness import evaluate_groundedness, segment_claims
 from app.evals.retrieval_metrics import (
     compute_ndcg_at_k,
@@ -19,7 +18,9 @@ def test_retrieval_metrics_individual():
     # Precision@K
     assert compute_precision_at_k(retrieved, relevant, k=1) == 0.0
     assert compute_precision_at_k(retrieved, relevant, k=2) == 0.5  # doc2 is relevant
-    assert compute_precision_at_k(retrieved, relevant, k=4) == 0.5  # doc2, doc4 are relevant (2/4)
+    assert (
+        compute_precision_at_k(retrieved, relevant, k=4) == 0.5
+    )  # doc2, doc4 are relevant (2/4)
 
     # Recall@K
     assert compute_recall_at_k(retrieved, relevant, k=1) == 0.0
@@ -96,4 +97,7 @@ def test_groundedness_evaluation_hallucination():
     assert report.supported_claims == 0
     assert report.unsupported_claim_rate == 1.0
     assert report.passed is False
-    assert "$99.9M" in report.claims[0].missing_evidence or "55%" in report.claims[0].missing_evidence
+    assert (
+        "$99.9M" in report.claims[0].missing_evidence
+        or "55%" in report.claims[0].missing_evidence
+    )

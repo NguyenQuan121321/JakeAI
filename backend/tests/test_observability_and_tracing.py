@@ -54,9 +54,18 @@ def test_w3c_traceparent_parsing():
     assert sampled is True
 
     # Invalid versions or all-zeros trace/span IDs
-    assert parse_traceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01") is None
-    assert parse_traceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01") is None
-    assert parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01") is None
+    assert (
+        parse_traceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+        is None
+    )
+    assert (
+        parse_traceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01")
+        is None
+    )
+    assert (
+        parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01")
+        is None
+    )
     assert parse_traceparent("invalid-format") is None
     assert parse_traceparent(None) is None
 
@@ -88,7 +97,15 @@ def test_prometheus_metrics_generation():
     metrics.reset()
     # Record various operational events
     metrics.record_http_request("GET", "/health", 200, 15.2)
-    metrics.record_provider_request("gemini", "gemini-1.5-flash", "success", 120.5, prompt_tokens=100, completion_tokens=50, cost_usd=0.0002)
+    metrics.record_provider_request(
+        "gemini",
+        "gemini-1.5-flash",
+        "success",
+        120.5,
+        prompt_tokens=100,
+        completion_tokens=50,
+        cost_usd=0.0002,
+    )
     metrics.record_stream_ttft("gemini", "gemini-1.5-flash", 85.0)
     metrics.record_security_incident("prompt_injection", "tenant-test", "layer1_regex")
     metrics.record_agent_task("completed", "tenant-test")
@@ -100,17 +117,35 @@ def test_prometheus_metrics_generation():
 
     prom_text = metrics.generate_prometheus_metrics()
     assert "# HELP jakeai_http_requests_total" in prom_text
-    assert 'jakeai_http_requests_total{method="GET",path="/health",status="200"} 1' in prom_text
+    assert (
+        'jakeai_http_requests_total{method="GET",path="/health",status="200"} 1'
+        in prom_text
+    )
     assert "# HELP jakeai_provider_requests_total" in prom_text
-    assert 'jakeai_provider_requests_total{provider="gemini",model="gemini-1.5-flash",status="success"} 1' in prom_text
+    assert (
+        'jakeai_provider_requests_total{provider="gemini",model="gemini-1.5-flash",status="success"} 1'
+        in prom_text
+    )
     assert "# HELP jakeai_stream_ttft_ms_avg" in prom_text
-    assert 'jakeai_stream_ttft_ms_avg{provider="gemini",model="gemini-1.5-flash"} 85.00' in prom_text
+    assert (
+        'jakeai_stream_ttft_ms_avg{provider="gemini",model="gemini-1.5-flash"} 85.00'
+        in prom_text
+    )
     assert "# HELP jakeai_safety_incidents_total" in prom_text
-    assert 'jakeai_safety_incidents_total{incident_type="prompt_injection",layer="layer1_regex",tenant_id="tenant-test"} 1' in prom_text
+    assert (
+        'jakeai_safety_incidents_total{incident_type="prompt_injection",layer="layer1_regex",tenant_id="tenant-test"} 1'
+        in prom_text
+    )
     assert "# HELP jakeai_agent_tasks_total" in prom_text
-    assert 'jakeai_agent_tasks_total{status="completed",tenant_id="tenant-test"} 1' in prom_text
+    assert (
+        'jakeai_agent_tasks_total{status="completed",tenant_id="tenant-test"} 1'
+        in prom_text
+    )
     assert "# HELP jakeai_agent_tool_calls_total" in prom_text
-    assert 'jakeai_agent_tool_calls_total{tool="calculator",status="success",tenant_id="tenant-test"} 1' in prom_text
+    assert (
+        'jakeai_agent_tool_calls_total{tool="calculator",status="success",tenant_id="tenant-test"} 1'
+        in prom_text
+    )
     assert 'jakeai_agent_revisions_total{tenant_id="tenant-test"} 1' in prom_text
     assert 'jakeai_agent_recovery_success_total{tenant_id="tenant-test"} 1' in prom_text
 

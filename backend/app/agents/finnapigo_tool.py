@@ -54,9 +54,7 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
 
     # Propagate On-Behalf-Of (OBO) token
     raw_corr_id = state.get("correlation_id")
-    correlation_id: str = (
-        str(raw_corr_id) if raw_corr_id else str(uuid.uuid4())
-    )
+    correlation_id: str = str(raw_corr_id) if raw_corr_id else str(uuid.uuid4())
     obo_token = state.get("obo_token")
     if not obo_token:
         ctx = TenantContext(

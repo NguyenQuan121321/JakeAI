@@ -373,11 +373,15 @@ async def generate_chat_stream(
 
         # 6. Output Guardrail & Semantic Cache Population (TASK OPS-03)
         if final_response:
-            sanitized_resp, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
-                final_response, context.tenant_id
+            sanitized_resp, leak_detected = (
+                GuardrailsEngine.inspect_and_sanitize_output(
+                    final_response, context.tenant_id
+                )
             )
             if leak_detected:
-                metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", context.tenant_id)
+                metrics.record_security_incident(
+                    "OUTPUT_DATA_LEAKAGE", context.tenant_id
+                )
                 yield _format_sse_event(
                     "error",
                     {

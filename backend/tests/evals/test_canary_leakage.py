@@ -52,14 +52,18 @@ async def test_rag_tenant_isolation_canary_leakage():
         assert CANARY_A not in cit.passage_content
 
     # Evaluate with RAGEvalResult to verify strict isolation gate
-    eval_res = evaluate_rag_case({
-        "case_id": "test_canary_leakage_rag",
-        "query": query,
-        "context": "\n".join(c.content for c in result_b.context_selection.selected_chunks),
-        "response": result_b.answer,
-        "tenant_id": "tenant_b",
-        "foreign_tenant_id": "tenant_a",
-    })
+    eval_res = evaluate_rag_case(
+        {
+            "case_id": "test_canary_leakage_rag",
+            "query": query,
+            "context": "\n".join(
+                c.content for c in result_b.context_selection.selected_chunks
+            ),
+            "response": result_b.answer,
+            "tenant_id": "tenant_b",
+            "foreign_tenant_id": "tenant_a",
+        }
+    )
     assert eval_res.tenant_isolation_verified is True
     assert eval_res.data_leakage_detected is False
 

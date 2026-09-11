@@ -53,7 +53,14 @@ class TelemetryEvent(BaseModel):
         """Serialize event to single-line JSON string safe for ingest."""
         # Sanitize metadata to prevent raw prompt or credential leakage
         safe_meta = {}
-        sensitive_keys = {"prompt", "password", "api_key", "secret", "authorization", "token"}
+        sensitive_keys = {
+            "prompt",
+            "password",
+            "api_key",
+            "secret",
+            "authorization",
+            "token",
+        }
         for k, v in self.metadata.items():
             if any(s in k.lower() for s in sensitive_keys):
                 safe_meta[k] = "[REDACTED]"
