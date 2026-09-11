@@ -1,43 +1,48 @@
-"""Models for bounded planning and action selection."""
+"""Canonical Models for bounded planning and action selection."""
 
 from __future__ import annotations
 
+import uuid
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.agent.domain.contracts import (
+    ExecutionPlan,
+    StepStatus,
+)
+from app.agent.domain.contracts import (
+    PlanStep as DomainPlanStep,
+)
 
-class PlanStepStatus(StrEnum):
-    """Execution status of an individual step in an agent plan."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    WAITING_APPROVAL = "waiting_approval"
+PlanStepStatus = StepStatus
 
 
-class PlanStep(BaseModel):
-    """Discrete planned milestone or operation."""
+class PlanStep(DomainPlanStep):
+    """Discrete planned milestone or operation within a DAG plan."""
 
-    step_id: str
-    description: str
     tool_name: str | None = None
     tool_args: dict[str, Any] = Field(default_factory=dict)
-    status: PlanStepStatus = Field(default=PlanStepStatus.PENDING)
-    observation: str | None = None
-    error: str | None = None
 
 
-class Plan(BaseModel):
-    """High-level structured plan decomposing an overarching goal."""
+class Plan(ExecutionPlan):
+    """Structured plan decomposing an overarching goal with DAG dependencies."""
 
-    plan_id: str
-    goal: str
-    steps: list[PlanStep] = Field(default_factory=list)
+    task_id: str = Field(default_factory=lambda: f"task_{uuid.uuid4().hex[:12]}")
+    steps: list[PlanStep] = Field(default_factory=list)  # type: ignore[assignment]
     current_step_index: int = 0
     completed: bool = False
+
+    def is_complete(self) -> bool:
+        """Return True if all steps in plan are completed or skipped."""
+        complete = bool(self.steps) and all(
+            s.status
+            in (StepStatus.COMPLETED, StepStatus.SKIPPED, PlanStepStatus.COMPLETED)
+            for s in self.steps
+        )
+        self.completed = complete
+        return complete
 
 
 class NextActionType(StrEnum):
@@ -59,3 +64,6 @@ class NextAction(BaseModel):
     thought: str = ""
     final_output: str | None = None
     error: str | None = None
+    target_step_id: str | None = None
+    assigned_agent: str | None = None
+    selected_model: str | None = None

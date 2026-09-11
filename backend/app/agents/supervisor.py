@@ -51,7 +51,31 @@ def classify_intent(prompt: str) -> str:
 async def decide_supervisor_route(
     prompt: str, tenant_id: str = "default"
 ) -> SupervisorDecision:
-    """Produce a structured routing decision using model reasoning with fallback heuristic."""
+    """Produce a structured routing decision using canonical AgentSelector, model reasoning, and fallback."""
+    # 1. Canonical AgentSelector Check
+    try:
+        from app.agent.domain.contracts import TaskSpec
+        from app.agent.registry.agent_selector import get_agent_selector
+
+        task_spec = TaskSpec(goal=prompt, tenant_id=tenant_id)
+        selection = get_agent_selector().select_agent(task_spec)
+        target_map = {
+            "financial_specialist": "financial_specialist",
+            "finnapigo_specialist": "finnapigo_tool",
+            "finnapigo_tool": "finnapigo_tool",
+            "synthesizer": "synthesizer",
+        }
+        mapped_target = target_map.get(selection.agent_id)
+        if mapped_target and not selection.fallback_used:
+            return SupervisorDecision(
+                target_agent=mapped_target,  # type: ignore[arg-type]
+                reasoning=selection.reasoning,
+                confidence=selection.confidence,
+            )
+    except Exception as exc:
+        logger.debug("Canonical AgentSelector in supervisor fallback: %s", exc)
+
+    # 2. Model-driven reasoning
     try:
         from app.agent.backends.base import AgentMessage, BackendRequest
         from app.agent.backends.jakeai import JakeAIBackend
@@ -113,6 +137,21 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
     tenant_id = state.get("tenant_id", "default")
     revision_count = state.get("revision_count", 0)
     retrieved_chunks = state.get("retrieved_chunks", [])
+    execution_plan = state.get("execution_plan")
+
+    # Ensure Canonical ExecutionPlan exists in state
+    if not execution_plan and prompt.strip():
+        try:
+            from app.agent.backends.jakeai import JakeAIBackend
+            from app.agent.planning.planner import BoundedPlanner
+
+            planner = BoundedPlanner(backend=JakeAIBackend())
+            plan_obj = planner.create_initial_plan(goal=prompt, tenant_id=tenant_id)
+            execution_plan = plan_obj.model_dump()
+        except Exception as exc:
+            logger.debug(
+                "Failed to initialize execution plan in supervisor_node: %s", exc
+            )
 
     # Populate contextual chunks from hybrid retriever & context selector if not already provided
     if not retrieved_chunks and prompt.strip():
@@ -148,6 +187,7 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
             "next_agent": target,
             "mascot_state": "thinking",
             "retrieved_chunks": retrieved_chunks,
+            "execution_plan": execution_plan,
             "messages": [
                 *state.get("messages", []),
                 f"Supervisor: Routing to '{target}' for revision {revision_count + 1}.",
@@ -163,6 +203,7 @@ async def supervisor_node(state: AgentState) -> dict[str, Any]:
         "mascot_state": "thinking",
         "revision_count": revision_count,
         "retrieved_chunks": retrieved_chunks,
+        "execution_plan": execution_plan,
         "messages": [
             *state.get("messages", []),
             f"Supervisor: {decision.reasoning}. Dispatching to '{target}'.",

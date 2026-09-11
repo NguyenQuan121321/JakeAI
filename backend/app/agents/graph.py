@@ -1,5 +1,6 @@
 """StateGraph assembly and execution pipeline for LangGraph multi-agent system."""
 
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -150,6 +151,7 @@ async def stream_multi_agent_workflow(
         "revision_count": 0,
         "mascot_state": "thinking",
         "citations": [],
+        "execution_plan": {},
     }
 
     config = {"configurable": {"thread_id": conversation_id}}
@@ -163,4 +165,105 @@ async def stream_multi_agent_workflow(
                 "tool_calls": node_state.get("tool_calls", []),
                 "final_response": node_state.get("final_response"),
                 "citations": node_state.get("citations", []),
+                "verification_verdict": node_state.get("verification_verdict"),
             }
+
+
+class LangGraphExecutionAdapter:
+    """Execution adapter allowing the canonical OrchestrationKernel to execute via LangGraph."""
+
+    def __init__(self, graph: Any | None = None) -> None:
+        self.graph = graph or agent_graph
+
+    async def execute(
+        self,
+        task_spec: Any,
+        run_id: str | None = None,
+        plan: Any | None = None,
+    ) -> AsyncGenerator[Any, None]:
+        """Execute a canonical TaskSpec through LangGraph and yield canonical AgentRunEvents."""
+        from app.agent.runtime.models import AgentRunEvent
+
+        active_run_id = run_id or f"run_lg_{uuid.uuid4().hex[:12]}"
+        conversation_id = task_spec.task_id
+
+        yield AgentRunEvent(
+            event_type="task_created",
+            task_id=task_spec.task_id,
+            run_id=active_run_id,
+            data={"goal": task_spec.goal, "tenant_id": task_spec.tenant_id},
+        )
+
+        initial_state: AgentState = {
+            "prompt": task_spec.goal,
+            "tenant_id": task_spec.tenant_id,
+            "user_id": task_spec.user_id,
+            "roles": task_spec.roles,
+            "permissions": task_spec.permissions,
+            "conversation_id": conversation_id,
+            "correlation_id": task_spec.correlation_id,
+            "obo_token": "",
+            "messages": [f"Task goal: '{task_spec.goal}'"],
+            "tool_calls": [],
+            "financial_analysis": {},
+            "revision_count": 0,
+            "mascot_state": "thinking",
+            "citations": [],
+            "execution_plan": (
+                plan.model_dump()
+                if plan is not None and hasattr(plan, "model_dump")
+                else {}
+            ),
+        }
+
+        config = {"configurable": {"thread_id": conversation_id}}
+        final_output = ""
+        verdict = "PASS"
+
+        async for event in self.graph.astream(initial_state, config=config):
+            for node_name, node_state in event.items():
+                phase = node_state.get("workflow_phase", "executing")
+                verdict = node_state.get("verification_verdict", verdict)
+                if node_state.get("final_response"):
+                    final_output = node_state["final_response"]
+
+                yield AgentRunEvent(
+                    event_type="step_started",
+                    task_id=task_spec.task_id,
+                    run_id=active_run_id,
+                    data={"step_id": node_name, "node": node_name, "phase": phase},
+                )
+
+                if node_name == "verifier":
+                    yield AgentRunEvent(
+                        event_type="verification_result",
+                        task_id=task_spec.task_id,
+                        run_id=active_run_id,
+                        data={
+                            "verdict": verdict,
+                            "reason": node_state.get("critique_notes", ""),
+                            "groundedness_score": node_state.get(
+                                "groundedness_score", 1.0
+                            ),
+                        },
+                    )
+
+        if verdict in ("FAILED", "REJECTED"):
+            yield AgentRunEvent(
+                event_type="failed",
+                task_id=task_spec.task_id,
+                run_id=active_run_id,
+                data={
+                    "error": final_output or f"Execution halted by {verdict}",
+                    "verdict": verdict,
+                },
+            )
+        else:
+            yield AgentRunEvent(
+                event_type="completed",
+                task_id=task_spec.task_id,
+                run_id=active_run_id,
+                data={"output": final_output, "verdict": "PASS"},
+            )
+
+    execute_task_spec = execute

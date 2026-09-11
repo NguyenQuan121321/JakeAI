@@ -1,0 +1,43 @@
+"""JakeAI Agent Canonical Domain Models and Contracts."""
+
+from app.agent.domain.contracts import (
+    AgentCapability,
+    AgentSelection,
+    ExecutionContext,
+    ExecutionPlan,
+    ExecutionStateStatus,
+    ModelSelection,
+    PlanStep,
+    RecoveryAction,
+    RecoveryDecision,
+    StepResult,
+    StepRetryPolicy,
+    StepStatus,
+    StepTimeoutPolicy,
+    TaskSpec,
+    TerminalState,
+    ToolSelection,
+    VerificationResult,
+    VerificationVerdict,
+)
+
+__all__ = [
+    "AgentCapability",
+    "AgentSelection",
+    "ExecutionContext",
+    "ExecutionPlan",
+    "ExecutionStateStatus",
+    "ModelSelection",
+    "PlanStep",
+    "RecoveryAction",
+    "RecoveryDecision",
+    "StepResult",
+    "StepRetryPolicy",
+    "StepStatus",
+    "StepTimeoutPolicy",
+    "TaskSpec",
+    "TerminalState",
+    "ToolSelection",
+    "VerificationResult",
+    "VerificationVerdict",
+]

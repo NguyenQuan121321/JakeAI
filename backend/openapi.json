@@ -4714,6 +4714,18 @@
             "type": "object",
             "title": "Checkpoint Metadata"
           },
+          "plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan"
+          },
           "final_output": {
             "anyOf": [
               {
@@ -4794,14 +4806,22 @@
         "type": "string",
         "enum": [
           "created",
+          "planning",
+          "ready",
           "running",
+          "executing",
           "paused_approval",
+          "waiting_approval",
+          "verifying",
+          "replanning",
           "completed",
           "failed",
-          "cancelled"
+          "cancelled",
+          "rejected",
+          "timeout"
         ],
         "title": "RunStatus",
-        "description": "Lifecycle states of an individual execution run for a task."
+        "description": "Lifecycle states of an individual execution run for a task (Phase 3 Canonical State)."
       },
       "SavingsAttribution": {
         "properties": {
@@ -5090,11 +5110,19 @@
         "type": "string",
         "enum": [
           "pending",
+          "planning",
+          "ready",
           "running",
+          "executing",
           "paused_approval",
+          "waiting_approval",
+          "verifying",
+          "replanning",
           "completed",
           "failed",
-          "cancelled"
+          "cancelled",
+          "rejected",
+          "timeout"
         ],
         "title": "TaskStatus",
         "description": "Lifecycle states of an overarching Agent task."
