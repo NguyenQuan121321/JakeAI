@@ -33,6 +33,7 @@ class FinOpsBudgetManager:
         self._memory_warning_thresholds: dict[str, float] = {}
         self._memory_token_usage: dict[str, int] = {}
         self._memory_dollar_spent: dict[str, float] = {}
+        self._memory_tokens_saved: dict[str, int] = {}
         self.redis_client: Any | None = None
         self._redis_available = True
 
@@ -205,6 +206,41 @@ class FinOpsBudgetManager:
         self._memory_dollar_spent[t_key] = new_dollars
 
         return new_tokens, new_dollars
+
+    async def record_token_usage(self, tenant_id: str, tokens: int) -> int:
+        """Increment token consumption and return total tokens used."""
+        new_tokens, _ = await self.settle_request(tenant_id, tokens, 0.0)
+        return new_tokens
+
+    async def record_tokens_saved(
+        self, tenant_id: str, tokens_saved: int, period: str | None = None
+    ) -> int:
+        """Increment tokens saved atomically in Redis or memory."""
+        period_key = period or self._get_period_key()
+        redis = await self._get_redis()
+        if redis is not None:
+            with contextlib.suppress(Exception):
+                key = f"finops:tokens_saved:{tenant_id}:{period_key}"
+                redis_val = await redis.incrby(key, tokens_saved)
+                return int(redis_val)
+
+        mem_key = f"{tenant_id}:{period_key}"
+        mem_val: int = int(self._memory_tokens_saved.get(mem_key, 0) + tokens_saved)
+        self._memory_tokens_saved[mem_key] = mem_val
+        return mem_val
+
+    async def get_tokens_saved(self, tenant_id: str, period: str | None = None) -> int:
+        """Get current tokens saved for the active period from Redis or memory."""
+        period_key = period or self._get_period_key()
+        redis = await self._get_redis()
+        if redis is not None:
+            with contextlib.suppress(Exception):
+                key = f"finops:tokens_saved:{tenant_id}:{period_key}"
+                val = await redis.get(key)
+                if val:
+                    return int(val)
+        mem_key = f"{tenant_id}:{period_key}"
+        return int(self._memory_tokens_saved.get(mem_key, 0))
 
     async def set_budget(
         self,
