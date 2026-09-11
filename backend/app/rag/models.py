@@ -98,6 +98,23 @@ class RetrievalResult(BaseModel):
     )
 
 
+class RetrievalCompressionResult(BaseModel):
+    """Outcome of RAG context retrieval compression."""
+
+    compressed_text: str
+    raw_tokens: int
+    compressed_tokens: int
+    tokens_saved: int
+    compression_ratio: float = Field(
+        ...,
+        description="Percentage of tokens pruned: (tokens_saved / raw_tokens) * 100",
+    )
+    retained_chunks_count: int
+    pruned_chunks_count: int
+    citations_preserved: list[str]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ContextSelectionResult(BaseModel):
     """Result of selecting, deduplicating, and bounding context from retrieved chunks."""
 

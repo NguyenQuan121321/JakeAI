@@ -32,16 +32,17 @@ from app.optimizer.contracts import (
     OptimizationLevel,
     OptimizedContext,
 )
-from app.optimizer.retrieval_compressor import (
-    RetrievalCompressor,
-    get_retrieval_compressor,
-)
 from app.optimizer.token_pruner import (
     HeuristicTokenPruner,
     compact_json,
     estimate_tokens,
     get_token_pruner,
     is_structured_json,
+)
+from app.rag.context_selector import (
+    CITATION_TAG_REGEX,
+    ContextSelector,
+    get_context_selector,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,12 +103,14 @@ class ContextOptimizer:
         skeletonizer: CodeSkeletonizer | None = None,
         pruner: HeuristicTokenPruner | None = None,
         code_compressor: CodeContextCompressor | None = None,
-        retrieval_compressor: RetrievalCompressor | None = None,
+        retrieval_compressor: Any | None = None,
+        context_selector: ContextSelector | None = None,
     ) -> None:
         self.skeletonizer = skeletonizer or get_code_skeletonizer()
         self.pruner = pruner or get_token_pruner()
         self.code_compressor = code_compressor or get_code_context_compressor()
-        self.retrieval_compressor = retrieval_compressor or get_retrieval_compressor()
+        self.context_selector = context_selector or get_context_selector()
+        self.retrieval_compressor = retrieval_compressor or self.context_selector
 
     @staticmethod
     def infer_workload_type(
@@ -140,7 +143,15 @@ class ContextOptimizer:
         ):
             return WorkloadType.MULTILINGUAL
 
-        # 3. Coding Context
+        # 3. Long Conversation / Conversation History
+        if (
+            ("Turn 1" in dynamic_context and "Turn 2" in dynamic_context)
+            or "TRANSCRIPT" in dynamic_context
+            or ("User:" in dynamic_context and "Assistant:" in dynamic_context)
+        ):
+            return WorkloadType.LONG_CONVERSATION
+
+        # 4. Coding Context
         if (
             "diff --git" in dynamic_context
             or "def " in dynamic_context
@@ -163,7 +174,7 @@ class ContextOptimizer:
         ):
             return WorkloadType.CODING_CONTEXT
 
-        # 4. RAG Excerpts
+        # 5. RAG Excerpts
         if (
             "=== DOCUMENT EXCERPT" in dynamic_context
             or "[SEC-" in dynamic_context
@@ -172,7 +183,7 @@ class ContextOptimizer:
         ):
             return WorkloadType.RAG
 
-        # 5. Financial Reasoning
+        # 6. Financial Reasoning
         if (
             any(
                 w in dynamic_context
@@ -188,12 +199,6 @@ class ContextOptimizer:
             or "ebitda" in query_lower
         ):
             return WorkloadType.FINANCIAL_REASONING
-
-        # 6. Long Conversation
-        if (
-            "Turn 1" in dynamic_context and "Turn 2" in dynamic_context
-        ) or "TRANSCRIPT" in dynamic_context:
-            return WorkloadType.LONG_CONVERSATION
 
         # 7. Simple Chat
         if len(dynamic_context.split()) < 20 and len(user_query.split()) < 30:
@@ -378,7 +383,7 @@ class ContextOptimizer:
 
             elif resolved_workload == WorkloadType.RAG:
                 # RAG: Distractor section pruning and cross-chunk deduplication
-                rag_res = self.retrieval_compressor.compress_rag_context_string(
+                rag_res = self.context_selector.compress_rag_context_string(
                     current_text, query=user_query
                 )
                 if rag_res.tokens_saved > 0:
@@ -420,6 +425,52 @@ class ContextOptimizer:
                 reduction_ratio=0.0,
                 fallback_used=True,
                 fallback_reason=str(exc),
+            )
+
+        # Quality Guardrail & Fail-Closed Validation (COST-06)
+        # 1. Non-empty raw text must not be reduced to empty
+        if raw_text.strip() and not current_text.strip():
+            logger.warning(
+                "Dynamic context reduced to empty; triggering fail-closed fallback."
+            )
+            return OptimizedContext(
+                content=raw_text,
+                source_content_hash=source_hash,
+                transformations=["fail_closed_fallback_empty"],
+                removed_content_metadata={"fallback_reason": "empty_optimized_content"},
+                optimization_level=level,
+                raw_tokens=raw_tokens,
+                optimized_tokens=raw_tokens,
+                tokens_removed=0,
+                reduction_ratio=0.0,
+                fallback_used=True,
+                fallback_reason="empty_optimized_content",
+            )
+
+        # 2. Citations preservation check: non-distractor citations present in raw text must be preserved
+        raw_citations = [
+            c
+            for c in CITATION_TAG_REGEX.findall(raw_text)
+            if not re.search(r"distractor|irrelevant", c, re.IGNORECASE)
+        ]
+        missing_citations = [c for c in raw_citations if c not in current_text]
+        if missing_citations:
+            logger.warning(
+                "Missing citations detected after compression: %s; triggering fail-closed fallback.",
+                missing_citations,
+            )
+            return OptimizedContext(
+                content=raw_text,
+                source_content_hash=source_hash,
+                transformations=["fail_closed_fallback_citation_loss"],
+                removed_content_metadata={"missing_citations": missing_citations},
+                optimization_level=level,
+                raw_tokens=raw_tokens,
+                optimized_tokens=raw_tokens,
+                tokens_removed=0,
+                reduction_ratio=0.0,
+                fallback_used=True,
+                fallback_reason=f"citation_loss: {missing_citations}",
             )
 
         optimized_tokens = estimate_tokens(current_text)

@@ -14,10 +14,15 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from app.optimizer.bpe_tokenizer import BPETokenizer, get_bpe_tokenizer
 from app.optimizer.token_pruner import get_token_pruner
-from app.rag.models import ContextSelectionResult, DocumentChunk
+from app.rag.models import (
+    ContextSelectionResult,
+    DocumentChunk,
+    RetrievalCompressionResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +338,188 @@ class ContextSelector:
             reduction_ratio=reduction_ratio,
             pruned_chunks_count=pruned_count,
             citations_preserved=citations_preserved,
+        )
+
+    def compress_document_chunks(
+        self,
+        chunks: list[Any],
+        query: str = "",
+        min_relative_score: float | None = None,
+        max_chunks: int | None = None,
+        tenant_id: str | None = None,
+    ) -> RetrievalCompressionResult:
+        """Filter and compress candidate document chunks using canonical ContextSelector logic."""
+        threshold = (
+            min_relative_score
+            if min_relative_score is not None
+            else self.min_relative_score
+        )
+        limit = max_chunks
+
+        if not chunks:
+            return RetrievalCompressionResult(
+                compressed_text="",
+                raw_tokens=0,
+                compressed_tokens=0,
+                tokens_saved=0,
+                compression_ratio=0.0,
+                retained_chunks_count=0,
+                pruned_chunks_count=0,
+                citations_preserved=[],
+            )
+
+        # 1. Normalize input chunks into DocumentChunk objects
+        doc_chunks: list[DocumentChunk] = []
+        raw_full_texts: list[str] = []
+
+        for i, c in enumerate(chunks):
+            if isinstance(c, DocumentChunk):
+                chunk_obj = c
+            elif hasattr(c, "content") and hasattr(c, "score"):
+                chunk_obj = DocumentChunk(
+                    chunk_id=getattr(c, "chunk_id", f"chk-{i}"),
+                    content=str(c.content),
+                    score=float(c.score or 0.0),
+                    tenant_id=getattr(c, "tenant_id", tenant_id or "default"),
+                    source=getattr(c, "source", "Internal Document"),
+                )
+            elif isinstance(c, dict):
+                chunk_obj = DocumentChunk(
+                    chunk_id=str(c.get("chunk_id", f"chk-{i}")),
+                    content=str(c.get("content", "")),
+                    score=float(c.get("score", 0.0)),
+                    tenant_id=str(c.get("tenant_id", tenant_id or "default")),
+                    source=str(c.get("source", "Internal Document")),
+                    metadata=c.get("metadata", {}),
+                )
+            else:
+                chunk_obj = DocumentChunk(
+                    chunk_id=f"chk-{i}",
+                    content=str(c),
+                    score=1.0,
+                    tenant_id=tenant_id or "default",
+                    source="Internal Document",
+                )
+            doc_chunks.append(chunk_obj)
+            raw_full_texts.append(chunk_obj.content)
+
+        raw_combined = "\n\n".join(raw_full_texts)
+        raw_tokens = self.tokenizer.count_tokens(raw_combined)
+
+        # 2. Filter by relevance score cutoff
+        max_score = (
+            max((c.score for c in doc_chunks), default=1.0) if doc_chunks else 1.0
+        )
+        cutoff = max_score * threshold
+
+        retained: list[DocumentChunk] = []
+        for c in doc_chunks:
+            cits = CITATION_TAG_REGEX.findall(c.content)
+            has_relevant_citation = any(cit.lower() in query.lower() for cit in cits)
+            if c.score >= cutoff or has_relevant_citation:
+                retained.append(c)
+
+        if limit is not None and limit > 0:
+            retained = retained[:limit]
+
+        pruned_count = len(doc_chunks) - len(retained)
+
+        # 3. Prune redundant boilerplate across retained chunks
+        retained_texts = [c.content for c in retained]
+        pruned_res = self.pruner.prune_context(retained_texts)
+        compressed_text = pruned_res.pruned_text
+
+        compressed_tokens = self.tokenizer.count_tokens(compressed_text)
+        tokens_saved = max(0, raw_tokens - compressed_tokens)
+        compression_ratio = (
+            round((tokens_saved / raw_tokens) * 100, 2) if raw_tokens > 0 else 0.0
+        )
+
+        all_citations: list[str] = []
+        for c in retained:
+            for cit in CITATION_TAG_REGEX.findall(c.content):
+                clean_c = cit.strip()
+                if clean_c and clean_c not in all_citations:
+                    all_citations.append(clean_c)
+
+        return RetrievalCompressionResult(
+            compressed_text=compressed_text,
+            raw_tokens=raw_tokens,
+            compressed_tokens=compressed_tokens,
+            tokens_saved=tokens_saved,
+            compression_ratio=compression_ratio,
+            retained_chunks_count=len(retained),
+            pruned_chunks_count=pruned_count,
+            citations_preserved=all_citations,
+            metadata={"threshold": threshold, "max_score": max_score},
+        )
+
+    def compress_rag_context_string(
+        self,
+        rag_context: str,
+        query: str = "",
+    ) -> RetrievalCompressionResult:
+        """Compress raw multi-excerpt RAG string by identifying excerpts and distractor sections."""
+        _ = query
+        raw_text = rag_context.strip()
+        raw_tokens = self.tokenizer.count_tokens(raw_text)
+
+        if not raw_text:
+            return RetrievalCompressionResult(
+                compressed_text="",
+                raw_tokens=0,
+                compressed_tokens=0,
+                tokens_saved=0,
+                compression_ratio=0.0,
+                retained_chunks_count=0,
+                pruned_chunks_count=0,
+                citations_preserved=[],
+            )
+
+        # Detect and split excerpt blocks if marked with === or ---
+        excerpt_splits = re.split(
+            r"(?=(?:=== DOCUMENT EXCERPT|=== SECTION|--- EXCERPT))",
+            raw_text,
+            flags=re.IGNORECASE,
+        )
+        if len(excerpt_splits) > 1:
+            chunks_to_evaluate: list[str] = []
+            for part in excerpt_splits:
+                p_strip = part.strip()
+                if not p_strip:
+                    continue
+                # If chunk is explicitly labeled distractor / irrelevant, skip it
+                if re.search(r"distractor|irrelevant", p_strip, re.IGNORECASE):
+                    logger.debug("Dropping labeled distractor chunk from RAG context")
+                    continue
+                chunks_to_evaluate.append(p_strip)
+        else:
+            chunks_to_evaluate = [raw_text]
+
+        pruned = self.pruner.prune_context(chunks_to_evaluate)
+        compressed_text = pruned.pruned_text
+        compressed_tokens = self.tokenizer.count_tokens(compressed_text)
+        tokens_saved = max(0, raw_tokens - compressed_tokens)
+        compression_ratio = (
+            round((tokens_saved / raw_tokens) * 100, 2) if raw_tokens > 0 else 0.0
+        )
+
+        citation_bracket_regex = re.compile(
+            r"\[(?:SEC|DOC|P|REF|CHUNK|EXCERPT)[^\]]+\]", re.IGNORECASE
+        )
+        all_citations = citation_bracket_regex.findall(compressed_text)
+        unique_citations = list(dict.fromkeys(c.strip() for c in all_citations))
+
+        return RetrievalCompressionResult(
+            compressed_text=compressed_text,
+            raw_tokens=raw_tokens,
+            compressed_tokens=compressed_tokens,
+            tokens_saved=tokens_saved,
+            compression_ratio=compression_ratio,
+            retained_chunks_count=len(chunks_to_evaluate),
+            pruned_chunks_count=len(excerpt_splits) - len(chunks_to_evaluate),
+            citations_preserved=unique_citations,
+            metadata={"method": "excerpt_splitting_and_pruning"},
         )
 
 

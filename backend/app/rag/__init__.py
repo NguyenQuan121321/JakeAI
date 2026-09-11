@@ -35,6 +35,7 @@ from app.rag.models import (
     DocumentChunk,
     GroundingClaim,
     RAGGenerationResult,
+    RetrievalCompressionResult,
     RetrievalResult,
 )
 from app.rag.normalizer import normalize_text
@@ -90,6 +91,7 @@ __all__ = [
     "QdrantVectorStore",
     "RAGGenerationResult",
     "RAGPipeline",
+    "RetrievalCompressionResult",
     "RetrievalResult",
     "TestOnlyFakeEmbeddingProvider",
     "UnsupportedDocumentTypeError",

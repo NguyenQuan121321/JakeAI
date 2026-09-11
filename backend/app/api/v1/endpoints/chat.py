@@ -135,13 +135,53 @@ async def generate_chat_stream(
             tool_schemas = None
 
     rag_context = params.get("rag_context")
+    dynamic_context = params.get("dynamic_context")
+
     raw_prompt_tokens = TokenAccounting.calculate_envelope_tokens(
         messages=history_messages,
         tools=tool_schemas,
         system_instruction=system_instruction,
         user_query=sanitized_prompt,
-        dynamic_context=params.get("dynamic_context"),
+        dynamic_context=dynamic_context,
         rag_context=rag_context,
+        model=model_name,
+    )
+
+    # 2.1 Dynamic Context & RAG Optimization on Live Path (COST-06)
+    from app.optimizer.context_optimizer import WorkloadType, get_context_optimizer
+
+    ctx_optimizer = get_context_optimizer()
+    optimized_dynamic_context = dynamic_context
+    optimized_rag_context = rag_context
+
+    if dynamic_context:
+        opt_dyn = ctx_optimizer.optimize_dynamic_context(
+            dynamic_context=str(dynamic_context),
+            user_query=sanitized_prompt,
+        )
+        optimized_dynamic_context = (
+            opt_dyn.content if not opt_dyn.fallback_used else dynamic_context
+        )
+        params["dynamic_context"] = optimized_dynamic_context
+
+    if rag_context:
+        opt_rag = ctx_optimizer.optimize_dynamic_context(
+            dynamic_context=str(rag_context),
+            user_query=sanitized_prompt,
+            workload_type=WorkloadType.RAG,
+        )
+        optimized_rag_context = (
+            opt_rag.content if not opt_rag.fallback_used else rag_context
+        )
+        params["rag_context"] = optimized_rag_context
+
+    optimized_prompt_tokens = TokenAccounting.calculate_envelope_tokens(
+        messages=history_messages,
+        tools=tool_schemas,
+        system_instruction=system_instruction,
+        user_query=sanitized_prompt,
+        dynamic_context=optimized_dynamic_context,
+        rag_context=optimized_rag_context,
         model=model_name,
     )
     final_response: str = ""
@@ -290,7 +330,7 @@ async def generate_chat_stream(
                         tenant_id=context.tenant_id,
                         model=model_name,
                         raw_input_tokens=raw_prompt_tokens,
-                        optimized_input_tokens=raw_prompt_tokens,
+                        optimized_input_tokens=optimized_prompt_tokens,
                         completion_tokens=comp_tokens,
                         cache_hit=False,
                         cache_type="none",
@@ -367,7 +407,7 @@ async def generate_chat_stream(
                         tenant_id=context.tenant_id,
                         model=model_name,
                         raw_input_tokens=raw_prompt_tokens,
-                        optimized_input_tokens=raw_prompt_tokens,
+                        optimized_input_tokens=optimized_prompt_tokens,
                         completion_tokens=comp_tokens,
                         cache_hit=False,
                         cache_type="none",
@@ -393,7 +433,7 @@ async def generate_chat_stream(
             tenant_id=context.tenant_id,
             model=model_name,
             raw_input_tokens=raw_prompt_tokens,
-            optimized_input_tokens=raw_prompt_tokens,
+            optimized_input_tokens=optimized_prompt_tokens,
             completion_tokens=comp_tokens,
             cache_hit=False,
             cache_type="none",
@@ -437,7 +477,7 @@ async def generate_chat_stream(
                 tenant_id=context.tenant_id,
                 model=model_name,
                 raw_input_tokens=raw_prompt_tokens,
-                optimized_input_tokens=raw_prompt_tokens,
+                optimized_input_tokens=optimized_prompt_tokens,
                 completion_tokens=comp_tokens,
                 cache_hit=False,
                 cache_type="none",

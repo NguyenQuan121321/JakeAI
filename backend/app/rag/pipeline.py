@@ -20,7 +20,6 @@ import re
 import time
 
 from app.core.config import get_settings
-from app.core.llm_provider import call_upstream_llm
 from app.rag.citations import CitationGenerator
 from app.rag.context_selector import ContextSelector, get_context_selector
 from app.rag.grounding import (
@@ -184,6 +183,8 @@ class RAGPipeline:
         # Step 10: Call upstream LLM provider
         raw_answer: str | None = None
         try:
+            from app.core.llm_provider import call_upstream_llm
+
             raw_answer = await call_upstream_llm(
                 prompt=prompt,
                 tenant_id=tenant_id,
