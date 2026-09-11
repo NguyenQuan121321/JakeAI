@@ -6,6 +6,11 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+from app.agent.backends.base import (
+    AgentBackendInterface,
+    AgentMessage,
+    BackendRequest,
+)
 from app.agent.domain.contracts import (
     AgentCapability,
     AgentSelection,
@@ -14,6 +19,7 @@ from app.agent.domain.contracts import (
     TaskSpec,
 )
 from app.agent.registry.agent_registry import AgentMetadata, get_agent_registry
+from app.agent.utils.structured_output import extract_json_dict
 
 if TYPE_CHECKING:
     from app.agent.registry.agent_registry import AgentRegistry
@@ -47,9 +53,11 @@ class AgentSelector:
         registry: AgentRegistry | None = None,
         agent_registry: AgentRegistry | None = None,
         tool_registry: Any = None,
+        backend: AgentBackendInterface | None = None,
     ) -> None:
         self.registry = registry or agent_registry or get_agent_registry()
         self.tool_registry = tool_registry
+        self.backend = backend
 
     def select_agent_for_step(
         self,
@@ -72,6 +80,101 @@ class AgentSelector:
             permissions=context.permissions,
         )
         return self.select_agent(task_spec=task_spec, plan_step=step, context=context)
+
+    async def select_agent_for_step_async(
+        self,
+        step: PlanStep,
+        context: ExecutionContext,
+        expected_tenant_id: str | None = None,
+    ) -> AgentSelection:
+        """Convenience async method to select an agent directly for an individual PlanStep."""
+        if expected_tenant_id is not None and context.tenant_id != expected_tenant_id:
+            raise PermissionError(
+                f"Tenant boundary violation: context tenant '{context.tenant_id}' "
+                f"does not match expected tenant '{expected_tenant_id}'."
+            )
+        task_spec = TaskSpec(
+            task_id="step_task",
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            goal=step.description,
+            roles=context.roles,
+            permissions=context.permissions,
+        )
+        return await self.select_agent_async(
+            task_spec=task_spec, plan_step=step, context=context
+        )
+
+    async def select_agent_async(
+        self,
+        task_spec: TaskSpec,
+        plan_step: PlanStep | None = None,
+        context: ExecutionContext | None = None,
+    ) -> AgentSelection:
+        """Select an agent using metadata matching, with model-assisted disambiguation when ambiguous."""
+        if context is not None:
+            context.assert_tenant_match(task_spec.tenant_id)
+
+        step_caps = plan_step.required_capabilities if plan_step else []
+        step_tools = plan_step.required_tools if plan_step else []
+        candidate_agents = plan_step.candidate_agents if plan_step else []
+        workload = (
+            plan_step.model_requirements.get("workload_class") if plan_step else None
+        )
+
+        eligible = self.registry.find_eligible(
+            required_capabilities=step_caps,
+            required_tools=step_tools,
+            workload_class=workload,
+        )
+        if candidate_agents:
+            candidate_set = set(candidate_agents)
+            eligible = [a for a in eligible if a.agent_id in candidate_set]
+
+        # Model-assisted disambiguation if multiple candidates and backend available
+        if len(eligible) > 1 and self.backend is not None:
+            try:
+                candidate_lines = [
+                    f"- '{a.agent_id}': {a.description} (capabilities: {a.capabilities})"
+                    for a in eligible
+                ]
+                system_prompt = (
+                    "You are JakeAI Agent Selector. Choose the optimal agent for the task step.\n"
+                    f"Task Goal: '{task_spec.goal}'\n"
+                    f"Step Description: '{plan_step.description if plan_step else ''}'\n"
+                    "Eligible Candidate Agents:\n" + "\n".join(candidate_lines) + "\n\n"
+                    "You MUST respond ONLY with a JSON object conforming strictly to:\n"
+                    '{"selected_agent_id": "<one_of_the_eligible_candidate_ids>", "reasoning": "<concise reason>", "confidence": 0.95}'
+                )
+                req = BackendRequest(
+                    messages=[AgentMessage(role="user", content=system_prompt)],
+                    temperature=0.0,
+                    tenant_id=task_spec.tenant_id,
+                )
+                resp = await self.backend.generate(req)
+                parsed = extract_json_dict(resp.content)
+                if parsed and parsed.get("selected_agent_id"):
+                    sel_id = str(parsed["selected_agent_id"]).strip()
+                    chosen = next((a for a in eligible if a.agent_id == sel_id), None)
+                    if chosen:
+                        return AgentSelection(
+                            agent_id=chosen.agent_id,
+                            reasoning=f"Model selection: {parsed.get('reasoning', 'Selected as best candidate.')}",
+                            confidence=float(parsed.get("confidence", 0.90)),
+                            matched_capabilities=chosen.capabilities,
+                            risk_level=chosen.risk_level,
+                            fallback_used=False,
+                            selection_mode="model",
+                        )
+            except Exception as exc:
+                logger.debug(
+                    "Model-assisted agent selection failed, falling back to deterministic: %s",
+                    exc,
+                )
+
+        return self.select_agent(
+            task_spec=task_spec, plan_step=plan_step, context=context
+        )
 
     def select_agent(
         self,
@@ -174,6 +277,7 @@ class AgentSelector:
                 matched_capabilities=matched,
                 risk_level=best_agent.risk_level,
                 fallback_used=False,
+                selection_mode="deterministic_fallback",
             )
 
         # 6. Explicit Degraded Mode Fallback
@@ -189,6 +293,7 @@ class AgentSelector:
             matched_capabilities=[],
             risk_level=fallback_meta.risk_level if fallback_meta else "safe",
             fallback_used=True,
+            selection_mode="deterministic_fallback",
         )
 
     def _degraded_heuristic_fallback(

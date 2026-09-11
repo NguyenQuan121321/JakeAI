@@ -25,7 +25,7 @@ class CanonicalVerifier:
         self,
         tenant_id: str,
         goal: str,
-        step_outputs: list[dict[str, Any]],
+        step_outputs: list[Any],
         tool_calls: list[dict[str, Any]],
         retrieved_chunks: list[dict[str, Any]],
         financial_data: dict[str, Any] | None = None,
@@ -107,15 +107,47 @@ class CanonicalVerifier:
         groundedness_score = 1.0
         grounding_reasons: list[str] = []
 
-        context_text = " ".join(c.get("content", "") for c in retrieved_chunks)
-        if not context_text:
-            context_text = goal
+        context_parts: list[str] = []
+        if retrieved_chunks:
+            # When retrieved chunks exist, they are the authoritative grounding source.
+            # Step outputs and financial data must NOT pollute grounding context,
+            # otherwise hallucinated numbers would self-validate.
+            context_parts.extend(
+                c.get("content", "") for c in retrieved_chunks if c.get("content")
+            )
+        else:
+            # Fallback: no retrieval pipeline — use execution evidence as context
+            for s in step_outputs:
+                if isinstance(s, dict):
+                    for k, v in s.items():
+                        context_parts.append(f"{k} {v}")
+                elif isinstance(s, str):
+                    context_parts.append(s)
+                elif isinstance(s, list):
+                    for item in s:
+                        context_parts.append(str(item))
+            for tc in tool_calls:
+                tc_out = tc.get("output")
+                if tc_out is not None:
+                    if isinstance(tc_out, dict):
+                        for k, v in tc_out.items():
+                            context_parts.append(f"{k} {v}")
+                    elif isinstance(tc_out, list):
+                        for item in tc_out:
+                            if isinstance(item, dict):
+                                for k, v in item.items():
+                                    context_parts.append(f"{k} {v}")
+                            else:
+                                context_parts.append(str(item))
+                    else:
+                        context_parts.append(str(tc_out))
             if fin:
-                context_text += (
-                    f" Gross Revenue: ${fin.get('revenue', 0.0)} "
-                    f"Operating Expenses: ${fin.get('operating_expenses', 0.0)} "
-                    f"Operating Income: ${fin.get('operating_income', 0.0)}"
-                )
+                for k, v in fin.items():
+                    context_parts.append(f"{k} {v}")
+        context_parts.append(goal)
+        context_parts.append(f"tenant {tenant_id}")
+
+        context_text = " ".join(context_parts)
 
         response_to_evaluate = final_output or ""
         if not response_to_evaluate and fin:
@@ -139,9 +171,14 @@ class CanonicalVerifier:
         anti_hallucination_passed = getattr(eval_res, "anti_hallucination_passed", True)
         is_grounded = groundedness_score >= 0.80 and anti_hallucination_passed
         if not is_grounded:
-            grounding_reasons.append(
-                f"Groundedness below threshold ({groundedness_score:.2f} < 0.80)"
-            )
+            if not anti_hallucination_passed:
+                grounding_reasons.append(
+                    "Anti-hallucination check failed: ungrounded numerical claims detected"
+                )
+            if groundedness_score < 0.80:
+                grounding_reasons.append(
+                    f"Groundedness below threshold ({groundedness_score:.2f} < 0.80)"
+                )
         evidence["groundedness_score"] = groundedness_score
 
         # 4. Synthesize Gate Failures and Evaluate Revision Budget

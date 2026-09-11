@@ -202,6 +202,10 @@ class ExecutionPlan(BaseModel):
     goal: str
     analysis: str = ""
     steps: list[PlanStep] = Field(default_factory=list)
+    planner_mode: str = Field(
+        default="deterministic_fallback",
+        description="Planning mode: structured | degraded_fallback | deterministic_fallback",
+    )
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
@@ -290,6 +294,10 @@ class AgentSelection(BaseModel):
     matched_capabilities: list[str] = Field(default_factory=list)
     risk_level: str = Field(default="safe")
     fallback_used: bool = False
+    selection_mode: str = Field(
+        default="deterministic_fallback",
+        description="Selection mode: model | deterministic_fallback",
+    )
 
 
 class ModelSelection(BaseModel):

@@ -16,6 +16,7 @@ from app.agent.backends.base import (
 from app.agent.domain.contracts import (
     AgentCapability,
     StepStatus,
+    TaskSpec,
 )
 from app.agent.planning.models import (
     NextAction,
@@ -24,6 +25,7 @@ from app.agent.planning.models import (
     PlanStep,
     PlanStepStatus,
 )
+from app.agent.utils.structured_output import extract_json_dict
 from app.routing.router import ModelRouter, RoutingPolicy
 from app.routing.workload_classifier import WorkloadClassifier
 
@@ -79,6 +81,252 @@ class BoundedPlanner:
 
         self.model_router = model_router or ModelRouter()
         self.workload_classifier = workload_classifier or WorkloadClassifier()
+
+    async def plan_task(
+        self,
+        task_spec: TaskSpec,
+        available_tools: list[ToolMetadata] | None = None,
+    ) -> Plan:
+        """Formulate a model-assisted structured DAG execution plan with strict validation and fallback."""
+        tenant_id = task_spec.tenant_id
+        goal = task_spec.goal
+        task_id = task_spec.task_id
+
+        system_instruction = (
+            "You are JakeAI's canonical Task Planner. Decompose the user's goal into a structured, "
+            "dependency-aware Directed Acyclic Graph (DAG) plan.\n"
+            "You MUST respond ONLY with a JSON object conforming strictly to this schema:\n"
+            "{\n"
+            '  "analysis": "Strategic breakdown of the goal",\n'
+            '  "steps": [\n'
+            "    {\n"
+            '      "step_id": "unique_step_id_string",\n'
+            '      "description": "Clear step description",\n'
+            '      "objective": "Target outcome of this step",\n'
+            '      "dependencies": ["prior_step_id_if_any"],\n'
+            '      "required_capabilities": ["synthesis"],\n'
+            '      "candidate_agents": ["synthesizer"],\n'
+            '      "required_tools": [],\n'
+            '      "model_requirements": {"workload_class": "general", "min_quality": 0.75}\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "Rules:\n"
+            "1. Steps must form an acyclic DAG. Independent steps must have empty dependencies.\n"
+            "2. Step IDs must be unique strings.\n"
+            "3. Dependencies must only reference earlier step IDs in the plan.\n"
+            "4. Output strictly valid JSON without explanation text outside the JSON."
+        )
+
+        user_content = f"Task Goal: '{goal}'\nTenant ID: '{tenant_id}'"
+        if available_tools:
+            tool_names = [t.name for t in available_tools]
+            user_content += f"\nAvailable Tools: {tool_names}"
+
+        messages = [
+            AgentMessage(role="system", content=system_instruction),
+            AgentMessage(role="user", content=user_content),
+        ]
+
+        # First attempt
+        try:
+            req = BackendRequest(
+                messages=messages,
+                temperature=0.1,
+                tenant_id=tenant_id,
+            )
+            resp = await self.backend.generate(req)
+            parsed = extract_json_dict(resp.content)
+            if parsed:
+                valid, err_msg, plan = self._validate_dag_plan(
+                    raw_data=parsed,
+                    goal=goal,
+                    task_id=task_id,
+                    tenant_id=tenant_id,
+                )
+                if valid and plan is not None:
+                    return plan
+            else:
+                err_msg = "Backend did not return a valid JSON object."
+
+            # Retry once with explicit feedback
+            logger.warning(
+                "Initial model plan generation failed validation: %s. Retrying once.",
+                err_msg,
+            )
+            correction_messages = [
+                *messages,
+                AgentMessage(role="assistant", content=resp.content),
+                AgentMessage(
+                    role="user",
+                    content=(
+                        f"Your previous plan failed validation: {err_msg}. "
+                        "Please correct the output and return strictly valid JSON conforming to the schema and acyclic DAG rules."
+                    ),
+                ),
+            ]
+            retry_req = BackendRequest(
+                messages=correction_messages,
+                temperature=0.0,
+                tenant_id=tenant_id,
+            )
+            retry_resp = await self.backend.generate(retry_req)
+            retry_parsed = extract_json_dict(retry_resp.content)
+            if retry_parsed:
+                valid, retry_err, plan = self._validate_dag_plan(
+                    raw_data=retry_parsed,
+                    goal=goal,
+                    task_id=task_id,
+                    tenant_id=tenant_id,
+                )
+                if valid and plan is not None:
+                    return plan
+                logger.warning("Retry model plan validation failed: %s", retry_err)
+
+        except Exception as exc:
+            logger.warning("Model-assisted planning encountered exception: %s", exc)
+
+        # Graceful fallback to deterministic DAG templates
+        logger.info("Using deterministic DAG fallback planner for goal: '%s'", goal)
+        fallback_plan = self.create_initial_plan(
+            goal=goal,
+            available_tools=available_tools,
+            tenant_id=tenant_id,
+            task_id=task_id,
+        )
+        fallback_plan.planner_mode = "degraded_fallback"
+        return fallback_plan
+
+    def _validate_dag_plan(
+        self,
+        raw_data: dict[str, Any],
+        goal: str,
+        task_id: str,
+        tenant_id: str,
+    ) -> tuple[bool, str, Plan | None]:
+        """Validate raw model-generated plan conforming to strict DAG and capability constraints."""
+        raw_steps = raw_data.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            return False, "Plan 'steps' must be a non-empty list of step objects.", None
+
+        step_ids: set[str] = set()
+        plan_steps: list[PlanStep] = []
+
+        for s_idx, raw_step in enumerate(raw_steps):
+            if not isinstance(raw_step, dict):
+                return False, f"Step at index {s_idx} is not an object.", None
+            s_id = str(raw_step.get("step_id") or "").strip()
+            if not s_id:
+                return (
+                    False,
+                    f"Step at index {s_idx} is missing a non-empty 'step_id'.",
+                    None,
+                )
+            if s_id in step_ids:
+                return False, f"Duplicate step_id '{s_id}' in plan.", None
+            step_ids.add(s_id)
+
+            desc = str(raw_step.get("description") or "").strip()
+            if not desc:
+                return False, f"Step '{s_id}' is missing a description.", None
+
+            deps = raw_step.get("dependencies") or []
+            if not isinstance(deps, list):
+                return (
+                    False,
+                    f"Dependencies for step '{s_id}' must be a list of step IDs.",
+                    None,
+                )
+
+            req_caps = raw_step.get("required_capabilities") or []
+            cand_agents = raw_step.get("candidate_agents") or []
+            req_tools = raw_step.get("required_tools") or []
+            model_reqs = raw_step.get("model_requirements") or {}
+
+            plan_step = PlanStep(
+                step_id=s_id,
+                description=desc,
+                objective=str(raw_step.get("objective") or desc),
+                dependencies=[str(d) for d in deps],
+                required_capabilities=[str(c) for c in req_caps],
+                candidate_agents=[str(a) for a in cand_agents],
+                required_tools=[str(t) for t in req_tools],
+                model_requirements=model_reqs if isinstance(model_reqs, dict) else {},
+                status=PlanStepStatus.PENDING,
+            )
+            plan_steps.append(plan_step)
+
+        # Validate dependency references
+        for step in plan_steps:
+            for dep in step.dependencies:
+                if dep == step.step_id:
+                    return (
+                        False,
+                        f"Step '{step.step_id}' cannot depend on itself.",
+                        None,
+                    )
+                if dep not in step_ids:
+                    return (
+                        False,
+                        f"Step '{step.step_id}' depends on non-existent step '{dep}'.",
+                        None,
+                    )
+
+        # Validate DAG is acyclic using 3-color DFS
+        adj: dict[str, list[str]] = {s.step_id: s.dependencies for s in plan_steps}
+        visited: dict[str, int] = {}  # 0: unvisited, 1: visiting, 2: visited
+
+        def has_cycle(node: str) -> bool:
+            visited[node] = 1
+            for neighbor in adj.get(node, []):
+                state = visited.get(neighbor, 0)
+                if state == 1:
+                    return True
+                if state == 0 and has_cycle(neighbor):
+                    return True
+            visited[node] = 2
+            return False
+
+        for node in adj:
+            if visited.get(node, 0) == 0 and has_cycle(node):
+                return (
+                    False,
+                    "Plan contains cyclic dependencies (not a valid DAG).",
+                    None,
+                )
+
+        # Route models for each step
+        for s in plan_steps:
+            req_workload = s.model_requirements.get("workload_class", "general")
+            try:
+                routing_policy = RoutingPolicy(
+                    requested_model="default",
+                    tenant_id=tenant_id,
+                    workload_class=req_workload,
+                    cost_aware_routing=True,
+                )
+                decision = self.model_router.route(routing_policy)
+                s.selected_model = decision.selected_model
+                s.selected_provider = decision.selected_provider
+            except Exception:
+                s.selected_model = "gemini-1.5-flash"
+                s.selected_provider = "gemini"
+
+        analysis = str(
+            raw_data.get("analysis")
+            or f"Model-assisted structured DAG plan for: {goal}"
+        )
+        plan = Plan(
+            plan_id=f"plan_{uuid.uuid4().hex[:12]}",
+            task_id=task_id,
+            goal=goal,
+            analysis=analysis,
+            steps=plan_steps,
+            current_step_index=0,
+            completed=False,
+            planner_mode="structured",
+        )
+        return True, "", plan
 
     def create_initial_plan(
         self,
@@ -289,6 +537,7 @@ class BoundedPlanner:
             steps=steps,
             current_step_index=0,
             completed=False,
+            planner_mode="deterministic_fallback",
         )
 
     def replan(
@@ -403,6 +652,7 @@ class BoundedPlanner:
             steps=new_steps,
             current_step_index=0,
             completed=False,
+            planner_mode="replan",
         )
 
     async def determine_next_action(

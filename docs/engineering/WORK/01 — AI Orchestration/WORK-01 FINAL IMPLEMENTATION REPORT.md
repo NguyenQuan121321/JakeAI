@@ -149,12 +149,16 @@ The orchestration suite validates the 5 canonical execution scenarios in [`backe
 
 | Scenario | Test Case | Verification Criteria | Status |
 | :--- | :--- | :--- | :--- |
-| **Scenario 1: Direct Single-Step** | `test_scenario_1_direct_single_step` | Simple goal creates 1-step plan, selects agent & model, executes, emits events, and reaches `COMPLETED`. | **PASSED** |
-| **Scenario 2: Multi-Step DAG** | `test_scenario_2_multi_step_dag_parallel` | Multi-source goal decomposes into parallel fetch steps (`asyncio.gather`), executes concurrently, synthesizes, and reaches `COMPLETED`. | **PASSED** |
-| **Scenario 3: Self-Correction Loop** | `test_scenario_3_self_correction_replan_loop` | Failing step triggers `evaluate_step_failure`, triggers `BoundedPlanner.replan()`, and succeeds without infinite loop. | **PASSED** |
-| **Scenario 4: Human-in-the-Loop** | `test_scenario_4_human_in_the_loop_approval` | High-risk step pauses execution at `WAITING_APPROVAL`, saves checkpoint, and cleanly resumes upon approval submission. | **PASSED** |
-| **Scenario 5: Multi-Tenant Breach** | `test_scenario_5_multi_tenant_isolation_breach` | Tool call with foreign tenant ID is detected by `CanonicalVerifier`, resulting in immediate non-recoverable `REJECTED`. | **PASSED** |
-| **Adapter Equivalence** | `test_adapter_lifecycle_equivalence` | Both `NativeExecutionAdapter` and `LangGraphExecutionAdapter` accept `TaskSpec` and produce conforming `TerminalState`. | **PASSED** |
+| **Scenario 1: Simple Question** | `test_scenario_1_simple_question` | Direct goal creates 1-step plan, selects agent & model, executes, emits events, verifies, and reaches `COMPLETED`. | **PASSED** |
+| **Scenario 2: Tool Banking Analysis** | `test_scenario_2_tool_banking_analysis` | Goal requires external banking API, selects `finnapigo_specialist` and `get_account_balance`, executes safely. | **PASSED** |
+| **Scenario 3: Parallel Independent Steps** | `test_scenario_3_parallel_independent_steps` | Multi-source goal decomposes into parallel fetch steps (`asyncio.gather`), executes concurrently, synthesizes, and reaches `COMPLETED`. | **PASSED** |
+| **Scenario 4: Approval Boundary & Resume** | `test_scenario_4_approval_pause_boundary`, `test_scenario_4_approval_resume_to_completion` | Dangerous tool pauses at `WAITING_APPROVAL`, saves checkpoint, cleanly resumes upon approval submission to `COMPLETED`. | **PASSED** |
+| **Scenario 5: Model Failure & Switch** | `test_scenario_5_model_failure_and_switch` | Model provider 429 rate limit triggers `evaluate_step_failure`, emits `model_switched`, switches to alternative model, and succeeds. | **PASSED** |
+| **Scenario 6: Tool Failure & Retry** | `test_scenario_6_tool_failure_and_retry` | Tool connection timeout triggers `step_retrying`, retries under bounded budget, and succeeds on subsequent attempt. | **PASSED** |
+| **Scenario 7: Verification Failure & Replan** | `test_scenario_7_verification_failure_and_replan` | Verifier critique triggers `replan_started`, self-corrects in next revision loop, and passes under max revision ceiling. | **PASSED** |
+| **Scenario 8: Cross-Tenant Isolation Breach** | `test_scenario_8_cross_tenant_isolation_rejected` | Tool call accessing foreign tenant ID is detected by `CanonicalVerifier`, resulting in immediate non-recoverable `REJECTED`. | **PASSED** |
+| **Scenario 9: Crash Recovery Process Restart** | `test_scenario_9_checkpoint_recovery_process_restart` | Process restart recovery from durable checkpoint via fresh `ExecutionEngine` instance and `resume_run()`. | **PASSED** |
+| **LangGraph Parity** | `test_langgraph_execution_adapter_parity` | `LangGraphExecutionAdapter` executes canonical `TaskSpec` and emits conforming lifecycle events to `COMPLETED`. | **PASSED** |
 
 ---
 

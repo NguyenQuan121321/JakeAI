@@ -58,15 +58,31 @@ LEAKAGE_PATTERNS = [
 
 
 def _extract_numerical_tokens(text: str) -> set[str]:
-    """Extract numerical and currency figures from text."""
-    # Matches numbers, percentages, and currencies (e.g., $100, 25%, 3.14)
-    pattern = r"\$?\b\d+(?:[\.,]\d+)?%?"
-    return set(re.findall(pattern, text))
+    """Extract numerical and currency figures from text, normalized for comparison."""
+    # Matches numbers, percentages, and currencies with commas or decimal points
+    pattern = r"\$?\b\d[\d,]*(?:\.\d+)?%?"
+    tokens: set[str] = set()
+    for m in re.findall(pattern, text):
+        cleaned = m.replace("$", "").replace("%", "").replace(",", "").strip()
+        if not cleaned:
+            continue
+        try:
+            val = float(cleaned)
+            if val.is_integer():
+                tokens.add(str(int(val)))
+            else:
+                tokens.add(str(round(val, 4)))
+        except ValueError:
+            tokens.add(cleaned)
+    return tokens
 
 
 def _extract_claim_tokens(text: str) -> set[str]:
     """Tokenize text into lowercased content tokens."""
-    words = re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", text.lower())
+    # Normalize punctuation and delimiters so compound identifiers like operating_expenses
+    # match separated words in response text
+    normalized = re.sub(r"[_\.,\n\r\t#\*\-]", " ", text)
+    words = re.findall(r"\b[a-zA-Z0-9]{3,}\b", normalized.lower())
     stop_words = {
         "the",
         "and",
@@ -111,8 +127,23 @@ def _extract_claim_tokens(text: str) -> set[str]:
         "given",
         "yields",
         "resulting",
+        # Procedural report structural and markdown scaffolding
+        "executive",
+        "intelligence",
+        "report",
+        "status",
+        "verified",
+        "completed",
+        "objective",
+        "tenant",
+        "jakeai",
+        "orchestration",
+        "overview",
+        "summary",
+        "section",
+        "findings",
     }
-    return {w for w in words if w not in stop_words}
+    return {w for w in words if w not in stop_words and not w.isdigit()}
 
 
 def evaluate_rag_case(case: dict[str, Any]) -> RAGEvalResult:
