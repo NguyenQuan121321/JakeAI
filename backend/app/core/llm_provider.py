@@ -9,6 +9,7 @@ Routes upstream provider invocations (Anthropic, OpenAI, Gemini, Groq, OpenRoute
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -87,12 +88,17 @@ async def call_upstream_llm_detailed(
         "openrouter": "OPENROUTER_API_KEY",
         "gemini": "GEMINI_API_KEY",
     }
-    settings_key = provider_settings_keys.get(decision.selected_provider)
-    explicit_key: str | None = None
-    if settings_key is not None:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, decision.selected_provider
-        ) or getattr(settings, settings_key, None)
+
+    async def resolve_provider_credentials(t_id: str, prov: str) -> str | None:
+        key = await byok_mgr.get_decrypted_key(t_id, prov)
+        if key:
+            return key
+        s_key = provider_settings_keys.get(prov)
+        return getattr(settings, s_key, None) if s_key else None
+
+    explicit_key = await resolve_provider_credentials(
+        tenant_id, decision.selected_provider
+    )
 
     provider_req = ProviderRequest(
         model=model,
@@ -126,11 +132,20 @@ async def call_upstream_llm_detailed(
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await failover_mgr.execute_with_failover(
-                request=provider_req,
-                decision=decision,
-                client=client,
-            )
+            sig = inspect.signature(failover_mgr.execute_with_failover)
+            if "credential_resolver" in sig.parameters:
+                resp = await failover_mgr.execute_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                    credential_resolver=resolve_provider_credentials,
+                )
+            else:
+                resp = await failover_mgr.execute_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                )
 
             metrics.record_provider_request(
                 provider=resp.provider,
@@ -220,12 +235,17 @@ async def call_upstream_llm_stream(
         "openrouter": "OPENROUTER_API_KEY",
         "gemini": "GEMINI_API_KEY",
     }
-    settings_key = provider_settings_keys.get(decision.selected_provider)
-    explicit_key: str | None = None
-    if settings_key is not None:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, decision.selected_provider
-        ) or getattr(settings, settings_key, None)
+
+    async def resolve_provider_credentials(t_id: str, prov: str) -> str | None:
+        key = await byok_mgr.get_decrypted_key(t_id, prov)
+        if key:
+            return key
+        s_key = provider_settings_keys.get(prov)
+        return getattr(settings, s_key, None) if s_key else None
+
+    explicit_key = await resolve_provider_credentials(
+        tenant_id, decision.selected_provider
+    )
 
     provider_req = ProviderRequest(
         model=model,
@@ -248,11 +268,21 @@ async def call_upstream_llm_stream(
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            async for chunk in failover_mgr.stream_with_failover(
-                request=provider_req,
-                decision=decision,
-                client=client,
-            ):
+            sig = inspect.signature(failover_mgr.stream_with_failover)
+            if "credential_resolver" in sig.parameters:
+                stream_iter = failover_mgr.stream_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                    credential_resolver=resolve_provider_credentials,
+                )
+            else:
+                stream_iter = failover_mgr.stream_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                )
+            async for chunk in stream_iter:
                 if chunk and chunk.delta:
                     yield chunk.delta
     except Exception as exc:

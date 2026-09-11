@@ -71,10 +71,15 @@ class SemanticCacheEntry(BaseModel):
     response_format: dict[str, Any] | str | None = None
 
 
+def _normalize_system_text(text: str) -> str:
+    """Apply deterministic Unicode NFC normalization and collapse horizontal whitespace for system instructions."""
+    nfc_text = unicodedata.normalize("NFC", text.strip())
+    return re.sub(r"[ \t]+", " ", nfc_text)
+
+
 def _normalize_text(text: str) -> str:
-    """Apply deterministic Unicode NFC normalization and whitespace collapsing."""
-    nfc_text = unicodedata.normalize("NFC", text.strip().lower())
-    return re.sub(r"\s+", " ", nfc_text)
+    """Apply deterministic Unicode NFC normalization without lowercasing or destroying whitespace."""
+    return unicodedata.normalize("NFC", text)
 
 
 def _compute_hash(
@@ -89,26 +94,48 @@ def _compute_hash(
     New code should use ``compute_cache_identity`` which includes all
     generation-relevant dimensions.
     """
-    normalized = _normalize_text(text)
+    nfc_text = unicodedata.normalize("NFC", text.strip().lower())
+    normalized = re.sub(r"\s+", " ", nfc_text)
     payload = f"{tenant_id}:{provider}:{model}:{version}:{normalized}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 
 def _canonical_messages_repr(
-    messages: list[dict[str, str]] | None,
+    messages: list[dict[str, Any]] | list[Any] | None,
 ) -> str:
     """Build a deterministic canonical string from the full message history.
 
-    Each message is represented as ``role:content`` with normalized content,
-    joined by a record separator to preserve ordering.
+    Includes role, content, name, tool_call_id, and tool_calls.
+    Preserves exact user casing and code indentation.
     """
     if not messages:
         return ""
     parts: list[str] = []
     for msg in messages:
-        role = msg.get("role", "").strip().lower()
-        content = _normalize_text(msg.get("content", ""))
-        parts.append(f"{role}:{content}")
+        if isinstance(msg, dict):
+            role = str(msg.get("role") or "").strip().lower()
+            raw_content = msg.get("content")
+            name = msg.get("name")
+            tool_call_id = msg.get("tool_call_id")
+            tool_calls = msg.get("tool_calls")
+        else:
+            role = str(getattr(msg, "role", "") or "").strip().lower()
+            raw_content = getattr(msg, "content", None)
+            name = getattr(msg, "name", None)
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            tool_calls = getattr(msg, "tool_calls", None)
+
+        content_str = (
+            _normalize_text(str(raw_content)) if raw_content is not None else ""
+        )
+        name_str = f":name={name}" if name else ""
+        tcid_str = f":tcid={tool_call_id}" if tool_call_id else ""
+        tc_str = (
+            f":tc={json.dumps(tool_calls, sort_keys=True, separators=(',', ':'))}"
+            if tool_calls
+            else ""
+        )
+        parts.append(f"{role}:{content_str}{name_str}{tcid_str}{tc_str}")
     return "\x1e".join(parts)  # ASCII record separator
 
 
@@ -158,7 +185,7 @@ def compute_cache_identity(
     provider: str = "generic",
     model: str = "default",
     system_instructions: str = "",
-    messages: list[dict[str, str]] | None = None,
+    messages: list[dict[str, Any]] | list[Any] | None = None,
     tools: list[dict[str, Any]] | None = None,
     response_format: dict[str, Any] | str | None = None,
     generation_params: dict[str, Any] | None = None,
@@ -172,14 +199,15 @@ def compute_cache_identity(
     system instructions, conversation history, tools, response format,
     generation parameters, or cache schema version produces a different identity.
 
-    All text inputs are NFC-normalized, lowercased, and whitespace-collapsed
-    to ensure deterministic hashing.
+    All text inputs are NFC-normalized. User content casing and indentation
+    are strictly preserved to ensure collision safety for code, identifiers,
+    and formatted text.
 
     Returns:
         64-character lowercase hex SHA-256 digest.
     """
     normalized_system = (
-        _normalize_text(system_instructions) if system_instructions else ""
+        _normalize_system_text(system_instructions) if system_instructions else ""
     )
     messages_repr = _canonical_messages_repr(messages)
     tools_repr = _canonical_tools_repr(tools)
