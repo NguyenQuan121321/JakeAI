@@ -815,6 +815,97 @@ async def test_agent_run_events_stream_terminal_non_blocking_regression(
     assert "data: " in response.text
 
 
+@pytest.mark.asyncio
+async def test_agent_runner_stream_events_live_and_timeout() -> None:
+    """Verify stream_run_events yields live events, handles TimeoutError, and terminates on terminal event."""
+    from app.agent.runtime.manager import get_agent_manager
+    from app.agent.runtime.models import AgentRunEvent
+    from app.agent.state.models import RunState, RunStatus
+
+    runner = get_agent_manager().runner
+    run = RunState(
+        run_id="run-live-test",
+        task_id="task-live-test",
+        tenant_id="tenant-live",
+        user_id="user-1",
+        status=RunStatus.RUNNING,
+    )
+
+    # 1. Test live event streaming until terminal event
+    events_yielded: list[str] = []
+
+    async def consume_stream() -> None:
+        async for sse in runner.stream_run_events(run.run_id, run=run):
+            events_yielded.append(sse)
+
+    consumer_task = asyncio.create_task(consume_stream())
+    await asyncio.sleep(0.01)
+
+    # Publish non-terminal event
+    await runner._broadcast_event(
+        run.run_id,
+        AgentRunEvent(
+            event_type="step_start",
+            task_id=run.task_id,
+            run_id=run.run_id,
+            data={"step": 1},
+        ),
+    )
+    # Publish terminal event
+    await runner._broadcast_event(
+        run.run_id,
+        AgentRunEvent(
+            event_type="completed",
+            task_id=run.task_id,
+            run_id=run.run_id,
+            data={"status": "completed"},
+        ),
+    )
+
+    await asyncio.wait_for(consumer_task, timeout=2.0)
+    assert len(events_yielded) == 2
+    assert "step_start" in events_yielded[0]
+    assert "completed" in events_yielded[1]
+
+    # 2. Test timeout handling when run is terminal
+    run_timeout = RunState(
+        run_id="run-timeout-test",
+        task_id="task-timeout-test",
+        tenant_id="tenant-live",
+        user_id="user-1",
+        status=RunStatus.RUNNING,
+    )
+
+    async def consume_timeout_stream() -> None:
+        async for _ in runner.stream_run_events(run_timeout.run_id, run=run_timeout):
+            pass
+
+    consumer_timeout_task = asyncio.create_task(consume_timeout_stream())
+    await asyncio.sleep(0.01)
+    # Mark run terminal while waiting in queue.get()
+    run_timeout.status = RunStatus.COMPLETED
+    # Give it ~1.1s to hit TimeoutError and break cleanly
+    await asyncio.wait_for(consumer_timeout_task, timeout=2.5)
+
+    # 3. Test None event stream closure
+    run_none = RunState(
+        run_id="run-none-test",
+        task_id="task-none-test",
+        tenant_id="tenant-live",
+        user_id="user-1",
+        status=RunStatus.RUNNING,
+    )
+
+    async def consume_none_stream() -> None:
+        async for _ in runner.stream_run_events(run_none.run_id, run=run_none):
+            pass
+
+    consumer_none_task = asyncio.create_task(consume_none_stream())
+    await asyncio.sleep(0.01)
+    await runner._broadcast_event(run_none.run_id, None)
+    await asyncio.wait_for(consumer_none_task, timeout=1.0)
+
+
 # ==============================================================================
 # 14. Perimeter, Security & Tenant Isolation Tests
 # ==============================================================================
