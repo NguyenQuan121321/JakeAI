@@ -9,6 +9,7 @@ Routes upstream provider invocations (Anthropic, OpenAI, Gemini, Groq, OpenRoute
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -25,6 +26,7 @@ from app.providers.base import (
 )
 from app.routing.failover import get_failover_manager
 from app.routing.router import RoutingPolicy, get_model_router
+from app.routing.workload_classifier import get_workload_classifier
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +67,41 @@ async def call_upstream_llm_detailed(
     else:
         compiled = compiled_prompt
 
-    # Route first: the ModelRouter (via the provider registry) is the single
-    # authoritative model-to-provider resolution and selects the adapter that
-    # will actually execute this request.
+    # Route first: classify workload and pass explicit criteria to ModelRouter
+    classifier = get_workload_classifier()
+    classification = classifier.classify(
+        prompt=prompt,
+        messages=[m.model_dump() if hasattr(m, "model_dump") else m for m in messages]
+        if messages
+        else None,
+        tools=tools,
+        response_format=response_format,
+    )
+
     router = get_model_router()
     routing_policy = RoutingPolicy(
         requested_model=model,
         tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        required_capabilities=classification.required_capabilities,
+        context_tokens=classification.context_requirement,
+        quality_requirement=classification.quality_requirement,
         allow_fallback=True,
+        cost_aware_routing=getattr(settings, "COST_AWARE_ROUTING_ENABLED", False),
     )
     decision = router.route(routing_policy)
+
+    from app.telemetry.metrics import metrics
+
+    metrics.record_optimization_decision(
+        tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        selected_provider=decision.selected_provider,
+        selected_model=decision.selected_model,
+        estimated_input_cost=decision.estimated_input_cost,
+        cost_savings_usd_per_million=decision.cost_savings_usd_per_million,
+        reason="; ".join(decision.decision_reasons[:2]),
+    )
 
     # Determine explicit key for the authoritatively resolved provider from
     # tenant BYOK first, then platform fallback key (supports mocked settings
@@ -87,15 +114,20 @@ async def call_upstream_llm_detailed(
         "openrouter": "OPENROUTER_API_KEY",
         "gemini": "GEMINI_API_KEY",
     }
-    settings_key = provider_settings_keys.get(decision.selected_provider)
-    explicit_key: str | None = None
-    if settings_key is not None:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, decision.selected_provider
-        ) or getattr(settings, settings_key, None)
+
+    async def resolve_provider_credentials(t_id: str, prov: str) -> str | None:
+        key = await byok_mgr.get_decrypted_key(t_id, prov)
+        if key:
+            return key
+        s_key = provider_settings_keys.get(prov)
+        return getattr(settings, s_key, None) if s_key else None
+
+    explicit_key = await resolve_provider_credentials(
+        tenant_id, decision.selected_provider
+    )
 
     provider_req = ProviderRequest(
-        model=model,
+        model=decision.selected_model,
         prompt=prompt,
         messages=messages,
         system_instruction=default_system,
@@ -126,11 +158,20 @@ async def call_upstream_llm_detailed(
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await failover_mgr.execute_with_failover(
-                request=provider_req,
-                decision=decision,
-                client=client,
-            )
+            sig = inspect.signature(failover_mgr.execute_with_failover)
+            if "credential_resolver" in sig.parameters:
+                resp = await failover_mgr.execute_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                    credential_resolver=resolve_provider_credentials,
+                )
+            else:
+                resp = await failover_mgr.execute_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                )
 
             metrics.record_provider_request(
                 provider=resp.provider,
@@ -204,13 +245,40 @@ async def call_upstream_llm_stream(
         or "You are JakeAI, an enterprise financial and operational AI companion."
     )
 
+    classifier = get_workload_classifier()
+    classification = classifier.classify(
+        prompt=prompt,
+        messages=[m.model_dump() if hasattr(m, "model_dump") else m for m in messages]
+        if messages
+        else None,
+        tools=None,
+        response_format=None,
+    )
+
     router = get_model_router()
     routing_policy = RoutingPolicy(
         requested_model=model,
         tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        required_capabilities=classification.required_capabilities,
+        context_tokens=classification.context_requirement,
+        quality_requirement=classification.quality_requirement,
         allow_fallback=True,
+        cost_aware_routing=getattr(settings, "COST_AWARE_ROUTING_ENABLED", False),
     )
     decision = router.route(routing_policy)
+
+    from app.telemetry.metrics import metrics
+
+    metrics.record_optimization_decision(
+        tenant_id=tenant_id,
+        workload_class=classification.workload_class,
+        selected_provider=decision.selected_provider,
+        selected_model=decision.selected_model,
+        estimated_input_cost=decision.estimated_input_cost,
+        cost_savings_usd_per_million=decision.cost_savings_usd_per_million,
+        reason="; ".join(decision.decision_reasons[:2]),
+    )
 
     provider_settings_keys = {
         "anthropic": "ANTHROPIC_API_KEY",
@@ -220,15 +288,20 @@ async def call_upstream_llm_stream(
         "openrouter": "OPENROUTER_API_KEY",
         "gemini": "GEMINI_API_KEY",
     }
-    settings_key = provider_settings_keys.get(decision.selected_provider)
-    explicit_key: str | None = None
-    if settings_key is not None:
-        explicit_key = await byok_mgr.get_decrypted_key(
-            tenant_id, decision.selected_provider
-        ) or getattr(settings, settings_key, None)
+
+    async def resolve_provider_credentials(t_id: str, prov: str) -> str | None:
+        key = await byok_mgr.get_decrypted_key(t_id, prov)
+        if key:
+            return key
+        s_key = provider_settings_keys.get(prov)
+        return getattr(settings, s_key, None) if s_key else None
+
+    explicit_key = await resolve_provider_credentials(
+        tenant_id, decision.selected_provider
+    )
 
     provider_req = ProviderRequest(
-        model=model,
+        model=decision.selected_model,
         prompt=prompt,
         messages=messages,
         system_instruction=default_system,
@@ -248,11 +321,21 @@ async def call_upstream_llm_stream(
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            async for chunk in failover_mgr.stream_with_failover(
-                request=provider_req,
-                decision=decision,
-                client=client,
-            ):
+            sig = inspect.signature(failover_mgr.stream_with_failover)
+            if "credential_resolver" in sig.parameters:
+                stream_iter = failover_mgr.stream_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                    credential_resolver=resolve_provider_credentials,
+                )
+            else:
+                stream_iter = failover_mgr.stream_with_failover(
+                    request=provider_req,
+                    decision=decision,
+                    client=client,
+                )
+            async for chunk in stream_iter:
                 if chunk and chunk.delta:
                     yield chunk.delta
     except Exception as exc:

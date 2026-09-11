@@ -23,13 +23,12 @@ from pydantic import BaseModel, Field
 
 from app.core.byok import get_byok_manager
 from app.core.circuit_breaker import CircuitBreaker
-from app.core.config import get_settings
 from app.core.llm_provider import (
     UpstreamLLMResponse,
     call_upstream_llm,
     call_upstream_llm_detailed,
 )
-from app.finops.budget import get_budget_manager
+from app.finops.budget import FinOpsBudgetManager, get_budget_manager
 from app.finops.service import get_finops_service
 from app.optimizer.context_optimizer import get_context_optimizer
 from app.optimizer.semantic_cache import get_semantic_cache_manager
@@ -93,14 +92,33 @@ class GatewayChatResponse(BaseModel):
 
 
 class QuotaManager:
-    """Tracks and enforces tenant token budgets with Redis atomic counters."""
+    """Compatibility facade delegating all quota and budget authority to FinOpsBudgetManager.
 
-    def __init__(self) -> None:
+    Established under WORK-03 as part of unified quota authority governance.
+    """
+
+    def __init__(self, budget_manager: FinOpsBudgetManager | None = None) -> None:
+        self._budget_manager = budget_manager
         self._memory_usage: dict[str, int] = {}
-        self._memory_limits: dict[str, int] = {}
-        self.redis_client: Any | None = None
         self._redis_available = True
         self._redis_retry_after: float = 0.0
+
+    def _get_manager(self) -> FinOpsBudgetManager:
+        if self._budget_manager is not None:
+            return self._budget_manager
+        return get_budget_manager()
+
+    @property
+    def redis_client(self) -> Any | None:
+        return self._get_manager().redis_client
+
+    @redis_client.setter
+    def redis_client(self, value: Any | None) -> None:
+        self._get_manager().redis_client = value
+
+    @staticmethod
+    def _get_period_key() -> str:
+        return time.strftime("%Y-%m")
 
     async def _get_redis(self) -> Any | None:
         """Lazily initialize Redis connection with fast ping check and cooldown."""
@@ -112,63 +130,37 @@ class QuotaManager:
         try:
             from redis import asyncio as aioredis
 
+            from app.core.config import get_settings
+
             settings = get_settings()
             client = aioredis.from_url(
                 settings.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
-                socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+                decode_responses=False,
+                socket_timeout=1.0,
+                socket_connect_timeout=1.0,
             )
             await client.ping()
             self.redis_client = client
             self._redis_available = True
-            self._redis_retry_after = 0.0
-            return self.redis_client
-        except Exception:
-            settings = get_settings()
+            return client
+        except Exception as exc:
+            logger.debug("QuotaManager Redis unavailable (%s)", exc)
             self._redis_available = False
-            self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
-            self.redis_client = None
+            self._redis_retry_after = now + 30.0
             return None
-
-    def _get_period_key(self) -> str:
-        return time.strftime("%Y-%m")
 
     async def get_quota_limit(self, tenant_id: str) -> int:
         """Retrieve quota limit for a tenant."""
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                val = await redis.get(f"gateway:limit:{tenant_id}")
-                if val:
-                    return int(val)
-            except Exception as exc:
-                logger.debug("Redis read limit failed (%s)", exc)
-        return self._memory_limits.get(tenant_id, DEFAULT_MONTHLY_QUOTA)
+        return await self._get_manager().get_token_quota(tenant_id)
 
     async def set_quota_limit(self, tenant_id: str, new_limit: int) -> int:
         """Set or update quota limit for a tenant."""
-        redis = await self._get_redis()
-        if redis is not None:
-            with contextlib.suppress(Exception):
-                await redis.set(f"gateway:limit:{tenant_id}", str(new_limit))
-        self._memory_limits[tenant_id] = new_limit
-        with contextlib.suppress(Exception):
-            await get_budget_manager().set_budget(tenant_id, token_quota=new_limit)
+        await self._get_manager().set_budget(tenant_id, token_quota=new_limit)
         return new_limit
 
     async def get_tokens_used(self, tenant_id: str) -> int:
         """Get current token usage for the active period."""
-        period = self._get_period_key()
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                val = await redis.get(f"gateway:usage:{tenant_id}:{period}")
-                if val:
-                    return int(val)
-            except Exception as exc:
-                logger.debug("Redis read usage failed (%s)", exc)
-        return self._memory_usage.get(f"{tenant_id}:{period}", 0)
+        return await self._get_manager().get_tokens_used(tenant_id)
 
     async def check_quota(
         self, tenant_id: str, estimated_tokens: int = 100
@@ -178,66 +170,44 @@ class QuotaManager:
         Returns:
             (is_allowed, warning_or_error_message)
         """
-        limit = await self.get_quota_limit(tenant_id)
-        used = await self.get_tokens_used(tenant_id)
-
-        if used + estimated_tokens > limit:
-            return (
-                False,
-                f"Monthly token quota exceeded ({used}/{limit}). Request suspended.",
-            )
-
-        if (used / limit) >= 0.8:
-            return (
-                True,
-                f"Soft warning: {round(used / limit * 100, 1)}% of token budget consumed.",
-            )
-
-        return True, None
+        return await self._get_manager().check_budget(
+            tenant_id, estimated_tokens=estimated_tokens
+        )
 
     async def record_usage(
         self, tenant_id: str, prompt_tokens: int, completion_tokens: int
     ) -> int:
-        """Increment token consumption atomically in Redis or memory."""
-        period = self._get_period_key()
+        """Increment token consumption atomically in FinOps ledger."""
         total = prompt_tokens + completion_tokens
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                key = f"gateway:usage:{tenant_id}:{period}"
-                new_val = await redis.incrby(key, total)
-                with contextlib.suppress(Exception):
-                    await get_budget_manager().settle_request(tenant_id, total, 0.0)
-                return int(new_val)
-            except Exception as exc:
-                logger.debug("Redis incrby failed (%s)", exc)
-
-        mem_key = f"{tenant_id}:{period}"
-        self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + total
-        with contextlib.suppress(Exception):
-            await get_budget_manager().settle_request(tenant_id, total, 0.0)
-        return self._memory_usage[mem_key]
+        new_tokens, _ = await self._get_manager().settle_request(tenant_id, total, 0.0)
+        return new_tokens
 
     async def record_tokens_saved(self, tenant_id: str, tokens_saved: int) -> int:
-        """Increment tokens saved atomically in Redis or memory."""
-        period = self._get_period_key()
+        """Increment tokens saved atomically in FinOps ledger and Redis/memory cache."""
         redis = await self._get_redis()
+        period = self._get_period_key()
         if redis is not None:
             try:
                 key = f"gateway:tokens_saved:{tenant_id}:{period}"
                 new_val = await redis.incrby(key, tokens_saved)
+                with contextlib.suppress(Exception):
+                    await self._get_manager().record_tokens_saved(
+                        tenant_id, tokens_saved
+                    )
                 return int(new_val)
             except Exception as exc:
                 logger.debug("Redis incrby tokens_saved failed (%s)", exc)
 
         mem_key = f"tokens_saved:{tenant_id}:{period}"
         self._memory_usage[mem_key] = self._memory_usage.get(mem_key, 0) + tokens_saved
+        with contextlib.suppress(Exception):
+            await self._get_manager().record_tokens_saved(tenant_id, tokens_saved)
         return self._memory_usage[mem_key]
 
     async def get_tokens_saved(self, tenant_id: str) -> int:
-        """Get current tokens saved for the active period from Redis or memory."""
-        period = self._get_period_key()
+        """Get current tokens saved for the active period from Redis, memory, or FinOps ledger."""
         redis = await self._get_redis()
+        period = self._get_period_key()
         if redis is not None:
             try:
                 val = await redis.get(f"gateway:tokens_saved:{tenant_id}:{period}")
@@ -246,29 +216,21 @@ class QuotaManager:
             except Exception as exc:
                 logger.debug("Redis read tokens_saved failed (%s)", exc)
         mem_key = f"tokens_saved:{tenant_id}:{period}"
-        return self._memory_usage.get(mem_key, 0)
+        if mem_key in self._memory_usage:
+            return self._memory_usage[mem_key]
+        return await self._get_manager().get_tokens_saved(tenant_id)
 
     async def get_status(self, tenant_id: str) -> QuotaStatus:
         """Return full quota status object for a tenant."""
-        limit = await self.get_quota_limit(tenant_id)
-        used = await self.get_tokens_used(tenant_id)
-        pct = round((used / limit * 100), 2) if limit > 0 else 100.0
-        remaining = max(0, limit - used)
-        suspended = used >= limit
-        warning = (
-            "Quota exceeded. Services suspended."
-            if suspended
-            else ("Approaching quota limit (>80%)." if pct >= 80 else None)
-        )
-
+        status = await self._get_manager().get_budget_status(tenant_id)
         return QuotaStatus(
             tenant_id=tenant_id,
-            quota_limit=limit,
-            tokens_used=used,
-            tokens_remaining=remaining,
-            percentage_used=pct,
-            is_suspended=suspended,
-            warning=warning,
+            quota_limit=status.token_quota,
+            tokens_used=status.tokens_used,
+            tokens_remaining=status.tokens_remaining,
+            percentage_used=status.percentage_tokens_used,
+            is_suspended=status.is_suspended,
+            warning=status.warning,
         )
 
 

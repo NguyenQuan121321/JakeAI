@@ -19,6 +19,7 @@ import re
 import threading
 import time
 from collections import defaultdict
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +52,8 @@ class MetricsSnapshot(BaseModel):
     failover_events_total: dict[str, int] = Field(default_factory=dict)
     tokens_consumed_total: dict[str, int] = Field(default_factory=dict)
     estimated_cost_usd_total: float = Field(default=0.0)
+    optimization_decisions_total: int = Field(default=0)
+    cost_savings_usd_total: float = Field(default=0.0)
 
 
 class MetricsCollector:
@@ -81,6 +84,10 @@ class MetricsCollector:
         # Token & FinOps metrics
         self._tokens_consumed: dict[str, int] = defaultdict(int)
         self._estimated_cost_usd: float = 0.0
+
+        # Optimization decisions (COST-13)
+        self._optimization_decisions: list[dict[str, Any]] = []
+        self._cost_savings_usd_total: float = 0.0
 
     def record_http_request(
         self, method: str, path: str, status_code: int, duration_ms: float
@@ -166,6 +173,41 @@ class MetricsCollector:
                 )
             ] += 1
 
+    def record_optimization_decision(
+        self,
+        tenant_id: str,
+        workload_class: str,
+        selected_provider: str,
+        selected_model: str,
+        estimated_input_cost: float,
+        cost_savings_usd_per_million: float,
+        reason: str = "",
+    ) -> None:
+        """Record an intelligent model routing optimization decision (COST-13)."""
+        with self._lock:
+            record = {
+                "timestamp": time.time(),
+                "tenant_id": tenant_id,
+                "workload_class": workload_class,
+                "selected_provider": selected_provider,
+                "selected_model": selected_model,
+                "estimated_input_cost": estimated_input_cost,
+                "cost_savings_usd_per_million": cost_savings_usd_per_million,
+                "reason": reason,
+            }
+            self._optimization_decisions.append(record)
+            if cost_savings_usd_per_million > 0:
+                self._cost_savings_usd_total += (
+                    cost_savings_usd_per_million / 1_000_000.0
+                )
+            if len(self._optimization_decisions) > 1000:
+                del self._optimization_decisions[:500]
+
+    def get_optimization_decisions(self) -> list[dict[str, Any]]:
+        """Return snapshot of recorded optimization decisions."""
+        with self._lock:
+            return list(self._optimization_decisions)
+
     def get_snapshot(self) -> MetricsSnapshot:
         """Generate structured snapshot of all captured metrics."""
         now = time.time()
@@ -222,6 +264,8 @@ class MetricsCollector:
                 failover_events_total=failovers,
                 tokens_consumed_total=dict(self._tokens_consumed),
                 estimated_cost_usd_total=round(self._estimated_cost_usd, 6),
+                optimization_decisions_total=len(self._optimization_decisions),
+                cost_savings_usd_total=round(self._cost_savings_usd_total, 6),
             )
 
     def reset(self) -> None:
@@ -240,6 +284,8 @@ class MetricsCollector:
             self._failover_events.clear()
             self._tokens_consumed.clear()
             self._estimated_cost_usd = 0.0
+            self._optimization_decisions.clear()
+            self._cost_savings_usd_total = 0.0
 
 
 _global_metrics_collector: MetricsCollector | None = None

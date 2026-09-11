@@ -25,7 +25,7 @@ from app.providers.errors import (
 from app.providers.registry import get_provider_registry
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from typing import Any
 
     import httpx
@@ -70,11 +70,44 @@ class FailoverManager:
         jitter = secrets.SystemRandom().uniform(0.0, 0.1 * delay)  # nosec B311
         return min(delay + jitter, self.config.max_delay_seconds)
 
+    async def _default_resolve_credentials(
+        self, tenant_id: str, provider_name: str
+    ) -> str | None:
+        """Resolve credentials specifically for candidate provider from BYOK or platform settings."""
+        try:
+            from app.core.byok import get_byok_manager
+            from app.core.config import get_settings
+
+            byok_mgr = get_byok_manager()
+            key = await byok_mgr.get_decrypted_key(tenant_id, provider_name)
+            if key:
+                return key
+            settings = get_settings()
+            provider_settings_keys = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "groq": "GROQ_API_KEY",
+                "deepseek": "DEEPSEEK_API_KEY",
+                "openrouter": "OPENROUTER_API_KEY",
+                "gemini": "GEMINI_API_KEY",
+            }
+            s_key = provider_settings_keys.get(provider_name)
+            if s_key:
+                return getattr(settings, s_key, None)
+        except Exception as exc:
+            logger.debug(
+                "Default credential resolution failed for %s: %s", provider_name, exc
+            )
+        return None
+
     async def execute_with_failover(
         self,
         request: ProviderRequest,
         decision: RoutingDecision,
         client: httpx.AsyncClient | None = None,
+        credential_resolver: (
+            Callable[[str, str], Awaitable[str | None]] | None
+        ) = None,
     ) -> ProviderResponse:
         """Execute inference against selected provider, falling back on failure."""
         providers_to_try: list[tuple[str, str]] = [
@@ -84,10 +117,22 @@ class FailoverManager:
 
         last_error: ProviderError | None = None
         total_attempts = 0
+        attempted_candidates: set[tuple[str, str]] = set()
+        has_executed_provider = False
 
         from app.telemetry.metrics import metrics
 
         for idx, (provider_name, model_name) in enumerate(providers_to_try):
+            candidate_key = (provider_name, model_name)
+            if candidate_key in attempted_candidates:
+                logger.debug(
+                    "Skipping duplicate fallback candidate (%s, %s)",
+                    provider_name,
+                    model_name,
+                )
+                continue
+            attempted_candidates.add(candidate_key)
+
             if idx > 0 and last_error is not None:
                 metrics.record_failover(
                     from_provider=providers_to_try[idx - 1][0],
@@ -109,7 +154,24 @@ class FailoverManager:
                 )
                 continue
 
-            current_request = request.model_copy(update={"model": model_name})
+            # Resolve credentials specifically for this provider candidate.
+            # Never reuse or inherit the previous provider's credentials once a provider has executed.
+            target_api_key: str | None = None
+            if credential_resolver is not None:
+                target_api_key = await credential_resolver(
+                    request.tenant_id, provider_name
+                )
+            elif not has_executed_provider:
+                target_api_key = request.api_key
+            else:
+                target_api_key = await self._default_resolve_credentials(
+                    request.tenant_id, provider_name
+                )
+
+            current_request = request.model_copy(
+                update={"model": model_name, "api_key": target_api_key}
+            )
+            has_executed_provider = True
 
             provider_retries = 0
             while provider_retries <= self.config.max_retries_per_provider:
@@ -185,12 +247,24 @@ class FailoverManager:
         request: ProviderRequest,
         decision: RoutingDecision,
         client: httpx.AsyncClient | None = None,
+        credential_resolver: (
+            Callable[[str, str], Awaitable[str | None]] | None
+        ) = None,
     ) -> AsyncIterator[Any]:
         """Stream chunks from selected provider adapter."""
         adapter = self.registry.get(decision.selected_provider)
         if adapter is not None and hasattr(adapter, "stream"):
+            target_api_key = request.api_key
+            if credential_resolver is not None:
+                target_api_key = await credential_resolver(
+                    request.tenant_id, decision.selected_provider
+                )
+            elif not target_api_key:
+                target_api_key = await self._default_resolve_credentials(
+                    request.tenant_id, decision.selected_provider
+                )
             current_request = request.model_copy(
-                update={"model": decision.selected_model}
+                update={"model": decision.selected_model, "api_key": target_api_key}
             )
             async for chunk in adapter.stream(current_request, client=client):
                 yield chunk

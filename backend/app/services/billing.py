@@ -15,6 +15,7 @@ from typing import Any, TypedDict
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.finops.budget import get_budget_manager
 from app.finops.service import get_finops_service
 from app.services.ai_gateway import get_quota_manager
 
@@ -144,6 +145,9 @@ class PayOSBillingService:
             target_tier = "free"
 
         config = TIER_CONFIGS[target_tier]
+        await get_budget_manager().set_budget(
+            tenant_id, token_quota=config["monthly_quota"]
+        )
         quota_mgr = get_quota_manager()
         await quota_mgr.set_quota_limit(tenant_id, config["monthly_quota"])
 

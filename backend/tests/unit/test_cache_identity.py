@@ -248,6 +248,96 @@ class TestComputeCacheIdentity:
         )
         assert id1 != id2
 
+    def test_user_content_casing_preserved(self) -> None:
+        """COST-02: Do NOT lowercase arbitrary user content. Case differences must not collide."""
+        kw1 = self._base_kwargs()
+        kw1["messages"] = [
+            {"role": "user", "content": "SELECT * FROM Users WHERE ID = 1;"}
+        ]
+        id1 = compute_cache_identity(**kw1)
+
+        kw2 = self._base_kwargs()
+        kw2["messages"] = [
+            {"role": "user", "content": "select * from users where id = 1;"}
+        ]
+        id2 = compute_cache_identity(**kw2)
+
+        assert id1 != id2
+
+    def test_code_indentation_preserved(self) -> None:
+        """COST-02: Do NOT collapse semantically meaningful whitespace. Code indentation must be preserved."""
+        kw1 = self._base_kwargs()
+        kw1["messages"] = [
+            {"role": "user", "content": "def calculate():\n    return 42"}
+        ]
+        id1 = compute_cache_identity(**kw1)
+
+        kw2 = self._base_kwargs()
+        kw2["messages"] = [
+            {"role": "user", "content": "def calculate():\n        return 42"}
+        ]
+        id2 = compute_cache_identity(**kw2)
+
+        assert id1 != id2
+
+    def test_tool_call_fields_in_messages(self) -> None:
+        """COST-02: Message serialization MUST include name, tool_call_id, and tool_calls."""
+        base_kw = self._base_kwargs()
+        # Different name
+        kw1 = dict(base_kw)
+        kw1["messages"] = [{"role": "tool", "content": "ok", "name": "db_search"}]
+        kw2 = dict(base_kw)
+        kw2["messages"] = [{"role": "tool", "content": "ok", "name": "web_search"}]
+        assert compute_cache_identity(**kw1) != compute_cache_identity(**kw2)
+
+        # Different tool_call_id
+        kw3 = dict(base_kw)
+        kw3["messages"] = [
+            {"role": "tool", "content": "ok", "tool_call_id": "call_123"}
+        ]
+        kw4 = dict(base_kw)
+        kw4["messages"] = [
+            {"role": "tool", "content": "ok", "tool_call_id": "call_456"}
+        ]
+        assert compute_cache_identity(**kw3) != compute_cache_identity(**kw4)
+
+        # Different tool_calls
+        kw5 = dict(base_kw)
+        kw5["messages"] = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "function": {"name": "f1"}}],
+            }
+        ]
+        kw6 = dict(base_kw)
+        kw6["messages"] = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_2", "function": {"name": "f2"}}],
+            }
+        ]
+        assert compute_cache_identity(**kw5) != compute_cache_identity(**kw6)
+
+    def test_identical_code_exact_match(self) -> None:
+        """COST-02: Identical requests with formatted code produce identical identity."""
+        kw1 = self._base_kwargs()
+        kw1["messages"] = [
+            {
+                "role": "user",
+                "content": "def solve(x):\n    if x > 0:\n        return x * 2\n    return 0",
+            }
+        ]
+        kw2 = self._base_kwargs()
+        kw2["messages"] = [
+            {
+                "role": "user",
+                "content": "def solve(x):\n    if x > 0:\n        return x * 2\n    return 0",
+            }
+        ]
+        assert compute_cache_identity(**kw1) == compute_cache_identity(**kw2)
+
 
 # ---------------------------------------------------------------------------
 # 2. SemanticCacheManager integration tests — end-to-end get/set with identity

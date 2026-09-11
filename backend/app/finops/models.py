@@ -81,7 +81,7 @@ class SavingsAttribution(BaseModel):
             round(
                 self.cache_hit_usd
                 + self.physical_reduction_usd
-                + max(0.0, self.provider_cache_usd)
+                + self.provider_cache_usd
                 + self.model_routing_usd
                 + self.avoided_retries_usd,
                 6,

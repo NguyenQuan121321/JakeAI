@@ -98,7 +98,7 @@ def compute_savings_attribution(
 
     # 5. Total Non-Overlapping Sum
     total_savings = round(
-        routing_saved + physical_saved + max(0.0, prov_cache_saved) + retries_saved,
+        max(0.0, routing_saved + physical_saved + prov_cache_saved + retries_saved),
         6,
     )
 

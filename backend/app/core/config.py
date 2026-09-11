@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     # Tier 5: Provider Prompt Caching Feature Flag
     PROVIDER_PROMPT_CACHE_ENABLED: bool = True
 
+    # COST-12: Local Model Provider & Cost Routing Settings
+    LOCAL_MODEL_ENDPOINT: str = "http://localhost:11434/v1"
+    LOCAL_MODEL_NAME: str = "local-model"
+    LOCAL_MODEL_CONTEXT_LIMIT: int = 32_768
+    LOCAL_MODEL_TIMEOUT_SECONDS: float = 30.0
+    LOCAL_MODEL_CONCURRENCY_LIMIT: int = 4
+    LOCAL_MODEL_INPUT_PRICING: float = 0.10
+    LOCAL_MODEL_OUTPUT_PRICING: float = 0.20
+    LOCAL_MODEL_ENABLED: bool = True
+    COST_AWARE_ROUTING_ENABLED: bool = True
+
     # Commercial SaaS & Security Settings
     BYOK_MASTER_KEY: str = "jakeai-enterprise-master-encryption-key-32b"
     PAYOS_API_KEY: str | None = None

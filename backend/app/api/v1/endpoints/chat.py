@@ -84,6 +84,7 @@ async def generate_chat_stream(
     context: TenantContext,
     conversation_id: str,
     request: Request | None = None,
+    parameters: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream real-time LangGraph multi-agent events via SSE with guardrails & caching."""
     start_time = time.time()
@@ -105,9 +106,84 @@ async def generate_chat_stream(
         )
         return
 
-    # 2. PII Redaction
+    # 2. PII Redaction & Model-Visible Request Envelope Accounting
     sanitized_prompt, _ = GuardrailsEngine.redact_pii(prompt)
-    raw_prompt_tokens = estimate_tokens(sanitized_prompt)
+    params = parameters or {}
+    model_name = params.get("model", "default")
+    system_instruction = (
+        params.get("system_instruction")
+        or params.get("system_prompt")
+        or "You are JakeAI, a universal AI engineering and financial assistant."
+    )
+    history_messages: list[Any] = params.get("messages", [])
+    tool_schemas: list[dict[str, Any]] | None = params.get("tools")
+    if not tool_schemas:
+        try:
+            from app.agent.tools.registry import get_tool_registry
+
+            discovered = get_tool_registry().discover(
+                context.roles, context.permissions
+            )
+            if discovered:
+                tool_schemas = [
+                    t.to_dict()
+                    if hasattr(t, "to_dict")
+                    else {"name": t.name, "description": t.description}
+                    for t in discovered
+                ]
+        except Exception:
+            tool_schemas = None
+
+    rag_context = params.get("rag_context")
+    dynamic_context = params.get("dynamic_context")
+
+    raw_prompt_tokens = TokenAccounting.calculate_envelope_tokens(
+        messages=history_messages,
+        tools=tool_schemas,
+        system_instruction=system_instruction,
+        user_query=sanitized_prompt,
+        dynamic_context=dynamic_context,
+        rag_context=rag_context,
+        model=model_name,
+    )
+
+    # 2.1 Dynamic Context & RAG Optimization on Live Path (COST-06)
+    from app.optimizer.context_optimizer import WorkloadType, get_context_optimizer
+
+    ctx_optimizer = get_context_optimizer()
+    optimized_dynamic_context = dynamic_context
+    optimized_rag_context = rag_context
+
+    if dynamic_context:
+        opt_dyn = ctx_optimizer.optimize_dynamic_context(
+            dynamic_context=str(dynamic_context),
+            user_query=sanitized_prompt,
+        )
+        optimized_dynamic_context = (
+            opt_dyn.content if not opt_dyn.fallback_used else dynamic_context
+        )
+        params["dynamic_context"] = optimized_dynamic_context
+
+    if rag_context:
+        opt_rag = ctx_optimizer.optimize_dynamic_context(
+            dynamic_context=str(rag_context),
+            user_query=sanitized_prompt,
+            workload_type=WorkloadType.RAG,
+        )
+        optimized_rag_context = (
+            opt_rag.content if not opt_rag.fallback_used else rag_context
+        )
+        params["rag_context"] = optimized_rag_context
+
+    optimized_prompt_tokens = TokenAccounting.calculate_envelope_tokens(
+        messages=history_messages,
+        tools=tool_schemas,
+        system_instruction=system_instruction,
+        user_query=sanitized_prompt,
+        dynamic_context=optimized_dynamic_context,
+        rag_context=optimized_rag_context,
+        model=model_name,
+    )
     final_response: str = ""
     accounting_recorded = False
 
@@ -133,7 +209,17 @@ async def generate_chat_stream(
         cached_entry = (
             None
             if is_edge_forwarded
-            else await _semantic_cache.get(sanitized_prompt, context.tenant_id)
+            else await _semantic_cache.get(
+                prompt=sanitized_prompt,
+                tenant_id=context.tenant_id,
+                provider=params.get("provider", "openai"),
+                model=model_name,
+                system_instructions=system_instruction,
+                messages=history_messages,
+                tools=tool_schemas,
+                response_format=params.get("response_format"),
+                generation_params=params.get("generation_params"),
+            )
         )
         if cached_entry:
             yield _format_sse_event(
@@ -168,9 +254,9 @@ async def generate_chat_stream(
             record = TokenAccounting.record_transaction(
                 request_id=f"stream-{conversation_id}",
                 tenant_id=context.tenant_id,
-                model="stream",
-                raw_prompt_tokens=raw_prompt_tokens,
-                pruned_prompt_tokens=0,
+                model=model_name,
+                raw_input_tokens=raw_prompt_tokens,
+                optimized_input_tokens=0,
                 completion_tokens=est_comp,
                 cache_hit=True,
                 cache_type=cached_entry.cache_type or "exact",
@@ -205,11 +291,15 @@ async def generate_chat_stream(
         citations: list[dict[str, Any]] = []
         final_mascot_state: str = "idle"
         has_tool_execution = False
+        provider_telemetry: Any | None = None
 
         # 5. Real-time LangGraph Event Stream
         async for event in stream_multi_agent_workflow(
             sanitized_prompt, context, conversation_id
         ):
+            if event.get("provider_telemetry"):
+                provider_telemetry = event["provider_telemetry"]
+
             # Check for Bounded Stream Timeout
             if (time.time() - start_time) > settings.STREAM_TIMEOUT_SECONDS:
                 yield _format_sse_event(
@@ -238,12 +328,13 @@ async def generate_chat_stream(
                     TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
-                        model="stream",
-                        raw_prompt_tokens=raw_prompt_tokens,
-                        pruned_prompt_tokens=raw_prompt_tokens,
+                        model=model_name,
+                        raw_input_tokens=raw_prompt_tokens,
+                        optimized_input_tokens=optimized_prompt_tokens,
                         completion_tokens=comp_tokens,
                         cache_hit=False,
                         cache_type="none",
+                        provider_telemetry=provider_telemetry,
                     )
                     accounting_recorded = True
                 return
@@ -295,6 +386,13 @@ async def generate_chat_stream(
                     response=final_response,
                     citations=citations,
                     mascot_state=final_mascot_state,
+                    provider=params.get("provider", "openai"),
+                    model=model_name,
+                    system_instructions=system_instruction,
+                    messages=history_messages,
+                    tools=tool_schemas,
+                    response_format=params.get("response_format"),
+                    generation_params=params.get("generation_params"),
                 )
 
             # Stream Real Token Deltas (providing delta, token, and content aliases without artificial sleep)
@@ -307,12 +405,13 @@ async def generate_chat_stream(
                     TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
-                        model="stream",
-                        raw_prompt_tokens=raw_prompt_tokens,
-                        pruned_prompt_tokens=raw_prompt_tokens,
+                        model=model_name,
+                        raw_input_tokens=raw_prompt_tokens,
+                        optimized_input_tokens=optimized_prompt_tokens,
                         completion_tokens=comp_tokens,
                         cache_hit=False,
                         cache_type="none",
+                        provider_telemetry=provider_telemetry,
                     )
                     accounting_recorded = True
                 return
@@ -332,12 +431,13 @@ async def generate_chat_stream(
         record = TokenAccounting.record_transaction(
             request_id=f"stream-{conversation_id}",
             tenant_id=context.tenant_id,
-            model="stream",
-            raw_prompt_tokens=raw_prompt_tokens,
-            pruned_prompt_tokens=raw_prompt_tokens,
+            model=model_name,
+            raw_input_tokens=raw_prompt_tokens,
+            optimized_input_tokens=optimized_prompt_tokens,
             completion_tokens=comp_tokens,
             cache_hit=False,
             cache_type="none",
+            provider_telemetry=provider_telemetry,
         )
         accounting_recorded = True
         yield _format_sse_event(
@@ -375,12 +475,13 @@ async def generate_chat_stream(
             TokenAccounting.record_transaction(
                 request_id=f"stream-{conversation_id}",
                 tenant_id=context.tenant_id,
-                model="stream",
-                raw_prompt_tokens=raw_prompt_tokens,
-                pruned_prompt_tokens=raw_prompt_tokens,
+                model=model_name,
+                raw_input_tokens=raw_prompt_tokens,
+                optimized_input_tokens=optimized_prompt_tokens,
                 completion_tokens=comp_tokens,
                 cache_hit=False,
                 cache_type="none",
+                provider_telemetry=provider_telemetry,
             )
             accounting_recorded = True
         return
@@ -428,6 +529,7 @@ async def chat_stream_endpoint(
             context=context,
             conversation_id=conv_id,
             request=request,
+            parameters=payload.parameters,
         ),
         media_type="text/event-stream",
         headers={

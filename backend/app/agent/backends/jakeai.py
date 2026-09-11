@@ -71,9 +71,24 @@ class JakeAIBackend(AgentBackendInterface):
             "\n".join(conversation_history) if conversation_history else "Hello"
         )
 
+        # Apply context optimization with safe fallback (COST-06)
+        effective_prompt = combined_prompt
+        try:
+            from app.optimizer.context_optimizer import get_context_optimizer
+
+            optimizer = get_context_optimizer()
+            opt_res = optimizer.optimize_dynamic_context(
+                dynamic_context=combined_prompt,
+                user_query=conversation_history[-1] if conversation_history else "",
+            )
+            if not opt_res.fallback_used and opt_res.content:
+                effective_prompt = opt_res.content
+        except Exception as exc:
+            logger.debug("Prompt context optimization skipped: %s", exc)
+
         # Dispatch via JakeAI Provider Platform
         upstream_resp = await call_upstream_llm_detailed(
-            prompt=combined_prompt,
+            prompt=effective_prompt,
             tenant_id=request.tenant_id,
             model=model_target,
             system_instruction=system_content if system_content else None,
@@ -174,12 +189,27 @@ class JakeAIBackend(AgentBackendInterface):
             "\n".join(conversation_history) if conversation_history else "Hello"
         )
 
+        # Apply context optimization with safe fallback (COST-06)
+        effective_prompt = combined_prompt
+        try:
+            from app.optimizer.context_optimizer import get_context_optimizer
+
+            optimizer = get_context_optimizer()
+            opt_res = optimizer.optimize_dynamic_context(
+                dynamic_context=combined_prompt,
+                user_query=conversation_history[-1] if conversation_history else "",
+            )
+            if not opt_res.fallback_used and opt_res.content:
+                effective_prompt = opt_res.content
+        except Exception as exc:
+            logger.debug("Prompt context optimization skipped: %s", exc)
+
         streamed_any = False
         try:
             from app.core.llm_provider import call_upstream_llm_stream
 
             async for delta_text in call_upstream_llm_stream(
-                prompt=combined_prompt,
+                prompt=effective_prompt,
                 tenant_id=request.tenant_id,
                 model=model_target,
                 system_instruction=system_content if system_content else None,

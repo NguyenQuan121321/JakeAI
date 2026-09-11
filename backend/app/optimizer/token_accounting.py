@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.optimizer.token_pruner import estimate_tokens
+from app.optimizer.provider_pricing import get_model_pricing
 
 
 class TokenUsageRecord(BaseModel):
@@ -68,6 +68,22 @@ class TokenUsageRecord(BaseModel):
         description="Layer B: Incurred upstream cost after cache discounts",
     )
     provider_name: str = Field(default="generic")
+    provider_cache_read_rate: float = Field(
+        default=0.0,
+        description="Rate or ratio applied to provider cached read tokens",
+    )
+    provider_cache_write_cost: float = Field(
+        default=0.0,
+        description="Upstream cost incurred for writing tokens to provider prompt cache",
+    )
+    effective_input_cost: float = Field(
+        default=0.0,
+        description="Effective total dollar cost incurred for input tokens after caching discounts and write fees",
+    )
+    is_estimate: bool = Field(
+        default=False,
+        description="True if token accounting values are local estimates rather than provider-reconciled metrics",
+    )
 
     # Canonical Token Accounting Dimensions (TOK-02)
     raw_input_tokens: int = Field(
@@ -190,7 +206,7 @@ class TokenAccounting:
         rag_context: str | None = None,
         model: str = "default",
     ) -> int:
-        """Calculate canonical model-visible input envelope tokens.
+        """Calculate canonical model-visible input envelope tokens using BPETokenizer.
 
         Accounts for:
         - system instructions and developer turns
@@ -202,7 +218,15 @@ class TokenAccounting:
         - retrieved RAG context passages
         - message framing and role delimiters
         """
-        _ = model
+        from app.optimizer.bpe_tokenizer import get_bpe_tokenizer
+
+        tokenizer = get_bpe_tokenizer()
+
+        def _count(text: str) -> int:
+            if not text:
+                return 0
+            return tokenizer.count_tokens(text, model=model)
+
         total = 0
         counted_contents: set[int] = set()
 
@@ -212,7 +236,7 @@ class TokenAccounting:
                     msg.get("role", "") if isinstance(msg, dict) else ""
                 )
                 if role:
-                    total += estimate_tokens(str(role))
+                    total += _count(str(role))
                 content = getattr(msg, "content", "") or (
                     msg.get("content", "") if isinstance(msg, dict) else ""
                 )
@@ -227,18 +251,18 @@ class TokenAccounting:
                 )
 
                 if content:
-                    total += estimate_tokens(str(content))
+                    total += _count(str(content))
                     counted_contents.add(id(content))
 
                 # Standard chat format framing (<|im_start|>{role}\n...<|im_end|>\n)
                 total += 4
 
                 if name:
-                    total += estimate_tokens(str(name)) + 1
+                    total += _count(str(name)) + 1
                 if tool_call_id:
-                    total += estimate_tokens(str(tool_call_id)) + 1
+                    total += _count(str(tool_call_id)) + 1
                 if tool_calls:
-                    total += estimate_tokens(json.dumps(tool_calls, ensure_ascii=False))
+                    total += _count(json.dumps(tool_calls, ensure_ascii=False))
 
         # Explicit system instruction if not already counted
         if system_instruction and id(system_instruction) not in counted_contents:
@@ -254,7 +278,7 @@ class TokenAccounting:
                 )
             )
             if not has_sys:
-                total += estimate_tokens(system_instruction) + 4
+                total += _count(system_instruction) + 4
 
         # Explicit user query if not already counted
         if user_query and id(user_query) not in counted_contents:
@@ -262,27 +286,27 @@ class TokenAccounting:
                 messages
                 and any(
                     (
-                        getattr(m, "role", "")
-                        or (m.get("role", "") if isinstance(m, dict) else "")
+                        getattr(m, "content", "")
+                        or (m.get("content", "") if isinstance(m, dict) else "")
                     )
-                    == "user"
+                    == user_query
                     for m in messages
                 )
             )
             if not has_user:
-                total += estimate_tokens(user_query) + 4
+                total += _count(user_query) + 4
 
         # Explicit dynamic context if provided
         if dynamic_context and id(dynamic_context) not in counted_contents:
-            total += estimate_tokens(dynamic_context)
+            total += _count(dynamic_context)
 
         # Explicit RAG context if provided
         if rag_context and id(rag_context) not in counted_contents:
-            total += estimate_tokens(rag_context)
+            total += _count(rag_context)
 
         # Tool definition schemas passed in request
         if tools:
-            total += estimate_tokens(json.dumps(tools, ensure_ascii=False)) + 8
+            total += _count(json.dumps(tools, ensure_ascii=False)) + 8
 
         has_input = bool(
             messages
@@ -321,11 +345,15 @@ class TokenAccounting:
         response_cache_avoided_tokens: int | None = None,
         effective_billed_tokens: int | None = None,
         provider_telemetry: Any | None = None,
+        provider_cache_read_rate: float | None = None,
+        provider_cache_write_cost: float | None = None,
+        effective_input_cost: float | None = None,
+        is_estimate: bool | None = None,
     ) -> TokenUsageRecord:
         """Calculate exact token accounting and savings for an inference call.
 
-        Supports full TOK-02 canonical token accounting dimensions and reconciliation
-        with upstream provider telemetry.
+        Supports full TOK-02 canonical token accounting dimensions, provider discount pricing,
+        and reconciliation with upstream provider telemetry.
         """
         raw_in = raw_input_tokens if raw_input_tokens is not None else raw_prompt_tokens
         opt_in = (
@@ -377,6 +405,47 @@ class TokenAccounting:
             if t_output > 0:
                 completion_tokens = t_output
 
+        pricing = get_model_pricing(model)
+        read_ratio = (
+            (pricing.cache_read_per_million / pricing.input_per_million)
+            if pricing.input_per_million > 0
+            else 1.0
+        )
+        resolved_read_rate = (
+            provider_cache_read_rate
+            if provider_cache_read_rate is not None
+            else pricing.cache_read_per_million
+        )
+
+        # Provider cache write cost in USD
+        if provider_cache_write_cost is not None:
+            write_cost_usd = provider_cache_write_cost
+        else:
+            write_cost_usd = round(
+                (prov_write * pricing.cache_write_per_million) / 1_000_000.0, 6
+            )
+
+        # Effective input cost in USD
+        if effective_input_cost is not None:
+            eff_in_cost_usd = effective_input_cost
+        else:
+            uncached_tokens_count = (
+                max(0, opt_in - prov_cached) if prov_cached > 0 else opt_in
+            )
+            eff_in_cost_usd = round(
+                (
+                    (uncached_tokens_count * pricing.input_per_million)
+                    + (prov_cached * pricing.cache_read_per_million)
+                    + (prov_write * pricing.cache_write_per_million)
+                )
+                / 1_000_000.0,
+                6,
+            )
+
+        is_est = (
+            is_estimate if is_estimate is not None else not (reconciled or cache_hit)
+        )
+
         baseline_total = max(1, raw_in + completion_tokens)
 
         if cache_hit:
@@ -399,7 +468,21 @@ class TokenAccounting:
             if effective_billed_tokens is not None:
                 billed = effective_billed_tokens
             elif prov_cached > 0:
-                billed = (opt_in - prov_cached) + completion_tokens
+                # Do not treat provider cached tokens as 100% free.
+                # Compute billed tokens using provider cache read discount ratio + write surcharges.
+                uncached_in = max(0, opt_in - prov_cached)
+                cached_equiv = round(prov_cached * read_ratio)
+                write_equiv = 0
+                if (
+                    prov_write > 0
+                    and pricing.cache_write_per_million > pricing.input_per_million
+                    and pricing.input_per_million > 0
+                ):
+                    write_ratio = (
+                        pricing.cache_write_per_million - pricing.input_per_million
+                    ) / pricing.input_per_million
+                    write_equiv = round(prov_write * write_ratio)
+                billed = uncached_in + cached_equiv + write_equiv + completion_tokens
             else:
                 billed = opt_in + completion_tokens
             saved = max(0, baseline_total - billed)
@@ -425,6 +508,10 @@ class TokenAccounting:
             provider_cost_savings_usd=prov_savings,
             provider_actual_cost_usd=prov_cost,
             provider_name=prov_name,
+            provider_cache_read_rate=resolved_read_rate,
+            provider_cache_write_cost=write_cost_usd,
+            effective_input_cost=eff_in_cost_usd,
+            is_estimate=is_est,
             raw_input_tokens=raw_in,
             optimized_input_tokens=opt_in,
             provider_cached_input_tokens=prov_cached,
