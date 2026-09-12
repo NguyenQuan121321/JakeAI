@@ -341,7 +341,7 @@ async def call_upstream_llm_stream(
                     client=client,
                 )
             async for chunk in stream_iter:
-                if chunk and chunk.delta:
-                    yield chunk.delta
+                if chunk and chunk.delta_text:
+                    yield chunk.delta_text
     except Exception as exc:
         logger.debug("call_upstream_llm_stream error: %s", exc)

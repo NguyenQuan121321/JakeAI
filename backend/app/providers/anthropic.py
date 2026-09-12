@@ -36,6 +36,8 @@ from app.providers.base import (
 )
 from app.providers.errors import (
     ProviderAuthenticationError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
     normalize_provider_error,
 )
 
@@ -155,7 +157,22 @@ class AnthropicAdapter(LLMProvider):
         start_t = time.perf_counter()
 
         async def _exec(c: httpx.AsyncClient) -> ProviderResponse:
-            res = await c.post(url, headers=headers, json=payload)
+            try:
+                res = await c.post(url, headers=headers, json=payload)
+            except httpx.TimeoutException as exc:
+                raise ProviderTimeoutError(
+                    message=f"Provider request timed out: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
+            except httpx.TransportError as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider endpoint unreachable: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
             latency = (time.perf_counter() - start_t) * 1000.0
 
             if res.status_code != 200:
@@ -171,7 +188,16 @@ class AnthropicAdapter(LLMProvider):
                     model=payload["model"],
                 )
 
-            data = res.json()
+            try:
+                data = res.json()
+            except Exception as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider returned a malformed JSON response: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    status_code=res.status_code,
+                    raw_error=exc,
+                ) from exc
             content_list = data.get("content", [])
             text_output = ""
             tool_calls: list[dict[str, Any]] = []
@@ -251,43 +277,58 @@ class AnthropicAdapter(LLMProvider):
         url = "https://api.anthropic.com/v1/messages"
 
         async def _stream_runner(c: httpx.AsyncClient) -> AsyncIterator[StreamChunk]:
-            async with c.stream("POST", url, headers=headers, json=payload) as res:
-                if res.status_code != 200:
-                    body = await res.aread()
-                    raise normalize_provider_error(
-                        provider=self.provider_name,
-                        status_code=res.status_code,
-                        response_body=body.decode(errors="replace"),
-                        model=payload["model"],
-                    )
-                async for line in res.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            event_data = json.loads(data_str)
-                            etype = event_data.get("type")
-                            if etype == "content_block_delta":
-                                delta = event_data.get("delta", {})
-                                if delta.get("type") == "text_delta":
+            try:
+                async with c.stream("POST", url, headers=headers, json=payload) as res:
+                    if res.status_code != 200:
+                        body = await res.aread()
+                        raise normalize_provider_error(
+                            provider=self.provider_name,
+                            status_code=res.status_code,
+                            response_body=body.decode(errors="replace"),
+                            model=payload["model"],
+                        )
+                    async for line in res.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                event_data = json.loads(data_str)
+                                etype = event_data.get("type")
+                                if etype == "content_block_delta":
+                                    delta = event_data.get("delta", {})
+                                    if delta.get("type") == "text_delta":
+                                        yield StreamChunk(
+                                            delta_text=delta.get("text", ""),
+                                            model=payload["model"],
+                                            provider=self.provider_name,
+                                        )
+                                elif etype == "message_delta":
+                                    stop_reason = event_data.get("delta", {}).get(
+                                        "stop_reason"
+                                    )
                                     yield StreamChunk(
-                                        delta_text=delta.get("text", ""),
+                                        delta_text="",
                                         model=payload["model"],
                                         provider=self.provider_name,
+                                        finish_reason=stop_reason,
                                     )
-                            elif etype == "message_delta":
-                                stop_reason = event_data.get("delta", {}).get(
-                                    "stop_reason"
-                                )
-                                yield StreamChunk(
-                                    delta_text="",
-                                    model=payload["model"],
-                                    provider=self.provider_name,
-                                    finish_reason=stop_reason,
-                                )
-                        except json.JSONDecodeError:
-                            continue
+                            except json.JSONDecodeError:
+                                continue
+            except httpx.TimeoutException as exc:
+                raise ProviderTimeoutError(
+                    message=f"Provider stream timed out: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
+            except httpx.TransportError as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider stream endpoint unreachable: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
 
         if client is not None:
             async for chunk in _stream_runner(client):
