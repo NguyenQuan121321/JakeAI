@@ -35,6 +35,21 @@ def get_bash_executable() -> str:
     return shutil.which("bash") or "bash"
 
 
+def create_mock_cosign(mock_dir: Path, script_content: str) -> Path:
+    """Create executable mock cosign binary in mock_dir across POSIX and Windows."""
+    mock_cosign = mock_dir / "cosign"
+    mock_cosign.write_text(script_content, encoding="utf-8")
+    mock_cosign.chmod(0o755)
+
+    if os.name == "nt":
+        cmd_wrapper = mock_dir / "cosign.cmd"
+        cmd_wrapper.write_text(
+            '@echo off\r\nbash "%~dp0cosign" %*\r\n', encoding="utf-8"
+        )
+
+    return mock_cosign
+
+
 class MockOidcServer(HTTPServer):
     def __init__(self, server_address: tuple[str, int]) -> None:
         super().__init__(server_address, MockOidcHandler)
@@ -124,12 +139,14 @@ def test_signing_with_controlled_failures_and_fresh_tokens(
         counter_file = mock_dir / "call_counter.txt"
         counter_file.write_text("0\n", encoding="utf-8")
 
-        mock_cosign = mock_dir / "cosign"
+        counter_posix = counter_file.resolve().as_posix()
+        log_posix = invocations_log.resolve().as_posix()
+
         mock_script_content = (
             "#!/usr/bin/env bash\n"
             "set -e\n"
-            "COUNTER_FILE='backend/tests/.mock_bin_test1/call_counter.txt'\n"
-            "LOG_FILE='backend/tests/.mock_bin_test1/cosign_invocations.jsonl'\n"
+            f"COUNTER_FILE='{counter_posix}'\n"
+            f"LOG_FILE='{log_posix}'\n"
             'count=$(cat "$COUNTER_FILE")\n'
             "count=$((count + 1))\n"
             'echo "$count" > "$COUNTER_FILE"\n'
@@ -142,12 +159,15 @@ def test_signing_with_controlled_failures_and_fresh_tokens(
             "  exit 0\n"
             "fi\n"
         )
-        mock_cosign.write_text(mock_script_content, encoding="utf-8")
+        create_mock_cosign(mock_dir, mock_script_content)
 
         env = os.environ.copy()
-        # Ensure mock cosign directory is first in PATH for git bash
-        mock_dir_posix = str(mock_dir.resolve()).replace("\\", "/")
-        env["PATH"] = f"{mock_dir_posix};{env.get('PATH', '')}"
+        # Prepend mock directory using platform-correct path separator (os.pathsep)
+        env["PATH"] = f"{mock_dir.resolve()}{os.pathsep}{env.get('PATH', '')}"
+        cosign_bin = shutil.which("cosign", path=env["PATH"])
+        assert cosign_bin is not None, f"cosign binary not found in PATH: {env['PATH']}"
+        assert Path(cosign_bin).parent.resolve() == mock_dir.resolve()
+
         env["ACTIONS_ID_TOKEN_REQUEST_URL"] = oidc_url
         env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] = "mock-bearer-token"
         env["COSIGN_RETRY_DELAYS"] = "0 0 0"
@@ -170,6 +190,9 @@ def test_signing_with_controlled_failures_and_fresh_tokens(
         )
         assert "CONTAINER_SIGN_SUCCESS" in proc.stdout
         assert "Image successfully signed on attempt 3/3" in proc.stdout
+        assert "Simulated Fulcio transient failure on call 1" in proc.stderr
+        assert "Simulated Fulcio transient failure on call 2" in proc.stderr
+        assert "Simulated Fulcio success on call 3" in proc.stdout
 
         # Invariant 1: Exactly 3 fresh tokens were issued
         assert oidc_server.request_count == 3
@@ -218,17 +241,19 @@ def test_exhausted_retries_aborts_and_fails_job(
     mock_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        mock_cosign = mock_dir / "cosign"
         mock_script_content = (
             "#!/usr/bin/env bash\n"
             'echo "Simulated persistent Fulcio failure" >&2\n'
             "exit 1\n"
         )
-        mock_cosign.write_text(mock_script_content, encoding="utf-8")
+        create_mock_cosign(mock_dir, mock_script_content)
 
         env = os.environ.copy()
-        mock_dir_posix = str(mock_dir.resolve()).replace("\\", "/")
-        env["PATH"] = f"{mock_dir_posix};{env.get('PATH', '')}"
+        env["PATH"] = f"{mock_dir.resolve()}{os.pathsep}{env.get('PATH', '')}"
+        cosign_bin = shutil.which("cosign", path=env["PATH"])
+        assert cosign_bin is not None, f"cosign binary not found in PATH: {env['PATH']}"
+        assert Path(cosign_bin).parent.resolve() == mock_dir.resolve()
+
         env["ACTIONS_ID_TOKEN_REQUEST_URL"] = oidc_url
         env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] = "mock-bearer-token"
         env["COSIGN_RETRY_DELAYS"] = "0 0 0"
@@ -249,6 +274,7 @@ def test_exhausted_retries_aborts_and_fails_job(
         assert proc.returncode != 0
         assert "SECURITY_GATE_FAILURE" in proc.stderr
         assert "Cryptographic container signing failed after 3 attempts" in proc.stderr
+        assert "Simulated persistent Fulcio failure" in proc.stderr
         assert oidc_server.request_count == 3
     finally:
         if mock_dir.exists():
@@ -274,19 +300,22 @@ def test_attestation_with_predicate_and_retries(
         sbom_file.write_text('{"bomFormat": "CycloneDX"}', encoding="utf-8")
 
         invocations_log = mock_dir / "attest_invocations.jsonl"
-        mock_cosign = mock_dir / "cosign"
+        log_posix = invocations_log.resolve().as_posix()
         mock_script_content = (
             "#!/usr/bin/env bash\n"
             "set -e\n"
-            "LOG_FILE='backend/tests/.mock_bin_test3/attest_invocations.jsonl'\n"
+            f"LOG_FILE='{log_posix}'\n"
             'echo "{\\"args\\": [\\"$@\\"]}" >> "$LOG_FILE"\n'
             "exit 0\n"
         )
-        mock_cosign.write_text(mock_script_content, encoding="utf-8")
+        create_mock_cosign(mock_dir, mock_script_content)
 
         env = os.environ.copy()
-        mock_dir_posix = str(mock_dir.resolve()).replace("\\", "/")
-        env["PATH"] = f"{mock_dir_posix};{env.get('PATH', '')}"
+        env["PATH"] = f"{mock_dir.resolve()}{os.pathsep}{env.get('PATH', '')}"
+        cosign_bin = shutil.which("cosign", path=env["PATH"])
+        assert cosign_bin is not None, f"cosign binary not found in PATH: {env['PATH']}"
+        assert Path(cosign_bin).parent.resolve() == mock_dir.resolve()
+
         env["ACTIONS_ID_TOKEN_REQUEST_URL"] = oidc_url
         env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] = "mock-bearer-token"
         env["COSIGN_RETRY_DELAYS"] = "0 0 0"
@@ -297,7 +326,7 @@ def test_attestation_with_predicate_and_retries(
                 ".github/scripts/cosign_sign_with_retry.sh",
                 "attest",
                 "ghcr.io/test/backend@sha256:1234567890",
-                "backend/tests/.mock_bin_test3/sbom.json",
+                str(sbom_file.resolve().as_posix()),
             ],
             cwd=str(repo_root),
             env=env,
