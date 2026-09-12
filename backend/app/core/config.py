@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     FINNAPIGO_JWKS_URL: str = "http://localhost:8080/.well-known/jwks.json"
     JWT_ALGORITHM: str = "RS256"
     JWT_SECRET_KEY: str = "insecure-development-secret-change-in-production"
+    JWT_SECRET_PREVIOUS: str | None = None
     JWT_AUDIENCE: str = "jakeai-service"
     JWT_ISSUER: str = "finnapigo-identity-provider"
 

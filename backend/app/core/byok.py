@@ -268,11 +268,11 @@ class BYOKManager:
                 "Invalid key format for Groq (expected prefix 'gsk_' or test key)",
             )
         if norm_provider == "gemini" and not (
-            clean_key.startswith("AIza") or "test" in clean_key
+            clean_key.startswith("AIza") or clean_key.startswith("AQ.") or "test" in clean_key
         ):
             return (
                 False,
-                "Invalid key format for Gemini (expected prefix 'AIza' or test key)",
+                "Invalid key format for Gemini (expected prefix 'AIza', 'AQ.', or test key)",
             )
         if norm_provider == "openrouter" and not (
             clean_key.startswith("sk-or-") or "test" in clean_key

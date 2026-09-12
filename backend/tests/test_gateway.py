@@ -97,6 +97,51 @@ def test_verify_missing_claims() -> None:
     assert exc_info.value.status_code == 401
 
 
+def test_verify_jwt_key_rotation_previous_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that a token signed with JWT_SECRET_PREVIOUS is accepted during rotation."""
+    settings = get_settings()
+    current_key = "current-active-secret-key-32-chars-long"
+    previous_key = "previous-active-secret-key-32-chars-long"
+
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", current_key)
+    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", previous_key)
+
+    token = create_test_jwt(
+        sub="rotated-user-01",
+        tenant_id="tenant-rotated",
+        secret_key=previous_key,
+    )
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    assert context.user_id == "rotated-user-01"
+    assert context.tenant_id == "tenant-rotated"
+
+
+def test_verify_jwt_kid_matching(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that a token with kid header matching sha256(secret)[:8] resolves accurately."""
+    import hashlib
+
+    settings = get_settings()
+    key_a = "secret-key-alpha-32-bytes-long-1234"
+    key_b = "secret-key-beta-32-bytes-long-5678"
+
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", key_a)
+    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", key_b)
+
+    kid_b = hashlib.sha256(key_b.encode("utf-8")).hexdigest()[:8]
+    now = int(time.time())
+    token = jwt.encode(
+        {"uid": 42, "role": "admin", "type": "access", "exp": now + 3600, "iat": now},
+        key_b,
+        algorithm="HS256",
+        headers={"kid": kid_b},
+    )
+
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    assert context.user_id == "42"
+    assert context.tenant_id == "default"
+    assert "admin" in context.roles
+
+
 @pytest.mark.asyncio
 async def test_require_permissions_dependency() -> None:
     """Verify require_permissions validator permits authorized tenants."""
