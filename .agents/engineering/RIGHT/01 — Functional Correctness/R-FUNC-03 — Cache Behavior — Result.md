@@ -213,6 +213,7 @@ All 40 new R-FUNC-03 verification scenarios pass (plus 2 real-Redis tests that a
 | Semantic hit across wildcard/unpinned model | served (**false hit**) | rejected |
 | Exact identity isolation (11 dimensions) | already correct | preserved |
 | Identical-request exact hit / hit accounting | correct | preserved (44 pre-existing tests green) |
+| CI suite totals | 805 passing | 805 passing (with 42 new R-FUNC-03 scenarios; 1 new-test environment assumption fixed during CI loop) |
 
 ---
 
@@ -224,7 +225,13 @@ All 40 new R-FUNC-03 verification scenarios pass (plus 2 real-Redis tests that a
 ## 8. CI Result
 
 - Local CI-equivalent gates: ruff lint ✓, ruff format ✓, mypy ✓ (166 files), bandit ✓, OpenAPI compatibility ✓, full relevant test suites ✓.
-- GitHub Actions (CI + CD on the PR of this branch): recorded below with the final commit of this branch after execution.
+- **GitHub Actions: GREEN.** Run `34719307684` on final commit `dcce3a2` (branch `chore/r-func-03-cache-behavior`, PR #36) — all 9 jobs passed:
+  - DevSecOps Secret & Key Leak Detection ✓, Vulnerability Audit/SAST/License ✓, Infrastructure & Workflow Linting ✓
+  - Code Quality & Type Analysis (3.11 ✓, 3.12 ✓)
+  - Frontend Widget Build & Quality Verification ✓
+  - **Automated Tests & AI RAG Regression (3.11 ✓, 3.12 ✓)** — full suite with real Redis 7 + Qdrant services; the two real-Redis scenarios executed (not skipped) against the live Redis service; coverage floor ≥ 85% branch reached; token/portfolio benchmark gates passed
+  - Container Packaging & Vulnerability Scan ✓
+- **Intermediate CI failure (recorded per CI Rule)**: run on `f61e3852` failed in the coverage step with `1 failed, 804 passed` — `test_scenario_15_qdrant_roundtrip_serves_after_restart_simulation` asserted `cache_type == "semantic"` after the restart simulation, but in CI the Redis exact tier is reachable and correctly served the identical replay first (`'exact' != 'semantic'`). Classification: **CURRENT TASK REGRESSION** — an environment assumption inside the new test, not a production defect (the exact tier outranking the semantic tier is required behavior). Fix: the scenario puts the manager into its documented Redis-unavailable cooldown so it deterministically exercises the real Qdrant path in every environment. Retest: run `34719307684` fully green.
 - Failure classification: the only local red, `test_local_safe_sandbox_file_and_commands`, was reproduced on pristine `main` and classified **ENVIRONMENT FAILURE** (missing `python` binary in WSL; CI green on main confirms).
 
 ## 9. Remaining Issues & Risks
