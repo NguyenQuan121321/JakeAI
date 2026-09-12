@@ -81,12 +81,12 @@ def verify_finnapigo_jwt(
 
     # Invariant 5: Dual Claim Schema Resolution
     sub = str(payload.get("sub") or payload.get("uid") or "")
-    tenant_id = str(payload.get("tenant_id") or payload.get("tid") or "")
+    tenant_id = str(payload.get("tenant_id") or payload.get("tid") or "default")
 
-    if not sub or not tenant_id:
+    if not sub:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing mandatory subject (sub/uid) or tenant identifier (tenant_id/tid)",
+            detail="Token missing mandatory subject (sub/uid)",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
