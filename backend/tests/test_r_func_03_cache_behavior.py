@@ -752,6 +752,13 @@ async def test_scenario_15_qdrant_roundtrip_serves_after_restart_simulation() ->
     )
     tenant = unique_tenant("r03-qdrant")
 
+    # Isolate the Qdrant path from the Redis exact tier (which is reachable
+    # in CI and would otherwise serve the identical replay before the
+    # semantic tier is consulted). The manager's own unavailability cooldown
+    # is the documented degradation mechanism for "Redis unreachable".
+    cache._redis_available = False
+    cache._redis_retry_after = time.time() + 3600.0
+
     # An injected client bypasses the manager's auto-provisioning, so create
     # the collection with the manager's actual embedding dimension.
     dim = len(cache._embed_text("dimension probe"))
