@@ -39,6 +39,8 @@ from app.providers.base import (
 )
 from app.providers.errors import (
     ProviderAuthenticationError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
     normalize_provider_error,
 )
 
@@ -136,7 +138,22 @@ class GeminiAdapter(LLMProvider):
         start_t = time.perf_counter()
 
         async def _exec(c: httpx.AsyncClient) -> ProviderResponse:
-            res = await c.post(url, json=payload)
+            try:
+                res = await c.post(url, json=payload)
+            except httpx.TimeoutException as exc:
+                raise ProviderTimeoutError(
+                    message=f"Provider request timed out: {exc}",
+                    provider=self.provider_name,
+                    model=model_name,
+                    raw_error=exc,
+                ) from exc
+            except httpx.TransportError as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider endpoint unreachable: {exc}",
+                    provider=self.provider_name,
+                    model=model_name,
+                    raw_error=exc,
+                ) from exc
             latency = (time.perf_counter() - start_t) * 1000.0
 
             if res.status_code != 200:
@@ -152,7 +169,16 @@ class GeminiAdapter(LLMProvider):
                     model=model_name,
                 )
 
-            data = res.json()
+            try:
+                data = res.json()
+            except Exception as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider returned a malformed JSON response: {exc}",
+                    provider=self.provider_name,
+                    model=model_name,
+                    status_code=res.status_code,
+                    raw_error=exc,
+                ) from exc
             candidates = data.get("candidates", [])
             text_output = ""
             finish_reason = "stop"
@@ -233,36 +259,53 @@ class GeminiAdapter(LLMProvider):
         )
 
         async def _stream_runner(c: httpx.AsyncClient) -> AsyncIterator[StreamChunk]:
-            async with c.stream("POST", url, json=payload) as res:
-                if res.status_code != 200:
-                    body = await res.aread()
-                    raise normalize_provider_error(
-                        provider=self.provider_name,
-                        status_code=res.status_code,
-                        response_body=body.decode(errors="replace"),
-                        model=model_name,
-                    )
-                async for line in res.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        try:
-                            event_data = json.loads(data_str)
-                            candidates = event_data.get("candidates", [])
-                            if candidates:
-                                parts = (
-                                    candidates[0].get("content", {}).get("parts", [])
-                                )
-                                if parts:
-                                    text_chunk = parts[0].get("text", "")
-                                    finish = candidates[0].get("finishReason")
-                                    yield StreamChunk(
-                                        delta_text=text_chunk,
-                                        model=model_name,
-                                        provider=self.provider_name,
-                                        finish_reason=finish,
+            try:
+                async with c.stream("POST", url, json=payload) as res:
+                    if res.status_code != 200:
+                        body = await res.aread()
+                        raise normalize_provider_error(
+                            provider=self.provider_name,
+                            status_code=res.status_code,
+                            response_body=body.decode(errors="replace"),
+                            model=model_name,
+                        )
+                    async for line in res.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:].strip()
+                            try:
+                                event_data = json.loads(data_str)
+                                candidates = event_data.get("candidates", [])
+                                if candidates:
+                                    parts = (
+                                        candidates[0]
+                                        .get("content", {})
+                                        .get("parts", [])
                                     )
-                        except json.JSONDecodeError:
-                            continue
+                                    if parts:
+                                        text_chunk = parts[0].get("text", "")
+                                        finish = candidates[0].get("finishReason")
+                                        yield StreamChunk(
+                                            delta_text=text_chunk,
+                                            model=model_name,
+                                            provider=self.provider_name,
+                                            finish_reason=finish,
+                                        )
+                            except json.JSONDecodeError:
+                                continue
+            except httpx.TimeoutException as exc:
+                raise ProviderTimeoutError(
+                    message=f"Provider stream timed out: {exc}",
+                    provider=self.provider_name,
+                    model=model_name,
+                    raw_error=exc,
+                ) from exc
+            except httpx.TransportError as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider stream endpoint unreachable: {exc}",
+                    provider=self.provider_name,
+                    model=model_name,
+                    raw_error=exc,
+                ) from exc
 
         if client is not None:
             async for chunk in _stream_runner(client):

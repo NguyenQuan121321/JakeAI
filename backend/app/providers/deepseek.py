@@ -37,6 +37,8 @@ from app.providers.base import (
 )
 from app.providers.errors import (
     ProviderAuthenticationError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
     normalize_provider_error,
 )
 
@@ -136,7 +138,22 @@ class DeepSeekAdapter(LLMProvider):
         start_t = time.perf_counter()
 
         async def _exec(c: httpx.AsyncClient) -> ProviderResponse:
-            res = await c.post(url, headers=headers, json=payload)
+            try:
+                res = await c.post(url, headers=headers, json=payload)
+            except httpx.TimeoutException as exc:
+                raise ProviderTimeoutError(
+                    message=f"Provider request timed out: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
+            except httpx.TransportError as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider endpoint unreachable: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
             latency = (time.perf_counter() - start_t) * 1000.0
 
             if res.status_code != 200:
@@ -152,7 +169,16 @@ class DeepSeekAdapter(LLMProvider):
                     model=payload["model"],
                 )
 
-            data = res.json()
+            try:
+                data = res.json()
+            except Exception as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider returned a malformed JSON response: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    status_code=res.status_code,
+                    raw_error=exc,
+                ) from exc
             choices = data.get("choices", [])
             text_output = (
                 choices[0].get("message", {}).get("content", "") if choices else ""
@@ -230,38 +256,53 @@ class DeepSeekAdapter(LLMProvider):
         url = "https://api.deepseek.com/chat/completions"
 
         async def _stream_runner(c: httpx.AsyncClient) -> AsyncIterator[StreamChunk]:
-            async with c.stream("POST", url, headers=headers, json=payload) as res:
-                if res.status_code != 200:
-                    body = await res.aread()
-                    raise normalize_provider_error(
-                        provider=self.provider_name,
-                        status_code=res.status_code,
-                        response_body=body.decode(errors="replace"),
-                        model=payload["model"],
-                    )
-                async for line in res.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            event_data = json.loads(data_str)
-                            choices = event_data.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                content = delta.get("content", "")
-                                finish = choices[0].get("finish_reason")
-                                tool_chunks = delta.get("tool_calls")
-                                if content or finish or tool_chunks:
-                                    yield StreamChunk(
-                                        delta_text=content or "",
-                                        model=payload["model"],
-                                        provider=self.provider_name,
-                                        finish_reason=finish,
-                                        tool_call_chunks=tool_chunks,
-                                    )
-                        except json.JSONDecodeError:
-                            continue
+            try:
+                async with c.stream("POST", url, headers=headers, json=payload) as res:
+                    if res.status_code != 200:
+                        body = await res.aread()
+                        raise normalize_provider_error(
+                            provider=self.provider_name,
+                            status_code=res.status_code,
+                            response_body=body.decode(errors="replace"),
+                            model=payload["model"],
+                        )
+                    async for line in res.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                event_data = json.loads(data_str)
+                                choices = event_data.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    finish = choices[0].get("finish_reason")
+                                    tool_chunks = delta.get("tool_calls")
+                                    if content or finish or tool_chunks:
+                                        yield StreamChunk(
+                                            delta_text=content or "",
+                                            model=payload["model"],
+                                            provider=self.provider_name,
+                                            finish_reason=finish,
+                                            tool_call_chunks=tool_chunks,
+                                        )
+                            except json.JSONDecodeError:
+                                continue
+            except httpx.TimeoutException as exc:
+                raise ProviderTimeoutError(
+                    message=f"Provider stream timed out: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
+            except httpx.TransportError as exc:
+                raise ProviderUnavailableError(
+                    message=f"Provider stream endpoint unreachable: {exc}",
+                    provider=self.provider_name,
+                    model=payload["model"],
+                    raw_error=exc,
+                ) from exc
 
         if client is not None:
             async for chunk in _stream_runner(client):

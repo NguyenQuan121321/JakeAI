@@ -37,9 +37,16 @@ logger = logging.getLogger(__name__)
 
 
 class FailoverConfig(BaseModel):
-    """Execution parameters governing retries and fallback bounds."""
+    """Execution parameters governing retries and fallback bounds.
 
-    max_retries_per_provider: int = Field(default=2, ge=0, le=5)
+    ``max_retries_per_provider`` must stay strictly below
+    ``max_total_attempts`` so that a primary provider exhausting its retry
+    budget on retryable errors cannot consume the entire total attempt
+    ceiling — the remaining budget is what makes cross-provider failover
+    reachable.
+    """
+
+    max_retries_per_provider: int = Field(default=1, ge=0, le=5)
     max_total_attempts: int = Field(default=3, ge=1, le=8)
     base_delay_seconds: float = Field(default=0.2, ge=0.01)
     backoff_factor: float = Field(default=1.5, ge=1.0)
@@ -196,11 +203,13 @@ class FailoverManager:
                         sanitized_msg,
                     )
 
-                    # Only retry if error category is explicitly retryable
+                    # Only retry if error category is explicitly retryable and
+                    # the total attempt ceiling still has room for the retry.
                     if (
                         p_err.is_retryable
                         and p_err.category in self.config.retryable_categories
                         and provider_retries < self.config.max_retries_per_provider
+                        and total_attempts < self.config.max_total_attempts
                     ):
                         delay = self._calculate_backoff(
                             provider_retries, p_err.retry_after_seconds
