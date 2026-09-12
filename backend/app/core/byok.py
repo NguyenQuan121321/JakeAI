@@ -268,7 +268,9 @@ class BYOKManager:
                 "Invalid key format for Groq (expected prefix 'gsk_' or test key)",
             )
         if norm_provider == "gemini" and not (
-            clean_key.startswith("AIza") or clean_key.startswith("AQ.") or "test" in clean_key
+            clean_key.startswith("AIza")
+            or clean_key.startswith("AQ.")
+            or "test" in clean_key
         ):
             return (
                 False,

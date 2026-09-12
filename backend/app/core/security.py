@@ -52,11 +52,20 @@ def verify_finnapigo_jwt(
         candidate_keys = []
         if settings.JWT_SECRET_KEY:
             candidate_keys.append(settings.JWT_SECRET_KEY)
-        if settings.JWT_SECRET_PREVIOUS and settings.JWT_SECRET_PREVIOUS not in candidate_keys:
+        if (
+            settings.JWT_SECRET_PREVIOUS
+            and settings.JWT_SECRET_PREVIOUS not in candidate_keys
+        ):
             candidate_keys.append(settings.JWT_SECRET_PREVIOUS)
 
         # In non-production environments, provide known dev secret fallbacks
-        if getattr(settings, "ENVIRONMENT", "").lower() in ("development", "test", "testing", "local", ""):
+        if getattr(settings, "ENVIRONMENT", "").lower() in (
+            "development",
+            "test",
+            "testing",
+            "local",
+            "",
+        ):
             dev_fallbacks = [
                 "a04c1981ceded10b6ecadc8c0504f89f524b7b9057ed5036233803a78bee7fc8",
                 "a8f3e2b1c9d7f6e5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2",
@@ -72,8 +81,8 @@ def verify_finnapigo_jwt(
         header_kid = header.get("kid")
         if header.get("alg") == "HS256" and algo.startswith("RS"):
             algo = "HS256"
-    except Exception:
-        pass
+    except jwt.PyJWTError as exc:
+        logger.debug("Failed to inspect JWT header: %s", exc)
 
     if header_kid:
         candidate_keys.sort(

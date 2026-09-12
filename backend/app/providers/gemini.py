@@ -90,7 +90,9 @@ class GeminiAdapter(LLMProvider):
         )
 
         gemini_model = (
-            request.model if "gemini" in request.model.lower() else "gemini-flash-latest"
+            request.model
+            if "gemini" in request.model.lower()
+            else "gemini-flash-latest"
         )
         if gemini_model in ("gemini-1.5-flash", "gemini-2.5-flash"):
             gemini_model = "gemini-flash-latest"

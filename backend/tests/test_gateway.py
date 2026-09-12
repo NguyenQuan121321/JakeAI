@@ -97,7 +97,9 @@ def test_verify_missing_claims() -> None:
     assert exc_info.value.status_code == 401
 
 
-def test_verify_jwt_key_rotation_previous_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verify_jwt_key_rotation_previous_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify that a token signed with JWT_SECRET_PREVIOUS is accepted during rotation."""
     settings = get_settings()
     current_key = "current-active-secret-key-32-chars-long"
@@ -543,3 +545,61 @@ def test_verify_internal_perimeter_secret_edge_cases() -> None:
         }
     )
     assert verify_internal_perimeter_secret(req_malformed_sig) is False
+
+
+def test_verify_malformed_jwt_returns_401() -> None:
+    """Verify completely malformed JWT returns HTTP 401 instead of unhandled error."""
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt("not.a.valid.jwt.token", algorithm="HS256")
+    assert exc_info.value.status_code == 401
+    assert "invalid" in exc_info.value.detail.lower()
+
+    with pytest.raises(HTTPException) as exc_info2:
+        verify_finnapigo_jwt("completely-garbage-token", algorithm="HS256")
+    assert exc_info2.value.status_code == 401
+
+
+def test_verify_malformed_jwt_header_does_not_cause_500() -> None:
+    """Verify malformed base64 header does not cause HTTP 500 and raises HTTP 401."""
+    malformed_header_token = (
+        "invalid!header.eyJzdWIiOiAidXNlci0xMjMiLCAidGlkIjogInRlbmFudC1hIn0.invalidsig"
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt(malformed_header_token, algorithm="HS256")
+    assert exc_info.value.status_code == 401
+    assert "invalid" in exc_info.value.detail.lower()
+
+
+def test_verify_header_inspection_failure_does_not_bypass_signature() -> None:
+    """Verify header inspection failure or header tampering never bypasses signature verification."""
+    untrusted_token = create_test_jwt(
+        sub="attacker",
+        tenant_id="victim-tenant",
+        secret_key="untrusted-attacker-secret-key-32-chars",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt(untrusted_token, algorithm="HS256")
+    assert exc_info.value.status_code == 401
+
+    # Tampered payload with untrusted signature
+    parts = untrusted_token.split(".")
+    tampered_token = f"{parts[0]}.eyJzdWIiOiAic3VwZXJ1c2VyIn0.{parts[2]}"
+    with pytest.raises(HTTPException) as exc_info2:
+        verify_finnapigo_jwt(tampered_token, algorithm="HS256")
+    assert exc_info2.value.status_code == 401
+
+
+def test_verify_normal_token_validation_path_unchanged() -> None:
+    """Verify normal token validation path continues to produce complete TenantContext."""
+    token = create_test_jwt(
+        sub="normal-user",
+        tenant_id="normal-tenant",
+        roles=["operator", "viewer"],
+        permissions=["read:all", "write:chat"],
+    )
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    assert context.user_id == "normal-user"
+    assert context.tenant_id == "normal-tenant"
+    assert context.roles == ["operator", "viewer"]
+    assert "read:all" in context.permissions
+    assert context.correlation_id is not None
