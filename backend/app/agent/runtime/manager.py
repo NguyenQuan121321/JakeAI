@@ -250,7 +250,9 @@ class AgentRuntimeManager:
         )
         agent_telemetry.record_approval_decision(decision.approved, tenant_id)
 
-        if decision.approved and run.status == RunStatus.PAUSED_APPROVAL:
+        if decision.approved and (
+            run.status in (RunStatus.PAUSED_APPROVAL, RunStatus.WAITING_APPROVAL)
+        ):
             # Resume run execution
             await self.runner.resume_after_approval(
                 task=task,
