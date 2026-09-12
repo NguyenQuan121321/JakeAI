@@ -394,15 +394,19 @@ class SemanticCacheManager:
         effective_system: str,
         effective_tools: list[dict[str, Any]] | None,
         effective_rf: dict[str, Any] | str | None,
+        effective_params: dict[str, Any] | None = None,
     ) -> bool:
-        """Enforce strict generation compatibility guardrails for semantic hits."""
-        if entry.model != model and model != "default" and entry.model != "default":
+        """Enforce strict generation compatibility guardrails for semantic hits.
+
+        A semantic candidate may only be served when every generation-relevant
+        dimension of the stored entry matches the incoming request. Model,
+        provider, and generation parameters are compared with the same
+        normalization used by ``compute_cache_identity`` so that the semantic
+        tier can never serve a response the exact tier would have isolated.
+        """
+        if entry.model.strip().lower() != model.strip().lower():
             return False
-        if (
-            entry.provider != provider
-            and provider != "generic"
-            and entry.provider != "generic"
-        ):
+        if entry.provider.strip().lower() != provider.strip().lower():
             return False
         if entry.version != version:
             return False
@@ -415,7 +419,21 @@ class SemanticCacheManager:
             return False
         if entry.tools != effective_tools:
             return False
-        return entry.response_format == effective_rf
+        if entry.response_format != effective_rf:
+            return False
+        # Generation parameters (temperature, max_tokens, ...) change model
+        # output; a stored response generated under different parameters must
+        # not be semantically reused.
+        stored_params = dict(entry.parameters) if entry.parameters else {}
+        incoming_params = dict(effective_params) if effective_params else {}
+        # Ignore identity-extracted keys (tools/response_format/system) the
+        # way get()/set() do before storing parameters.
+        for key in ("tools", "response_format", "system_instructions"):
+            stored_params.pop(key, None)
+            incoming_params.pop(key, None)
+        return _canonical_params_repr(stored_params) == _canonical_params_repr(
+            incoming_params
+        )
 
     def get_metrics(self) -> dict[str, Any]:
         """Return snapshot of cache performance metrics."""
@@ -592,14 +610,16 @@ class SemanticCacheManager:
                         )
                     ]
                 )
-                search_res = await qdrant.search(
+                # qdrant-client >= 1.10 removed AsyncQdrantClient.search;
+                # query_points is the supported search API.
+                response = await qdrant.query_points(
                     collection_name=self.collection_name,
-                    query_vector=query_vec,
+                    query=query_vec,
                     query_filter=tenant_filter,
                     limit=5,
                     score_threshold=self.similarity_threshold,
                 )
-                for hit in search_res:
+                for hit in response.points:
                     payload = hit.payload or {}
                     # Defense-in-depth tenant boundary check
                     if str(payload.get("tenant_id")) != tenant_id:
@@ -638,6 +658,7 @@ class SemanticCacheManager:
                         effective_system=effective_system,
                         effective_tools=effective_tools,
                         effective_rf=effective_rf,
+                        effective_params=combined_params,
                     ):
                         self.metrics.semantic_hits += 1
                         self.metrics.tokens_avoided += candidate.tokens_avoided
@@ -671,6 +692,7 @@ class SemanticCacheManager:
                 effective_system=effective_system,
                 effective_tools=effective_tools,
                 effective_rf=effective_rf,
+                effective_params=combined_params,
             ):
                 continue
             if entry.vector is not None:

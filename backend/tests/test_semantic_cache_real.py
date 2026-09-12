@@ -11,6 +11,7 @@ Tests verify:
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -118,7 +119,7 @@ async def test_qdrant_vector_store_upsert_and_search(
     assert points[0].payload["model"] == "gpt-4o"
     assert points[0].payload["provider"] == "openai"
 
-    # 2. Simulate Qdrant search returning a semantic hit
+    # 2. Simulate Qdrant query_points returning a semantic hit
     cached_payload = {
         "prompt": prompt,
         "response": response,
@@ -134,9 +135,9 @@ async def test_qdrant_vector_store_upsert_and_search(
         "tools": None,
         "response_format": None,
     }
-    mock_qdrant_client.search.return_value = [
-        MockQdrantHit(score=0.96, payload=cached_payload)
-    ]
+    mock_qdrant_client.query_points.return_value = SimpleNamespace(
+        points=[MockQdrantHit(score=0.96, payload=cached_payload)]
+    )
 
     # Query with a slightly different prompt to bypass exact memory cache
     query_prompt = "Could you explain quantum entanglement simply?"
@@ -151,7 +152,7 @@ async def test_qdrant_vector_store_upsert_and_search(
     assert hit.cache_type == "semantic"
     assert hit.similarity_score == 0.96
     assert hit.response == response
-    assert mock_qdrant_client.search.called
+    assert mock_qdrant_client.query_points.called
 
 
 @pytest.mark.asyncio
@@ -166,21 +167,23 @@ async def test_qdrant_tenant_isolation_in_search(
         embedding_provider=fake_embedding_provider,
     )
 
-    mock_qdrant_client.search.return_value = [
-        MockQdrantHit(
-            score=0.99,
-            payload={
-                "prompt": "secret internal roadmap",
-                "response": "Confidential roadmap data",
-                "tenant_id": "tenant_foreign",
-                "model": "default",
-                "provider": "generic",
-                "cached_at": time.time(),
-                "ttl_seconds": 300,
-                "version": CACHE_VERSION,
-            },
-        )
-    ]
+    mock_qdrant_client.query_points.return_value = SimpleNamespace(
+        points=[
+            MockQdrantHit(
+                score=0.99,
+                payload={
+                    "prompt": "secret internal roadmap",
+                    "response": "Confidential roadmap data",
+                    "tenant_id": "tenant_foreign",
+                    "model": "default",
+                    "provider": "generic",
+                    "cached_at": time.time(),
+                    "ttl_seconds": 300,
+                    "version": CACHE_VERSION,
+                },
+            )
+        ]
+    )
 
     hit = await cache.get("secret internal roadmap", tenant_id="tenant_my_company")
     assert hit is None
@@ -273,7 +276,7 @@ async def test_fallback_to_memory_when_qdrant_fails(
     """Verify seamless failover to in-memory vector store when Qdrant encounters exceptions."""
     failing_qdrant = AsyncMock()
     failing_qdrant.upsert.side_effect = RuntimeError("Qdrant connection timeout")
-    failing_qdrant.search.side_effect = RuntimeError("Qdrant connection refused")
+    failing_qdrant.query_points.side_effect = RuntimeError("Qdrant connection refused")
 
     cache = SemanticCacheManager(
         similarity_threshold=0.85,

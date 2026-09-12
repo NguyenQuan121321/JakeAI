@@ -234,6 +234,24 @@ class QuotaManager:
         )
 
 
+def _message_to_cache_dict(m: ChatMessage) -> dict[str, Any]:
+    """Convert a chat message to its cache-identity representation.
+
+    W-COST-03: the cache identity must include every generation-relevant
+    message field (role, content, name, tool_call_id, tool_calls); dropping
+    tool-call structure makes structurally different conversations collide
+    on the same exact cache key.
+    """
+    msg_dict: dict[str, Any] = {"role": m.role, "content": m.content or ""}
+    if m.name:
+        msg_dict["name"] = m.name
+    if m.tool_call_id:
+        msg_dict["tool_call_id"] = m.tool_call_id
+    if m.tool_calls:
+        msg_dict["tool_calls"] = m.tool_calls
+    return msg_dict
+
+
 class GatewayInferenceProxy:
     """Reverse proxy executing inference with exact caching and quota governance."""
 
@@ -275,8 +293,8 @@ class GatewayInferenceProxy:
         system_instructions = "\n".join(
             m.content or "" for m in request.messages if m.role == "system"
         )
-        messages_as_dicts: list[dict[str, str]] = [
-            {"role": m.role, "content": m.content or ""} for m in request.messages
+        messages_as_dicts: list[dict[str, Any]] = [
+            _message_to_cache_dict(m) for m in request.messages
         ]
         generation_params = {
             "temperature": request.temperature,
@@ -630,8 +648,8 @@ class GatewayInferenceProxy:
         system_instructions = "\n".join(
             m.content or "" for m in request.messages if m.role == "system"
         )
-        messages_as_dicts: list[dict[str, str]] = [
-            {"role": m.role, "content": m.content or ""} for m in request.messages
+        messages_as_dicts: list[dict[str, Any]] = [
+            _message_to_cache_dict(m) for m in request.messages
         ]
         generation_params = {
             "temperature": request.temperature,
