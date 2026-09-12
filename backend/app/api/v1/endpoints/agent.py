@@ -169,7 +169,7 @@ async def stream_run_events(
     manager = get_agent_manager()
     try:
         manager.get_task(task_id, context.tenant_id)
-        manager.get_run(run_id, context.tenant_id)
+        run = manager.get_run(run_id, context.tenant_id)
     except KeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
@@ -179,7 +179,7 @@ async def stream_run_events(
             status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
         ) from exc
 
-    generator = manager.runner.stream_run_events(run_id)
+    generator = manager.runner.stream_run_events(run_id, run=run)
     return StreamingResponse(generator, media_type="text/event-stream")
 
 

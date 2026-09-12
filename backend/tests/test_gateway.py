@@ -97,6 +97,53 @@ def test_verify_missing_claims() -> None:
     assert exc_info.value.status_code == 401
 
 
+def test_verify_jwt_key_rotation_previous_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that a token signed with JWT_SECRET_PREVIOUS is accepted during rotation."""
+    settings = get_settings()
+    current_key = "current-active-secret-key-32-chars-long"
+    previous_key = "previous-active-secret-key-32-chars-long"
+
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", current_key)
+    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", previous_key)
+
+    token = create_test_jwt(
+        sub="rotated-user-01",
+        tenant_id="tenant-rotated",
+        secret_key=previous_key,
+    )
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    assert context.user_id == "rotated-user-01"
+    assert context.tenant_id == "tenant-rotated"
+
+
+def test_verify_jwt_kid_matching(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that a token with kid header matching sha256(secret)[:8] resolves accurately."""
+    import hashlib
+
+    settings = get_settings()
+    key_a = "secret-key-alpha-32-bytes-long-1234"
+    key_b = "secret-key-beta-32-bytes-long-5678"
+
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", key_a)
+    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", key_b)
+
+    kid_b = hashlib.sha256(key_b.encode("utf-8")).hexdigest()[:8]
+    now = int(time.time())
+    token = jwt.encode(
+        {"uid": 42, "role": "admin", "type": "access", "exp": now + 3600, "iat": now},
+        key_b,
+        algorithm="HS256",
+        headers={"kid": kid_b},
+    )
+
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    assert context.user_id == "42"
+    assert context.tenant_id == "default"
+    assert "admin" in context.roles
+
+
 @pytest.mark.asyncio
 async def test_require_permissions_dependency() -> None:
     """Verify require_permissions validator permits authorized tenants."""
@@ -498,3 +545,61 @@ def test_verify_internal_perimeter_secret_edge_cases() -> None:
         }
     )
     assert verify_internal_perimeter_secret(req_malformed_sig) is False
+
+
+def test_verify_malformed_jwt_returns_401() -> None:
+    """Verify completely malformed JWT returns HTTP 401 instead of unhandled error."""
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt("not.a.valid.jwt.token", algorithm="HS256")
+    assert exc_info.value.status_code == 401
+    assert "invalid" in exc_info.value.detail.lower()
+
+    with pytest.raises(HTTPException) as exc_info2:
+        verify_finnapigo_jwt("completely-garbage-token", algorithm="HS256")
+    assert exc_info2.value.status_code == 401
+
+
+def test_verify_malformed_jwt_header_does_not_cause_500() -> None:
+    """Verify malformed base64 header does not cause HTTP 500 and raises HTTP 401."""
+    malformed_header_token = (
+        "invalid!header.eyJzdWIiOiAidXNlci0xMjMiLCAidGlkIjogInRlbmFudC1hIn0.invalidsig"
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt(malformed_header_token, algorithm="HS256")
+    assert exc_info.value.status_code == 401
+    assert "invalid" in exc_info.value.detail.lower()
+
+
+def test_verify_header_inspection_failure_does_not_bypass_signature() -> None:
+    """Verify header inspection failure or header tampering never bypasses signature verification."""
+    untrusted_token = create_test_jwt(
+        sub="attacker",
+        tenant_id="victim-tenant",
+        secret_key="untrusted-attacker-secret-key-32-chars",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        verify_finnapigo_jwt(untrusted_token, algorithm="HS256")
+    assert exc_info.value.status_code == 401
+
+    # Tampered payload with untrusted signature
+    parts = untrusted_token.split(".")
+    tampered_token = f"{parts[0]}.eyJzdWIiOiAic3VwZXJ1c2VyIn0.{parts[2]}"
+    with pytest.raises(HTTPException) as exc_info2:
+        verify_finnapigo_jwt(tampered_token, algorithm="HS256")
+    assert exc_info2.value.status_code == 401
+
+
+def test_verify_normal_token_validation_path_unchanged() -> None:
+    """Verify normal token validation path continues to produce complete TenantContext."""
+    token = create_test_jwt(
+        sub="normal-user",
+        tenant_id="normal-tenant",
+        roles=["operator", "viewer"],
+        permissions=["read:all", "write:chat"],
+    )
+    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    assert context.user_id == "normal-user"
+    assert context.tenant_id == "normal-tenant"
+    assert context.roles == ["operator", "viewer"]
+    assert "read:all" in context.permissions
+    assert context.correlation_id is not None

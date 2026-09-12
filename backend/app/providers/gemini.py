@@ -90,8 +90,12 @@ class GeminiAdapter(LLMProvider):
         )
 
         gemini_model = (
-            request.model if "gemini" in request.model.lower() else "gemini-1.5-flash"
+            request.model
+            if "gemini" in request.model.lower()
+            else "gemini-flash-latest"
         )
+        if gemini_model in ("gemini-1.5-flash", "gemini-2.5-flash"):
+            gemini_model = "gemini-flash-latest"
 
         payload: dict[str, Any] = {
             "contents": contents,
@@ -103,7 +107,9 @@ class GeminiAdapter(LLMProvider):
         if system_text:
             payload["systemInstruction"] = {"parts": [{"text": system_text}]}
         if request.extra_params:
-            payload.update(request.extra_params)
+            for k, v in request.extra_params.items():
+                if k not in ("prompt_cache_enabled", "cost_aware", "model_routing"):
+                    payload[k] = v
 
         return gemini_model, payload
 

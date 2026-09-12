@@ -187,14 +187,43 @@ class AgentRunner:
     async def stream_run_events(
         self,
         run_id: str,
+        run: RunState | None = None,
     ) -> AsyncIterator[str]:
         """Yield Server-Sent Event formatted strings until the run completes."""
+        if run is not None and run.status.is_terminal:
+            terminal_event = AgentRunEvent(
+                event_type=run.status.value,
+                task_id=run.task_id,
+                run_id=run.run_id,
+                data={
+                    "status": run.status.value,
+                    "output": run.final_output,
+                    "error": run.error,
+                },
+            )
+            yield terminal_event.to_sse()
+            return
+
         queue = self.subscribe_events(run_id)
         try:
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except TimeoutError:
+                    if run is not None and run.status.is_terminal:
+                        break
+                    continue
+
                 if event is None:
                     break
                 yield event.to_sse()
+                if event.event_type in (
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "rejected",
+                    "timeout",
+                ):
+                    break
         finally:
             self.unsubscribe_events(run_id, queue)

@@ -90,3 +90,6 @@ logs/
 
 # Worktrees
 .worktrees/
+
+# Bruno Local Collections
+Bruno/
