@@ -29,11 +29,13 @@ class BM25Retriever:
         k1: float = 1.5,
         b: float = 0.75,
         storage_path: str | Path | None = None,
+        auto_save: bool = True,
     ) -> None:
         self.k1 = k1
         self.b = b
         settings = get_settings()
         self.storage_path = Path(storage_path or settings.BM25_STORAGE_PATH)
+        self.auto_save = auto_save
         # tenant_id -> list of DocumentChunk
         self._corpus: dict[str, list[DocumentChunk]] = {}
         # tenant_id -> chunk_id -> Counter(token -> count)
@@ -44,6 +46,26 @@ class BM25Retriever:
         self._doc_lengths: dict[str, dict[str, int]] = {}
         # tenant_id -> avg_doc_length
         self._avg_lengths: dict[str, float] = {}
+
+        if self.storage_path.is_file():
+            self.load_from_disk()
+
+    def clear(self, tenant_id: str | None = None) -> None:
+        """Clear index state for a specific tenant or the entire index."""
+        if tenant_id:
+            self._corpus.pop(tenant_id, None)
+            self._term_freqs.pop(tenant_id, None)
+            self._doc_freqs.pop(tenant_id, None)
+            self._doc_lengths.pop(tenant_id, None)
+            self._avg_lengths.pop(tenant_id, None)
+        else:
+            self._corpus.clear()
+            self._term_freqs.clear()
+            self._doc_freqs.clear()
+            self._doc_lengths.clear()
+            self._avg_lengths.clear()
+        if self.auto_save and self.storage_path.is_file():
+            self.save_to_disk()
 
     def add_documents(self, chunks: list[DocumentChunk]) -> None:
         """Index a batch of document chunks partitioned strictly per tenant."""
@@ -92,6 +114,9 @@ class BM25Retriever:
                 self._avg_lengths[tenant] = sum(lengths.values()) / len(lengths)
             else:
                 self._avg_lengths[tenant] = 0.0
+
+        if self.auto_save and chunks:
+            self.save_to_disk()
 
     def search(
         self,

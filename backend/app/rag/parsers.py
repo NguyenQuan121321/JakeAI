@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import io
 import logging
 import mimetypes
@@ -189,8 +191,14 @@ class PDFParser(BaseDocumentParser):
     ) -> ParsedDocument:
         meta = metadata.copy() if metadata else {}
         if not data.startswith(b"%PDF"):
-            # Plain text string passed with a .pdf source filename (pre-extracted text)
+            # Attempt to decode base64 payload in case raw PDF was passed via JSON string
+            with contextlib.suppress(Exception):
+                decoded = base64.b64decode(data, validate=True)
+                if decoded.startswith(b"%PDF"):
+                    data = decoded
 
+        if not data.startswith(b"%PDF"):
+            # Plain text string passed with a .pdf source filename (pre-extracted text)
             try:
                 text = data.decode("utf-8")
             except UnicodeDecodeError:
@@ -210,33 +218,32 @@ class PDFParser(BaseDocumentParser):
             import pypdf
 
             reader = pypdf.PdfReader(io.BytesIO(data))
+            page_texts: list[str] = []
+            pages_metadata: list[dict[str, Any]] = []
+
+            for page_idx, page in enumerate(reader.pages, start=1):
+                raw_text = page.extract_text() or ""
+                norm_text = normalize_text(raw_text)
+                if norm_text:
+                    page_texts.append(f"[Page {page_idx}]\n{norm_text}")
+                    pages_metadata.append(
+                        {"page_number": page_idx, "char_count": len(norm_text)}
+                    )
+
+            full_content = "\n\n".join(page_texts)
+            meta["byte_size"] = len(data)
+            meta["total_pages"] = len(reader.pages)
+            meta["extracted_pages"] = len(pages_metadata)
+            meta["pages"] = pages_metadata
+
+            return ParsedDocument(
+                content=full_content,
+                source=filename,
+                mime_type="application/pdf",
+                metadata=meta,
+            )
         except Exception as exc:
             raise ValueError(f"Failed to read PDF file '{filename}': {exc}") from exc
-
-        page_texts: list[str] = []
-        pages_metadata: list[dict[str, Any]] = []
-
-        for page_idx, page in enumerate(reader.pages, start=1):
-            raw_text = page.extract_text() or ""
-            norm_text = normalize_text(raw_text)
-            if norm_text:
-                page_texts.append(f"[Page {page_idx}]\n{norm_text}")
-                pages_metadata.append(
-                    {"page_number": page_idx, "char_count": len(norm_text)}
-                )
-
-        full_content = "\n\n".join(page_texts)
-        meta["byte_size"] = len(data)
-        meta["total_pages"] = len(reader.pages)
-        meta["extracted_pages"] = len(pages_metadata)
-        meta["pages"] = pages_metadata
-
-        return ParsedDocument(
-            content=full_content,
-            source=filename,
-            mime_type="application/pdf",
-            metadata=meta,
-        )
 
 
 _PARSERS: list[BaseDocumentParser] = [

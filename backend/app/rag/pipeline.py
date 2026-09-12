@@ -79,7 +79,14 @@ class RAGPipeline:
         grounding_verifier: GroundingVerifier | None = None,
     ) -> None:
         self.retriever = retriever or default_hybrid_retriever
-        self.ingestion_pipeline = ingestion_pipeline or default_ingestion_pipeline
+        if ingestion_pipeline is not None:
+            self.ingestion_pipeline = ingestion_pipeline
+        elif retriever is not None:
+            self.ingestion_pipeline = DocumentIngestionPipeline(
+                retriever=self.retriever
+            )
+        else:
+            self.ingestion_pipeline = default_ingestion_pipeline
         self.context_selector = context_selector or get_context_selector()
         self.citation_generator = citation_generator or CitationGenerator()
         self.grounding_verifier = grounding_verifier or get_grounding_verifier()
@@ -237,12 +244,12 @@ class RAGPipeline:
             query_terms = {
                 w.lower()
                 for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", query)
-                if w.lower() not in STOPWORDS
+                if w.lower() not in STOPWORDS and not w.isdigit()
             }
             chunk_terms = {
                 w.lower()
                 for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", top_chunk.content)
-                if w.lower() not in STOPWORDS
+                if w.lower() not in STOPWORDS and not w.isdigit()
             }
             query_nums = set(METRIC_REGEX.findall(query))
             chunk_nums = set(METRIC_REGEX.findall(top_chunk.content))
@@ -270,6 +277,7 @@ class RAGPipeline:
         verification = self.grounding_verifier.verify(
             text=raw_answer,
             passages=context_res.selected_chunks,
+            tenant_id=tenant_id,
         )
 
         if not verification.is_grounded and not verification.verified_answer:
@@ -291,10 +299,11 @@ class RAGPipeline:
             verification.verified_answer if verification.verified_answer else raw_answer
         )
 
-        # Step 9: Citation Mapping
+        # Step 9: Citation Mapping with strict tenant scoping
         annotated_answer, citations = self.citation_generator.generate_citations(
             text=verified_text,
             passages=context_res.selected_chunks,
+            tenant_id=tenant_id,
         )
 
         # Enforce strict tenant boundary on all citations

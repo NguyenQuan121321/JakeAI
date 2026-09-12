@@ -15,8 +15,13 @@ class CitationGenerator:
         self,
         text: str,
         passages: list[DocumentChunk],
+        tenant_id: str | None = None,
     ) -> tuple[str, list[Citation]]:
         """Identify supporting passages for claims, strip hallucinated footnotes, and build citation cards."""
+        # Enforce strict multi-tenant boundary guardrail
+        if tenant_id is not None:
+            passages = [p for p in passages if p.tenant_id == tenant_id]
+
         if not passages or not text.strip():
             # Strip any hallucinated footnote markers e.g. [^1], [^99]
             clean_text = re.sub(r"\[\^\d+\]", "", text).strip()
@@ -41,7 +46,7 @@ class CitationGenerator:
             sentence_words = {
                 w.lower()
                 for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", sentence)
-                if w.lower() not in STOPWORDS
+                if w.lower() not in STOPWORDS and not w.isdigit()
             }
             sentence_numbers = set(METRIC_REGEX.findall(sentence))
 
@@ -53,7 +58,7 @@ class CitationGenerator:
                 chunk_words = {
                     w.lower()
                     for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", chunk_content)
-                    if w.lower() not in STOPWORDS
+                    if w.lower() not in STOPWORDS and not w.isdigit()
                 }
                 chunk_numbers = set(METRIC_REGEX.findall(chunk_content))
 
@@ -65,9 +70,17 @@ class CitationGenerator:
                     if num_overlap and num_overlap == sentence_numbers:
                         # Full number match
                         word_ratio = len(word_overlap) / max(1, len(sentence_words))
-                        score = 0.8 + (word_ratio * 0.2)
+                        # Prevent citation mismatch: require minimum lexical overlap when words exist
+                        if sentence_words and word_ratio < 0.15:
+                            score = 0.0  # Spurious metric collision without substantive topic match
+                        else:
+                            score = 0.8 + (word_ratio * 0.2)
                     elif num_overlap:
-                        score = 0.5
+                        score = (
+                            0.5
+                            if (not sentence_words or len(word_overlap) >= 1)
+                            else 0.0
+                        )
                     else:
                         score = 0.0
                 else:

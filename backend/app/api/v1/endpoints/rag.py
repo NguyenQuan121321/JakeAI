@@ -12,6 +12,7 @@ from app.rag.ingestion import (
     default_ingestion_pipeline,
 )
 from app.rag.models import Citation, DocumentChunk
+from app.rag.parsers import UnsupportedDocumentTypeError
 from app.rag.pipeline import default_rag_pipeline
 from app.rag.retriever import default_hybrid_retriever
 from app.rag.tasks import (
@@ -154,10 +155,16 @@ async def ingest_document(
     """Ingest document text synchronously or enqueue into the bounded task queue."""
     if not async_mode:
         response.status_code = status.HTTP_201_CREATED
-        return await default_ingestion_pipeline.ingest(
-            request=request,
-            tenant_id=tenant_ctx.tenant_id,
-        )
+        try:
+            return await default_ingestion_pipeline.ingest(
+                request=request,
+                tenant_id=tenant_ctx.tenant_id,
+            )
+        except (UnsupportedDocumentTypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
     task_mgr = get_task_manager()
     task_res = await task_mgr.enqueue(request, tenant_ctx.tenant_id)

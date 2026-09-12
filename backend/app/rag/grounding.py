@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 # Numerical, currency, percentage, and metric tokens
 METRIC_REGEX = re.compile(
-    r"[\$€£¥₫]\s*\d+(?:[.,]\d+)?(?:\s*(?:billion|million|trillion|tỷ|triệu|k|m|b))?"
-    r"|\b\d+(?:[.,]\d+)?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%)"
-    r"|\b\d+(?:[.,]\d+)?\b",
+    r"[\$€£¥₫]\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|tỷ|triệu|k|m|b))?"
+    r"|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%)"
+    r"|\b\d+(?:,\d{3})*(?:\.\d+)?\b",
     re.IGNORECASE,
 )
 
@@ -127,8 +127,12 @@ class GroundingVerifier:
         self,
         claim: str,
         passages: list[DocumentChunk],
+        tenant_id: str | None = None,
     ) -> GroundingClaim:
         """Verify a single claim against candidate evidence passages."""
+        if tenant_id is not None:
+            passages = [p for p in passages if p.tenant_id == tenant_id]
+
         if not passages:
             return GroundingClaim(
                 claim_text=claim,
@@ -142,7 +146,7 @@ class GroundingVerifier:
         claim_terms = {
             w.lower()
             for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", claim)
-            if w.lower() not in STOPWORDS
+            if w.lower() not in STOPWORDS and not w.isdigit()
         }
 
         best_support_chunks: list[str] = []
@@ -155,7 +159,7 @@ class GroundingVerifier:
             chunk_terms = {
                 w.lower()
                 for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", chunk_content)
-                if w.lower() not in STOPWORDS
+                if w.lower() not in STOPWORDS and not w.isdigit()
             }
 
             # If claim asserts numbers, check if they exist in the chunk
@@ -168,9 +172,10 @@ class GroundingVerifier:
                         best_support_chunks.append(chunk.chunk_id)
                         max_overlap_ratio = max(max_overlap_ratio, ratio)
                 else:
-                    # Check if partial number match with contradicting numbers
-                    intersect_num = claim_numbers.intersection(chunk_numbers)
-                    if not intersect_num and claim_terms.intersection(chunk_terms):
+                    # Check if topic terms overlap but numbers differ/contradict
+                    overlap = len(claim_terms.intersection(chunk_terms))
+                    ratio = overlap / max(1, len(claim_terms))
+                    if ratio >= 0.25 and chunk_numbers:
                         number_mismatch_detected = True
             else:
                 # Qualitative claim verification
@@ -182,6 +187,15 @@ class GroundingVerifier:
 
         # Classify entailment
         if best_support_chunks:
+            if number_mismatch_detected:
+                # Conflicting evidence: one passage matches but another contradicts the metrics
+                return GroundingClaim(
+                    claim_text=claim,
+                    entailment=ClaimEntailment.UNCERTAIN,
+                    confidence=0.50,
+                    supporting_chunk_ids=best_support_chunks,
+                    reasoning=f"Conflicting evidence detected in context passages: supported by {', '.join(best_support_chunks)} but contradicted by other records.",
+                )
             confidence = round(min(1.0, 0.70 + (max_overlap_ratio * 0.30)), 2)
             return GroundingClaim(
                 claim_text=claim,
@@ -224,8 +238,12 @@ class GroundingVerifier:
         self,
         text: str,
         passages: list[DocumentChunk],
+        tenant_id: str | None = None,
     ) -> GroundingVerificationResult:
         """Run complete claim extraction and grounding verification."""
+        if tenant_id is not None:
+            passages = [p for p in passages if p.tenant_id == tenant_id]
+
         claims = self.extract_claims(text)
         if not claims:
             # If no substantive claims (e.g. empty or boilerplate), check if passages exist
@@ -241,7 +259,7 @@ class GroundingVerifier:
             )
 
         verified_claims: list[GroundingClaim] = [
-            self.verify_claim(c, passages) for c in claims
+            self.verify_claim(c, passages, tenant_id=tenant_id) for c in claims
         ]
 
         supported = [
