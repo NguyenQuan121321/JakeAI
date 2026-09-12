@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.agent.approvals.policy import ApprovalPolicy
 from app.agent.backends.base import AgentMessage
+from app.agent.domain.contracts import StepStatus
 from app.agent.planning.models import NextActionType
 from app.agent.runtime.models import AgentConfig, AgentRunEvent
 from app.agent.state.models import (
@@ -78,6 +79,7 @@ class AgentExecutionLoop:
 
         # Initialize or retrieve plan
         plan = self.planner.create_initial_plan(task.goal, available_tools)
+        run.plan = plan.model_dump()
 
         run.status = RunStatus.RUNNING
         task.status = TaskStatus.RUNNING
@@ -133,6 +135,11 @@ class AgentExecutionLoop:
                 task.status = TaskStatus.COMPLETED
                 run.final_output = action.final_output
                 run.completed_at = time.time()
+                for s in plan.steps:
+                    if s.status == StepStatus.PENDING:
+                        s.status = StepStatus.COMPLETED
+                plan.completed = True
+                run.plan = plan.model_dump()
                 await self.checkpoint_manager.save_checkpoint(
                     run, short_term_mem.snapshot()
                 )
@@ -211,6 +218,7 @@ class AgentExecutionLoop:
                     run.status = RunStatus.PAUSED_APPROVAL
                     task.status = TaskStatus.PAUSED_APPROVAL
                     run.pending_approval_id = appr_req.approval_id
+                    run.plan = plan.model_dump()
 
                     # Save checkpoint for resumption
                     await self.checkpoint_manager.save_checkpoint(
@@ -289,6 +297,12 @@ class AgentExecutionLoop:
                     execution_time_ms=step_duration,
                 )
                 run.steps.append(step_rec)
+                if run.current_iteration < len(plan.steps):
+                    plan.steps[run.current_iteration].status = (
+                        StepStatus.COMPLETED if tool_res.success else StepStatus.FAILED
+                    )
+                    plan.steps[run.current_iteration].observation = obs_text
+                run.plan = plan.model_dump()
 
                 yield AgentRunEvent(
                     event_type="observation",

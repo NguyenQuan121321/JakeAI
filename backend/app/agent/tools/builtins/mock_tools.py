@@ -112,7 +112,7 @@ class MockDangerousShellTool(Tool):
                 },
                 "required": ["command"],
             },
-            permissions=["agent:terminal"],
+            permissions=[],
             risk_level=ToolRiskLevel.DANGEROUS,
         )
 

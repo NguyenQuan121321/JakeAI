@@ -122,6 +122,7 @@ class AgentRuntimeManager:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         iterations_limit = max_iterations or self.config.max_iterations
 
+        initial_plan = self.planner.create_initial_plan(task.goal)
         run = RunState(
             run_id=run_id,
             task_id=task_id,
@@ -129,6 +130,7 @@ class AgentRuntimeManager:
             user_id=user_id,
             status=RunStatus.CREATED,
             max_iterations=iterations_limit,
+            plan=initial_plan.model_dump(),
         )
         self._runs[run_id] = run
         task.active_run_id = run_id
@@ -250,7 +252,9 @@ class AgentRuntimeManager:
         )
         agent_telemetry.record_approval_decision(decision.approved, tenant_id)
 
-        if decision.approved and run.status == RunStatus.PAUSED_APPROVAL:
+        if decision.approved and (
+            run.status in (RunStatus.PAUSED_APPROVAL, RunStatus.WAITING_APPROVAL)
+        ):
             # Resume run execution
             await self.runner.resume_after_approval(
                 task=task,

@@ -92,6 +92,7 @@ class ExecutionEngine:
         task_spec: TaskSpec,
         run_id: str | None = None,
         cancellation_token: Any = None,
+        max_revisions: int = 2,
     ) -> AsyncGenerator[AgentRunEvent, None]:
         """Execute task through canonical lifecycle: PLAN -> RESOLVE -> EXECUTE -> VERIFY -> COMPLETE."""
         start_ts = time.time()
@@ -166,16 +167,79 @@ class ExecutionEngine:
             },
         )
 
+        if self._is_cancelled(cancellation_token):
+            run_state.status = RunStatus.CANCELLED
+            run_state.completed_at = time.time()
+            await self.checkpoint_manager.save_checkpoint(run_state)
+            yield AgentRunEvent(
+                event_type="cancelled",
+                task_id=task_spec.task_id,
+                run_id=active_run_id,
+                data={
+                    "message": "Execution cancelled by operator request",
+                    "reason": "Execution cancelled by client.",
+                },
+            )
+            return
+
         await self.checkpoint_manager.save_checkpoint(run_state)
         run_state.status = RunStatus.EXECUTING
 
-        completed_step_ids: set[str] = set()
-        accumulated_outputs: dict[str, Any] = {}
+        async for event in self._run_execution_loop(
+            task_spec=task_spec,
+            context=context,
+            run_state=run_state,
+            plan=plan,
+            cancellation_token=cancellation_token,
+            start_ts=start_ts,
+            max_revisions=max_revisions,
+        ):
+            yield event
+
+    async def _run_execution_loop(
+        self,
+        task_spec: TaskSpec,
+        context: ExecutionContext,
+        run_state: RunState,
+        plan: Plan,
+        cancellation_token: Any = None,
+        approval_already_granted: bool = False,
+        start_ts: float | None = None,
+        max_revisions: int = 2,
+    ) -> AsyncGenerator[AgentRunEvent, None]:
+        """Canonical DAG execution loop with concurrency, recovery, and self-RAG verification."""
+        active_run_id = run_state.run_id
+        start_ts = start_ts or time.time()
+        tenant_id = task_spec.tenant_id
+
+        completed_step_ids: set[str] = {
+            s.step_id for s in plan.steps if s.status == StepStatus.COMPLETED
+        }
+        accumulated_outputs: dict[str, Any] = {
+            s.step_id: s.result.output
+            for s in plan.steps
+            if s.result and s.result.output is not None
+        }
         all_tool_calls: list[dict[str, Any]] = []
         financial_data: dict[str, Any] = {}
         retrieved_chunks: list[dict[str, Any]] = []
+
+        # Populate state from any previously completed steps
+        for s in plan.steps:
+            if s.result:
+                if s.result.tool_calls:
+                    all_tool_calls.extend(s.result.tool_calls)
+                if isinstance(s.result.output, dict):
+                    if (
+                        "revenue" in s.result.output
+                        and "operating_expenses" in s.result.output
+                    ):
+                        financial_data = s.result.output
+                    if "retrieved_chunks" in s.result.output:
+                        retrieved_chunks.extend(s.result.output["retrieved_chunks"])
+
         revision_count = 0
-        max_revisions = 2
+        current_approval_already_granted = approval_already_granted
 
         # Outer Revision Loop
         while revision_count <= max_revisions:
@@ -193,6 +257,29 @@ class ExecutionEngine:
                         task_id=task_spec.task_id,
                         run_id=active_run_id,
                         data={"message": "Execution cancelled by operator request"},
+                    )
+                    return
+
+                # Check Run-Level Timeout
+                run_timeout = float(
+                    task_spec.metadata.get("timeout_seconds", 0)
+                ) or getattr(
+                    self.recovery_engine.limits,
+                    "MAX_EXECUTION_TIME_SECONDS",
+                    60.0,
+                )
+                if elapsed >= run_timeout:
+                    run_state.status = RunStatus.TIMEOUT
+                    run_state.error = (
+                        f"Execution timeout of {run_timeout:.1f}s exceeded."
+                    )
+                    run_state.completed_at = time.time()
+                    await self.checkpoint_manager.save_checkpoint(run_state)
+                    yield AgentRunEvent(
+                        event_type="failed",
+                        task_id=task_spec.task_id,
+                        run_id=active_run_id,
+                        data={"error": run_state.error, "status": "timeout"},
                     )
                     return
 
@@ -215,7 +302,6 @@ class ExecutionEngine:
                     break
 
                 # Execute independent steps concurrently via asyncio.gather() (Phase 11)
-                # Only parallelize steps that are proven independent by the plan dependency graph
                 if len(runnable) > 1:
                     logger.info(
                         "Executing %d independent steps concurrently", len(runnable)
@@ -228,6 +314,7 @@ class ExecutionEngine:
                             run_state=run_state,
                             accumulated_outputs=accumulated_outputs,
                             _elapsed_seconds=elapsed,
+                            approval_already_granted=current_approval_already_granted,
                         )
                         for s in runnable
                     ]
@@ -235,16 +322,19 @@ class ExecutionEngine:
                         *step_tasks, return_exceptions=False
                     )
                 else:
-                    s = runnable[0]
+                    runnable_step = runnable[0]
                     res = await self._execute_single_step(
-                        step=s,
+                        step=runnable_step,
                         task_spec=task_spec,
                         context=context,
                         run_state=run_state,
                         accumulated_outputs=accumulated_outputs,
                         _elapsed_seconds=elapsed,
+                        approval_already_granted=current_approval_already_granted,
                     )
                     step_results = [res]
+
+                current_approval_already_granted = False
 
                 # Process step results
                 paused_for_approval = False
@@ -343,7 +433,10 @@ class ExecutionEngine:
                                 },
                             )
                         elif rec_decision.action == RecoveryAction.SWITCH_MODEL:
-                            step_obj.selected_model = "gemini-1.5-pro"
+                            alt_model = (
+                                rec_decision.alternative_model or "gemini-1.5-pro"
+                            )
+                            step_obj.selected_model = alt_model
                             step_obj.retries_exhausted += 1
                             step_obj.status = StepStatus.PENDING
                             plan.mark_step_status(
@@ -356,7 +449,7 @@ class ExecutionEngine:
                                 run_id=active_run_id,
                                 data={
                                     "step_id": step_obj.step_id,
-                                    "new_model": "gemini-1.5-pro",
+                                    "new_model": alt_model,
                                     "reason": rec_decision.reason,
                                 },
                             )
@@ -842,6 +935,11 @@ class ExecutionEngine:
             return step, res, events
 
         # General problem solver / ReAct model execution
+        step_timeout = (
+            step.timeout_policy.timeout_seconds
+            if step.timeout_policy and step.timeout_policy.timeout_seconds > 0
+            else 30.0
+        )
         try:
             backend_req = BackendRequest(
                 messages=[
@@ -856,16 +954,46 @@ class ExecutionEngine:
                 model=selected_model,
                 tenant_id=task_spec.tenant_id,
             )
-            resp = await self.backend.generate(backend_req)
+            resp = await asyncio.wait_for(
+                self.backend.generate(backend_req),
+                timeout=step_timeout,
+            )
+            actual_model = (
+                resp.model
+                if (resp.model and resp.model != "unknown")
+                else selected_model
+            )
+            actual_provider = (
+                resp.provider
+                if (resp.provider and resp.provider != "unknown")
+                else selected_provider
+            )
+            step.selected_model = actual_model
+            step.selected_provider = actual_provider
             res = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.COMPLETED,
                 output=resp.content or "Completed step execution.",
                 agent_id=agent_sel.agent_id,
-                model_used=selected_model,
-                provider_used=selected_provider,
+                model_used=actual_model,
+                provider_used=actual_provider,
                 tokens_consumed=resp.input_tokens + resp.output_tokens,
                 cost_usd=resp.cost_usd,
+                execution_time_ms=(time.time() - step_start) * 1000,
+            )
+            return step, res, events
+        except TimeoutError:
+            err = f"Step execution timed out after {step_timeout:.1f}s."
+            logger.warning(
+                "Step '%s' timed out after %.2fs", step.step_id, step_timeout
+            )
+            res = StepResult(
+                step_id=step.step_id,
+                status=StepStatus.FAILED,
+                error=err,
+                agent_id=agent_sel.agent_id,
+                model_used=selected_model,
+                provider_used=selected_provider,
                 execution_time_ms=(time.time() - step_start) * 1000,
             )
             return step, res, events
@@ -892,6 +1020,7 @@ class ExecutionEngine:
         tenant_id: str,
         approved: bool | None = None,
         rejection_reason: str | None = None,
+        cancellation_token: Any = None,
     ) -> AsyncGenerator[AgentRunEvent, None]:
         """Resume an execution run from a checkpoint or approval pause point."""
         run_state = await self.checkpoint_manager.resume_run_from_checkpoint(
@@ -909,21 +1038,27 @@ class ExecutionEngine:
         )
         context.assert_tenant_match(tenant_id)
 
+        raw_plan = run_state.plan or {}
+        plan = Plan(**raw_plan)
+
+        goal_val = (
+            run_state.prompt
+            or (plan.goal if hasattr(plan, "goal") and plan.goal else "")
+            or "Resumed Agent Task"
+        )
         task_spec = TaskSpec(
             task_id=run_state.task_id,
             tenant_id=tenant_id,
             user_id=run_state.user_id,
-            goal=run_state.prompt or "",
+            goal=goal_val,
             roles=run_state.roles,
             permissions=run_state.permissions,
             correlation_id=corr_id,
         )
 
-        raw_plan = run_state.plan or {}
-        plan = Plan(**raw_plan)
-
+        approval_already_granted = False
         # If waiting approval, process approval decision
-        if run_state.status == RunStatus.WAITING_APPROVAL:
+        if run_state.status in (RunStatus.WAITING_APPROVAL, RunStatus.PAUSED_APPROVAL):
             if approved is False or (rejection_reason and approved is None):
                 run_state.status = RunStatus.REJECTED
                 run_state.error = (
@@ -948,6 +1083,7 @@ class ExecutionEngine:
                         break
 
             if is_approved:
+                approval_already_granted = True
                 # Advance waiting step to PENDING so it executes with approval
                 for pending_step in plan.steps:
                     if pending_step.status in (
@@ -975,177 +1111,34 @@ class ExecutionEngine:
                 )
                 return
 
-        start_ts = time.time()
-        completed_step_ids = {
-            p_step.step_id
-            for p_step in plan.steps
-            if p_step.status == StepStatus.COMPLETED
-        }
-        accumulated_outputs: dict[str, Any] = {
-            p_step.step_id: p_step.result.output
-            for p_step in plan.steps
-            if p_step.result and p_step.result.output is not None
-        }
-        all_tool_calls: list[dict[str, Any]] = []
-        for p_step in plan.steps:
-            if p_step.result and p_step.result.tool_calls:
-                all_tool_calls.extend(p_step.result.tool_calls)
-        financial_data: dict[str, Any] = {}
-        retrieved_chunks: list[dict[str, Any]] = []
-        revision_count = 0
-
-        while not plan.is_complete():
-            elapsed = time.time() - start_ts
-            runnable = plan.get_runnable_steps(completed_step_ids)
-            if not runnable:
-                if plan.has_failures():
-                    run_state.status = RunStatus.FAILED
-                    run_state.error = (
-                        "Plan execution halted due to unrecoverable step failure."
-                    )
-                    await self.checkpoint_manager.save_checkpoint(run_state)
-                    yield AgentRunEvent(
-                        event_type="failed",
-                        task_id=task_spec.task_id,
-                        run_id=run_id,
-                        data={"error": run_state.error},
-                    )
-                    return
-                break
-
-            if len(runnable) > 1:
-                step_tasks = [
-                    self._execute_single_step(
-                        step=r_step,
-                        task_spec=task_spec,
-                        context=context,
-                        run_state=run_state,
-                        accumulated_outputs=accumulated_outputs,
-                        _elapsed_seconds=elapsed,
-                        approval_already_granted=True,
-                    )
-                    for r_step in runnable
-                ]
-                step_results = await asyncio.gather(
-                    *step_tasks, return_exceptions=False
-                )
-            else:
-                runnable_step = runnable[0]
-                res = await self._execute_single_step(
-                    step=runnable_step,
-                    task_spec=task_spec,
-                    context=context,
-                    run_state=run_state,
-                    accumulated_outputs=accumulated_outputs,
-                    _elapsed_seconds=elapsed,
-                    approval_already_granted=True,
-                )
-                step_results = [res]
-
-            paused_for_approval = False
-            for step_obj, step_res, events_to_emit in step_results:
-                for ev in events_to_emit:
-                    yield ev
-
-                if step_res.status == StepStatus.WAITING_APPROVAL:
-                    run_state.status = RunStatus.WAITING_APPROVAL
-                    await self.checkpoint_manager.save_checkpoint(run_state)
-                    paused_for_approval = True
-                    break
-
-                if step_res.status == StepStatus.COMPLETED:
-                    completed_step_ids.add(step_obj.step_id)
-                    plan.mark_step_status(
-                        step_id=step_obj.step_id,
-                        status=StepStatus.COMPLETED,
-                        observation=str(step_res.output),
-                        result=step_res,
-                    )
-                    yield AgentRunEvent(
-                        event_type="step_completed",
-                        task_id=task_spec.task_id,
-                        run_id=run_id,
-                        data={
-                            "step_id": step_obj.step_id,
-                            "output": step_res.output,
-                            "agent_id": step_res.agent_id,
-                        },
-                    )
-                    accumulated_outputs[step_obj.step_id] = step_res.output
-                    if step_res.tool_calls:
-                        all_tool_calls.extend(step_res.tool_calls)
-
-            if paused_for_approval:
-                return
-
-            run_state.plan = plan.model_dump()
-            await self.checkpoint_manager.save_checkpoint(run_state)
-
-        # Verification & Terminal Complete
-        final_output_candidate = ""
-        for p_step in reversed(plan.steps):
-            if p_step.result and p_step.result.output:
-                final_output_candidate = str(p_step.result.output)
-                break
-
-        verification = self.verifier.verify_execution(
-            tenant_id=tenant_id,
-            goal=task_spec.goal,
-            step_outputs=list(accumulated_outputs.values()),
-            tool_calls=all_tool_calls,
-            retrieved_chunks=retrieved_chunks,
-            financial_data=financial_data,
-            final_output=final_output_candidate,
-            revision_count=revision_count,
-        )
-        if verification.verdict in (
-            VerificationVerdict.REJECTED,
-            VerificationVerdict.FAILED,
+        # Execute remaining steps via common execution loop
+        async for event in self._run_execution_loop(
+            task_spec=task_spec,
+            context=context,
+            run_state=run_state,
+            plan=plan,
+            cancellation_token=cancellation_token,
+            approval_already_granted=approval_already_granted,
         ):
-            run_state.status = (
-                RunStatus.REJECTED
-                if verification.verdict == VerificationVerdict.REJECTED
-                else RunStatus.FAILED
-            )
-            run_state.error = verification.reason
-            run_state.completed_at = time.time()
-            await self.checkpoint_manager.save_checkpoint(run_state)
-            yield AgentRunEvent(
-                event_type="failed",
-                task_id=task_spec.task_id,
-                run_id=run_id,
-                data={
-                    "error": verification.reason,
-                    "verdict": verification.verdict.value,
-                },
-            )
-            return
-
-        run_state.status = RunStatus.COMPLETED
-        run_state.final_output = final_output_candidate
-        run_state.completed_at = time.time()
-        await self.checkpoint_manager.save_checkpoint(run_state)
-        yield AgentRunEvent(
-            event_type="completed",
-            task_id=task_spec.task_id,
-            run_id=run_id,
-            data={
-                "output": final_output_candidate,
-                "elapsed_ms": round((time.time() - start_ts) * 1000, 2),
-                "steps_completed": len(completed_step_ids),
-                "verdict": "PASS",
-            },
-        )
+            yield event
 
     @staticmethod
     def _is_cancelled(cancellation_token: Any) -> bool:
         """Evaluate cooperative cancellation flag or event."""
         if cancellation_token is None:
             return False
+        if isinstance(cancellation_token, bool):
+            return cancellation_token
         if callable(cancellation_token):
             return bool(cancellation_token())
         if hasattr(cancellation_token, "is_set"):
             return bool(cancellation_token.is_set())
+        if hasattr(cancellation_token, "is_cancelled"):
+            val = cancellation_token.is_cancelled
+            return bool(val() if callable(val) else val)
+        if hasattr(cancellation_token, "cancelled"):
+            val = cancellation_token.cancelled
+            return bool(val() if callable(val) else val)
         return False
 
 
