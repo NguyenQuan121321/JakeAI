@@ -16,6 +16,19 @@ from app.agent.approvals.models import ApprovalStatus
 from app.agent.approvals.policy import ApprovalPolicy
 from app.agent.backends.base import AgentBackendInterface, AgentMessage, BackendRequest
 from app.agent.backends.jakeai import JakeAIBackend
+from app.agent.capabilities.financial_analysis import (
+    DEFAULT_OPERATING_EXPENSES,
+    DEFAULT_REVENUE,
+)
+from app.agent.capabilities.financial_analysis import (
+    ebitda as compute_ebitda,
+)
+from app.agent.capabilities.financial_analysis import (
+    operating_income as compute_operating_income,
+)
+from app.agent.capabilities.financial_analysis import (
+    operating_margin_pct as compute_operating_margin_pct,
+)
 from app.agent.domain.contracts import (
     ExecutionContext,
     PlanStep,
@@ -1004,9 +1017,11 @@ class ExecutionEngine:
             return step, res, events
 
         if agent_sel.agent_id == "financial_specialist":
-            # Quantitative computation
-            rev = 1500000.0
-            exp = 950000.0
+            # Quantitative computation via the canonical financial capability
+            # (R-ARCH-02); ledger coupling below is engine-specific input
+            # derivation and presentation rounding stays engine-local.
+            rev = DEFAULT_REVENUE
+            exp = DEFAULT_OPERATING_EXPENSES
             # Inspect previous banking outputs if present
             for prev_out in accumulated_outputs.values():
                 if isinstance(prev_out, dict) and "ledger_balance" in prev_out:
@@ -1014,9 +1029,9 @@ class ExecutionEngine:
                     exp = rev * 0.60
                     break
 
-            operating_income = round(rev - exp, 2)
-            margin = round((operating_income / rev) * 100, 2) if rev > 0 else 0.0
-            ebitda = round(operating_income * 1.12, 2)
+            operating_income = round(compute_operating_income(rev, exp), 2)
+            margin = compute_operating_margin_pct(operating_income, rev)
+            ebitda = round(compute_ebitda(operating_income), 2)
 
             fin_res = {
                 "revenue": rev,

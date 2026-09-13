@@ -13,6 +13,19 @@ from app.agent.backends.base import (
     AgentMessage,
     BackendRequest,
 )
+from app.agent.capabilities.financial_analysis import (
+    DEFAULT_OPERATING_EXPENSES,
+    DEFAULT_REVENUE,
+)
+from app.agent.capabilities.financial_analysis import (
+    ebitda as compute_ebitda,
+)
+from app.agent.capabilities.financial_analysis import (
+    operating_income as compute_operating_income,
+)
+from app.agent.capabilities.financial_analysis import (
+    operating_margin_pct as compute_operating_margin_pct,
+)
 from app.agent.domain.contracts import (
     AgentCapability,
     StepStatus,
@@ -38,6 +51,10 @@ if TYPE_CHECKING:
     from app.agent.tools.base import ToolMetadata
 
 logger = logging.getLogger(__name__)
+
+# Degraded-fallback calculator input for the canonical financial defaults;
+# derived from the capability authority, not re-declared (R-ARCH-02).
+_DEGRADED_CALC_EXPRESSION = f"{DEFAULT_REVENUE:.0f} - {DEFAULT_OPERATING_EXPENSES:.0f}"
 
 # Planner-local plan-shaping heuristics (capability classification itself comes
 # from the canonical app.agent.registry.capability_patterns authority).
@@ -832,7 +849,7 @@ class BoundedPlanner:
                 tool_args = getattr(current_step, "tool_args", None) or {}
                 if not tool_args:
                     if req_tool == "calculator":
-                        tool_args = {"expression": "1500000 - 950000"}
+                        tool_args = {"expression": _DEGRADED_CALC_EXPRESSION}
                     elif req_tool in ("terminal_exec", "mock_dangerous_shell"):
                         tool_args = {"command": "system maintenance audit"}
                     # get_account_balance intentionally gets no account_id here:
@@ -862,8 +879,12 @@ class BoundedPlanner:
                 return NextAction(
                     action_type=NextActionType.TOOL_CALL,
                     tool_name="calculator",
-                    tool_args={"expression": "1500000 - 950000"},
-                    thought="Calculating operating income from revenue ($1,500,000) and operating expenses ($950,000).",
+                    tool_args={"expression": _DEGRADED_CALC_EXPRESSION},
+                    thought=(
+                        "Calculating operating income from revenue "
+                        f"(${DEFAULT_REVENUE:,.0f}) and operating expenses "
+                        f"(${DEFAULT_OPERATING_EXPENSES:,.0f})."
+                    ),
                     selected_model="degraded_fallback",
                 )
 
@@ -875,7 +896,17 @@ class BoundedPlanner:
                 break
 
         if FINANCIAL_PATTERN.search(goal):
-            calc_val = "550,000.00"
+            # Default report figures derive from the canonical financial
+            # capability authority (R-ARCH-02), not local literals.
+            default_income = compute_operating_income(
+                DEFAULT_REVENUE, DEFAULT_OPERATING_EXPENSES
+            )
+            default_margin = compute_operating_margin_pct(
+                default_income, DEFAULT_REVENUE
+            )
+            default_ebitda = compute_ebitda(default_income)
+
+            calc_val = f"{default_income:,.2f}"
             if last_tool_output:
                 if "'result':" in str(last_tool_output):
                     try:
@@ -893,11 +924,11 @@ class BoundedPlanner:
 
             fin_summary = (
                 "### Financial Analysis Report\n"
-                "- **Revenue**: $1,500,000.00\n"
-                "- **Operating Expenses**: $950,000.00\n"
+                f"- **Revenue**: ${DEFAULT_REVENUE:,.2f}\n"
+                f"- **Operating Expenses**: ${DEFAULT_OPERATING_EXPENSES:,.2f}\n"
                 f"- **Operating Income**: ${calc_val}\n"
-                "- **Operating Margin**: 36.67%\n"
-                "- **EBITDA**: $616,000.00\n\n"
+                f"- **Operating Margin**: {default_margin}%\n"
+                f"- **EBITDA**: ${default_ebitda:,.2f}\n\n"
                 "Completed via deterministic financial calculation engine."
             )
             return NextAction(
