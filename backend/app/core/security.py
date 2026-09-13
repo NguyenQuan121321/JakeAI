@@ -151,7 +151,8 @@ def verify_finnapigo_jwt(
     raw_roles = payload.get("roles") or payload.get("role") or []
     roles = [raw_roles] if isinstance(raw_roles, str) else list(raw_roles)
 
-    scopes = payload.get("scopes", [])
+    # `or []` also absorbs a present-but-null claim (same as roles/perms).
+    scopes = payload.get("scopes") or []
     if isinstance(scopes, str):
         scopes = scopes.split(" ")
 

@@ -13,7 +13,7 @@ from app.guardrails.rbac_guard import check_tool_rbac_guardrail
 async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
     """Execute authenticated upstream FinnApiGo operations with tenant scoping."""
     prompt = state.get("prompt", "")
-    tenant_id = state.get("tenant_id", "default_tenant")
+    tenant_id = state.get("tenant_id", "default")
     user_id = state.get("user_id", "anonymous")
 
     from app.agent.tools.registry import get_tool_registry

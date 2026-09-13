@@ -116,8 +116,16 @@ class AgentRuntimeManager:
         tenant_id: str,
         user_id: str,
         max_iterations: int | None = None,
+        roles: list[str] | None = None,
+        permissions: list[str] | None = None,
+        correlation_id: str | None = None,
     ) -> RunState:
-        """Create a new execution run associated with a task."""
+        """Create a new execution run associated with a task.
+
+        The caller's authorization context (roles/permissions) and correlation
+        id are persisted on the run so tool RBAC, telemetry, and checkpoint
+        restores keep the originating request's identity.
+        """
         task = self.get_task(task_id, tenant_id)
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         iterations_limit = max_iterations or self.config.max_iterations
@@ -131,6 +139,9 @@ class AgentRuntimeManager:
             status=RunStatus.CREATED,
             max_iterations=iterations_limit,
             plan=initial_plan.model_dump(),
+            roles=list(roles or []),
+            permissions=list(permissions or []),
+            correlation_id=correlation_id,
         )
         self._runs[run_id] = run
         task.active_run_id = run_id
@@ -262,6 +273,17 @@ class AgentRuntimeManager:
         """Submit approval or rejection for a dangerous action, resuming run if approved."""
         task = self.get_task(task_id, tenant_id)
         run = self.get_run(run_id, tenant_id)
+
+        # Binding check BEFORE finalizing: a decision submitted against the
+        # wrong run must be refused outright, otherwise the gate is consumed
+        # (APPROVED/REJECTED) while its own run is never resumed.
+        pending_appr = self.approval_manager.get_request(approval_id, tenant_id)
+        if pending_appr.run_id != run_id or pending_appr.task_id != task_id:
+            raise ValueError(
+                f"Approval '{approval_id}' belongs to run '{pending_appr.run_id}' "
+                f"(task '{pending_appr.task_id}'), not to run '{run_id}' "
+                f"(task '{task_id}')."
+            )
 
         appr = self.approval_manager.decide(
             approval_id=approval_id,
