@@ -1,6 +1,6 @@
 # R-LOGIC-03 — Accounting — Result
 
-**Status**: VERIFIED — all confirmed defects fixed, regression-tested, all CI-equivalent checks green locally. (CI evidence appended below after push.)
+**Status**: VERIFIED — all confirmed defects fixed, regression-tested, all CI-equivalent checks green locally. One CI regression (RL03-F-08, Redis-path denial message) caught by run 1, fixed, and CI green on run 2 (evidence in §10).
 **Baseline**: `main` @ `ea95b07` (post R-LOGIC-02 merge, PR #40)
 **Branch**: `chore/r-logic-03-accounting` → PR: see git log / GitHub
 **Date**: 2026-09-13
@@ -192,7 +192,7 @@ cd backend && .venv/bin/python /tmp/rl03_repro.py
 .venv/bin/python scripts/run_ai_evaluation.py --output-dir /tmp/rl03-benchmark                                        # PASSED all gates
 ```
 
-**Actual results**: all commands green locally; `102 passed` on the combined core chunk; OpenAPI zero drift (no response-model changes → no `openapi.json` regeneration needed); CI run 34812027746 green 9/9.
+**Actual results**: all commands green locally; `102 passed` on the combined core chunk; OpenAPI zero drift (no response-model changes → no `openapi.json` regeneration needed). CI: run 1 caught RL03-F-08 (fixed), run 2 green.
 
 ## 7. Remaining Issues & Risks
 
@@ -222,16 +222,21 @@ cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 4. **Concurrent oversubscription** — set quota 500, then fire ~10 parallel `POST /api/v1/gateway/chat/completions` (same tenant, `max_tokens: 64`): only the first few should succeed (200), the rest 429, and `GET /api/v1/gateway/quotas` must show `tokens_used ≤ 500`.
 5. **Usage consistency** — on any non-cached gateway response, assert `usage.total_tokens == usage.prompt_tokens + usage.completion_tokens` and that `GET /api/v1/gateway/quotas` `tokens_used` increased by exactly that total.
 
+### RL03-F-08 — SEVERITY: LOW — (CI regression, fixed) Redis denial results mislabeled the fired constraint
+
+- **EXPECTED**: The Lua reserve contract `{allowed, tok_used, tok_limit, dol_spent, dol_limit}` uses `-1` as the "no dollar limit" sentinel; a token-quota denial must produce the token-quota denial message.
+- **ACTUAL (CI run 34751257085, Python 3.11, real Redis)**: `test_reservation_denial_messages_match_hard_stop_semantics` failed — the token-quota denial produced "Monthly dollar budget exceeded ($0.0000/$-1.00 USD)". Only reachable on the Redis path (the memory path passes `None`), which is why local runs were green. **Classification: CURRENT TASK REGRESSION** (1 failed / 916 passed; all other jobs green).
+- **ROOT CAUSE**: The Python-side denial branch passed the `-1.0` sentinel into `_denial_message` instead of mapping it to `None`.
+- **FIX**: Map the sentinel to `None` in the Redis denial branch (`dol_limit_r if dol_limit_r >= 0 else None`), plus two contract-pinning tests (`test_redis_lua_denial_results_map_to_correct_messages`, `test_redis_lua_granted_result_builds_reservation`) exercising the exact Lua result shapes without requiring Redis locally.
+- **REGRESSION TEST**: The two Lua-contract tests above.
+- **RETEST RESULT**: PASS — post-fix CI run recorded in §10.
+
 ## 10. CI Status
 
 | Check | Result |
 |---|---|
-| GitHub Actions run | PENDING — filled after push |
-| Automated Tests & AI RAG Regression (3.11 + 3.12, real Redis 7 + Qdrant, ≥85% coverage + patch gates) | PASSED |
-| Token Optimization Benchmark Gate (≥40%) | PASSED |
-| Phase 00 AI Evaluation Benchmark Gate | PASSED |
-| Internal Mutual Auth / RAG Quality / LLMOps Safety / OpenAPI Contract & breaking-change gates | PASSED |
-| Ruff, Mypy (3.11+3.12), Bandit, pip-audit, licenses, gitleaks, hadolint/actionlint, frontend build, container build + Trivy | PASSED |
+| Run 1 — 34751257085 (8 check runs before fix) | 7 green; **Automated Tests (3.11) FAILED** → RL03-F-08 (CURRENT TASK REGRESSION, 1 failed / 916 passed); 3.12 cancelled by needs |
+| Run 2 — post-fix (see commit "ci-regression" / latest run on PR #41) | **GREEN — all 9 check runs success** (test jobs 3.11+3.12 incl. real-Redis Lua reservation path, coverage ≥85% + patch gates, benchmark gates, contract gates, SAST, container scan) |
 
 ---
 

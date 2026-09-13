@@ -291,8 +291,14 @@ class FinOpsBudgetManager:
                 redis = None
             else:
                 if not allowed:
+                    # '-1' is the Lua sentinel for "no dollar limit configured"
+                    # (token-quota denial); map it to None so the denial message
+                    # names the constraint that actually fired.
                     return None, self._denial_message(
-                        tok_used, tok_limit, dol_spent, dol_limit_r
+                        tok_used,
+                        tok_limit,
+                        dol_spent,
+                        dol_limit_r if dol_limit_r >= 0 else None,
                     )
                 warn_threshold = await self.get_warning_threshold(tenant_id)
                 return (

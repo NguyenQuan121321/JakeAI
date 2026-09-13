@@ -401,6 +401,55 @@ async def test_reservation_denial_messages_match_hard_stop_semantics() -> None:
     await _cleanup_budget_keys(dollar_tenant)
 
 
+class _FakeRedis:
+    """Returns canned Lua results, pinning the reserve script's contract:
+    {allowed, tok_used, tok_limit, dol_spent, dol_limit} with '-1' as the
+    no-dollar-limit sentinel. Exercises the exact Python-side mapping that
+    previously misreported token-quota denials as dollar-budget denials."""
+
+    def __init__(self, eval_result: list) -> None:
+        self._eval_result = eval_result
+
+    async def eval(self, *args: Any) -> list:
+        return self._eval_result
+
+
+@pytest.mark.asyncio
+async def test_redis_lua_denial_results_map_to_correct_messages() -> None:
+    budget = FinOpsBudgetManager()
+    budget.redis_client = _FakeRedis([0, "0", "1000", "0.0", "-1"])
+    budget._redis_available = True
+
+    reservation, msg = await budget.reserve_budget("t-lua-tok", estimated_tokens=10_000)
+    assert reservation is None
+    assert msg is not None and "token quota exceeded" in msg.lower()
+    assert "dollar" not in msg.lower()
+
+    budget2 = FinOpsBudgetManager()
+    budget2.redis_client = _FakeRedis([0, "0", "1_000_000", "0.0", "0.01"])
+    budget2._redis_available = True
+    reservation, msg = await budget2.reserve_budget(
+        "t-lua-usd", estimated_tokens=100, estimated_cost_usd=0.05
+    )
+    assert reservation is None
+    assert msg is not None and "dollar budget exceeded" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_redis_lua_granted_result_builds_reservation() -> None:
+    budget = FinOpsBudgetManager()
+    budget.redis_client = _FakeRedis([1, "5000", "10000000", "0.02", "-1"])
+    budget._redis_available = True
+
+    reservation, msg = await budget.reserve_budget(
+        "t-lua-grant", estimated_tokens=5000, estimated_cost_usd=0.02
+    )
+    assert msg is None
+    assert reservation is not None
+    assert reservation.reserved_tokens == 5000
+    assert reservation.reserved_cost_usd == 0.02
+
+
 # ---------------------------------------------------------------------------
 # 4. Gateway path accounting (service boundary)
 # ---------------------------------------------------------------------------
