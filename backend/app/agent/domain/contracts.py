@@ -188,6 +188,10 @@ class PlanStep(BaseModel):
     assigned_agent: str | None = None
     selected_model: str | None = None
     selected_provider: str | None = None
+    pending_approval_id: str | None = Field(
+        default=None,
+        description="Approval gate this step is paused on; single-use, consumed on execution",
+    )
     observation: str | None = None
     error: str | None = None
     result: StepResult | None = None

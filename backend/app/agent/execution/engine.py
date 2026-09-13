@@ -204,6 +204,7 @@ class ExecutionEngine:
         plan: Plan,
         cancellation_token: Any = None,
         approval_already_granted: bool = False,
+        pre_approved_step_ids: set[str] | None = None,
         start_ts: float | None = None,
         max_revisions: int = 2,
     ) -> AsyncGenerator[AgentRunEvent, None]:
@@ -211,6 +212,7 @@ class ExecutionEngine:
         active_run_id = run_state.run_id
         start_ts = start_ts or time.time()
         tenant_id = task_spec.tenant_id
+        pre_approved = pre_approved_step_ids or set()
 
         completed_step_ids: set[str] = {
             s.step_id for s in plan.steps if s.status == StepStatus.COMPLETED
@@ -286,6 +288,30 @@ class ExecutionEngine:
                 # Find runnable steps whose dependencies are satisfied
                 runnable = plan.get_runnable_steps(completed_step_ids)
                 if not runnable:
+                    waiting_steps = [
+                        s
+                        for s in plan.steps
+                        if s.status
+                        in (StepStatus.WAITING_APPROVAL, StepStatus.PAUSED_APPROVAL)
+                    ]
+                    if waiting_steps:
+                        # Remaining work is blocked on human approval: pause the
+                        # run instead of stalling or completing it.
+                        run_state.status = RunStatus.WAITING_APPROVAL
+                        run_state.plan = plan.model_dump()
+                        await self.checkpoint_manager.save_checkpoint(run_state)
+                        yield AgentRunEvent(
+                            event_type="waiting_approval",
+                            task_id=task_spec.task_id,
+                            run_id=active_run_id,
+                            data={
+                                "message": "Run paused: remaining steps await human approval.",
+                                "pending_approvals": [
+                                    s.pending_approval_id for s in waiting_steps
+                                ],
+                            },
+                        )
+                        return
                     if plan.has_failures():
                         run_state.status = RunStatus.FAILED
                         run_state.error = (
@@ -315,6 +341,7 @@ class ExecutionEngine:
                             accumulated_outputs=accumulated_outputs,
                             _elapsed_seconds=elapsed,
                             approval_already_granted=current_approval_already_granted,
+                            pre_approved_step_ids=pre_approved,
                         )
                         for s in runnable
                     ]
@@ -331,6 +358,7 @@ class ExecutionEngine:
                         accumulated_outputs=accumulated_outputs,
                         _elapsed_seconds=elapsed,
                         approval_already_granted=current_approval_already_granted,
+                        pre_approved_step_ids=pre_approved,
                     )
                     step_results = [res]
 
@@ -475,7 +503,44 @@ class ExecutionEngine:
             if not plan.is_complete():
                 if run_state.status == RunStatus.WAITING_APPROVAL:
                     return
-                break
+                waiting_steps = [
+                    s
+                    for s in plan.steps
+                    if s.status
+                    in (StepStatus.WAITING_APPROVAL, StepStatus.PAUSED_APPROVAL)
+                ]
+                if waiting_steps:
+                    run_state.status = RunStatus.WAITING_APPROVAL
+                    run_state.plan = plan.model_dump()
+                    await self.checkpoint_manager.save_checkpoint(run_state)
+                    yield AgentRunEvent(
+                        event_type="waiting_approval",
+                        task_id=task_spec.task_id,
+                        run_id=active_run_id,
+                        data={
+                            "message": "Run paused: remaining steps await human approval.",
+                            "pending_approvals": [
+                                s.pending_approval_id for s in waiting_steps
+                            ],
+                        },
+                    )
+                    return
+                # Invariant: an incomplete plan can never be reported as
+                # COMPLETED. Verification only covers fully executed plans.
+                run_state.status = RunStatus.FAILED
+                run_state.error = (
+                    "Plan did not complete: no runnable steps remain and the "
+                    "plan is incomplete; refusing to report unverified success."
+                )
+                run_state.completed_at = time.time()
+                await self.checkpoint_manager.save_checkpoint(run_state)
+                yield AgentRunEvent(
+                    event_type="failed",
+                    task_id=task_spec.task_id,
+                    run_id=active_run_id,
+                    data={"error": run_state.error},
+                )
+                return
 
             # 4. Actual Result Verification (Phase 13)
             yield AgentRunEvent(
@@ -611,10 +676,13 @@ class ExecutionEngine:
         accumulated_outputs: dict[str, Any],
         _elapsed_seconds: float,
         approval_already_granted: bool = False,
+        pre_approved_step_ids: set[str] | None = None,
     ) -> tuple[PlanStep, StepResult, list[AgentRunEvent]]:
         """Resolve agent, model, and tools to execute an individual PlanStep."""
         step_start = time.time()
         events: list[AgentRunEvent] = []
+        if pre_approved_step_ids and step.step_id in pre_approved_step_ids:
+            approval_already_granted = True
 
         events.append(
             AgentRunEvent(
@@ -734,36 +802,111 @@ class ExecutionEngine:
                     tool=tool_obj, tool_name=tool_name, arguments=arguments
                 )
                 if needs_approval:
-                    req = self.approval_manager.create_request(
-                        task_id=task_spec.task_id,
-                        run_id=run_state.run_id,
-                        tenant_id=task_spec.tenant_id,
-                        tool_name=tool_name,
-                        tool_args=arguments,
-                        reason=appr_reason,
-                    )
-                    step.status = StepStatus.WAITING_APPROVAL
-                    run_state.status = RunStatus.WAITING_APPROVAL
-                    events.append(
-                        AgentRunEvent(
-                            event_type="approval_required",
+                    bound_approval_id = getattr(step, "pending_approval_id", None)
+                    approval_satisfied = False
+                    if bound_approval_id:
+                        # Honor the step-bound approval gate instead of creating
+                        # duplicates: approvals are single-use and tool-bound.
+                        try:
+                            existing = self.approval_manager.get_request(
+                                bound_approval_id, task_spec.tenant_id
+                            )
+                        except (KeyError, PermissionError):
+                            existing = None
+                        if (
+                            existing is not None
+                            and existing.status == ApprovalStatus.APPROVED
+                        ):
+                            step.pending_approval_id = None  # consume single-use gate
+                            approval_satisfied = True
+                        elif existing is not None and (
+                            existing.status == ApprovalStatus.PENDING
+                        ):
+                            # Keep waiting on the existing gate
+                            step.status = StepStatus.WAITING_APPROVAL
+                            run_state.status = RunStatus.WAITING_APPROVAL
+                            events.append(
+                                AgentRunEvent(
+                                    event_type="approval_required",
+                                    task_id=task_spec.task_id,
+                                    run_id=run_state.run_id,
+                                    data={
+                                        "approval_id": existing.approval_id,
+                                        "tool_name": tool_name,
+                                        "reason": appr_reason,
+                                    },
+                                )
+                            )
+                            return (
+                                step,
+                                StepResult(
+                                    step_id=step.step_id,
+                                    status=StepStatus.WAITING_APPROVAL,
+                                ),
+                                events,
+                            )
+                        else:
+                            err = (
+                                f"Approval gate '{bound_approval_id}' is unavailable "
+                                "or was rejected; refusing to execute dangerous tool."
+                            )
+                            events.append(
+                                AgentRunEvent(
+                                    event_type="tool_result",
+                                    task_id=task_spec.task_id,
+                                    run_id=run_state.run_id,
+                                    data={
+                                        "tool_name": tool_name,
+                                        "success": False,
+                                        "error": err,
+                                    },
+                                )
+                            )
+                            return (
+                                step,
+                                StepResult(
+                                    step_id=step.step_id,
+                                    status=StepStatus.FAILED,
+                                    error=err,
+                                    agent_id=agent_sel.agent_id,
+                                    model_used=selected_model,
+                                    provider_used=selected_provider,
+                                    execution_time_ms=(time.time() - step_start) * 1000,
+                                ),
+                                events,
+                            )
+                    if not approval_satisfied:
+                        req = self.approval_manager.create_request(
                             task_id=task_spec.task_id,
                             run_id=run_state.run_id,
-                            data={
-                                "approval_id": req.approval_id,
-                                "tool_name": tool_name,
-                                "reason": appr_reason,
-                            },
+                            tenant_id=task_spec.tenant_id,
+                            tool_name=tool_name,
+                            tool_args=arguments,
+                            reason=appr_reason,
                         )
-                    )
-                    return (
-                        step,
-                        StepResult(
-                            step_id=step.step_id,
-                            status=StepStatus.WAITING_APPROVAL,
-                        ),
-                        events,
-                    )
+                        step.pending_approval_id = req.approval_id
+                        step.status = StepStatus.WAITING_APPROVAL
+                        run_state.status = RunStatus.WAITING_APPROVAL
+                        events.append(
+                            AgentRunEvent(
+                                event_type="approval_required",
+                                task_id=task_spec.task_id,
+                                run_id=run_state.run_id,
+                                data={
+                                    "approval_id": req.approval_id,
+                                    "tool_name": tool_name,
+                                    "reason": appr_reason,
+                                },
+                            )
+                        )
+                        return (
+                            step,
+                            StepResult(
+                                step_id=step.step_id,
+                                status=StepStatus.WAITING_APPROVAL,
+                            ),
+                            events,
+                        )
 
             if tool_obj is None:
                 err = f"Unknown tool: '{tool_name}' is not registered."
@@ -1041,6 +1184,24 @@ class ExecutionEngine:
         raw_plan = run_state.plan or {}
         plan = Plan(**raw_plan)
 
+        # Invariant: terminal states are immutable. A run that already reached
+        # a terminal state can never be resumed into execution again.
+        if run_state.status.is_terminal:
+            self._runs[run_id] = run_state
+            yield AgentRunEvent(
+                event_type="resume_refused",
+                task_id=run_state.task_id,
+                run_id=run_id,
+                data={
+                    "status": run_state.status.value,
+                    "message": (
+                        f"Run is in terminal state '{run_state.status.value}'; "
+                        "resume refused to preserve terminal-state integrity."
+                    ),
+                },
+            )
+            return
+
         goal_val = (
             run_state.prompt
             or (plan.goal if hasattr(plan, "goal") and plan.goal else "")
@@ -1057,6 +1218,7 @@ class ExecutionEngine:
         )
 
         approval_already_granted = False
+        pre_approved_step_ids: set[str] = set()
         # If waiting approval, process approval decision
         if run_state.status in (RunStatus.WAITING_APPROVAL, RunStatus.PAUSED_APPROVAL):
             if approved is False or (rejection_reason and approved is None):
@@ -1074,23 +1236,63 @@ class ExecutionEngine:
                 )
                 return
 
-            is_approved = approved is True
-            if not is_approved:
-                # Inspect approval manager for approved record
-                for appr in self.approval_manager._approvals.values():
-                    if appr.run_id == run_id and appr.status == ApprovalStatus.APPROVED:
-                        is_approved = True
-                        break
-
-            if is_approved:
-                approval_already_granted = True
-                # Advance waiting step to PENDING so it executes with approval
-                for pending_step in plan.steps:
-                    if pending_step.status in (
-                        StepStatus.WAITING_APPROVAL,
-                        StepStatus.PAUSED_APPROVAL,
+            # Per-step approval binding: only steps whose OWN approval gate is
+            # approved may be unlocked; no run-wide blanket grant.
+            waiting_steps = [
+                s
+                for s in plan.steps
+                if s.status in (StepStatus.WAITING_APPROVAL, StepStatus.PAUSED_APPROVAL)
+            ]
+            unlocked_any = False
+            for pending_step in waiting_steps:
+                bound_id = pending_step.pending_approval_id
+                if bound_id:
+                    try:
+                        existing = self.approval_manager.get_request(
+                            bound_id, tenant_id
+                        )
+                    except (KeyError, PermissionError):
+                        existing = None
+                    if (
+                        existing is not None
+                        and existing.status == ApprovalStatus.APPROVED
                     ):
                         pending_step.status = StepStatus.PENDING
+                        unlocked_any = True
+                    elif (
+                        approved is True
+                        and existing is not None
+                        and (existing.status == ApprovalStatus.PENDING)
+                    ):
+                        # Explicit operator approval via the resume API
+                        # finalizes the pending gate record.
+                        from app.agent.approvals.models import ApprovalDecision
+
+                        self.approval_manager.decide(
+                            approval_id=bound_id,
+                            decision=ApprovalDecision(
+                                approved=True, reason="Approved via resume"
+                            ),
+                            tenant_id=tenant_id,
+                            user_id=run_state.user_id,
+                        )
+                        pending_step.status = StepStatus.PENDING
+                        unlocked_any = True
+                    elif approved is True and existing is None:
+                        # In-memory approval record lost (e.g. process restart);
+                        # explicit operator approval still authorizes this step.
+                        pending_step.pending_approval_id = None
+                        pending_step.status = StepStatus.PENDING
+                        pre_approved_step_ids.add(pending_step.step_id)
+                        unlocked_any = True
+                elif approved is True:
+                    # Legacy checkpoint without a step binding: the explicit
+                    # operator approval param still authorizes this step.
+                    pending_step.status = StepStatus.PENDING
+                    pre_approved_step_ids.add(pending_step.step_id)
+                    unlocked_any = True
+
+            if unlocked_any:
                 run_state.status = RunStatus.EXECUTING
                 run_state.plan = plan.model_dump()
                 await self.checkpoint_manager.save_checkpoint(run_state)
@@ -1119,6 +1321,7 @@ class ExecutionEngine:
             plan=plan,
             cancellation_token=cancellation_token,
             approval_already_granted=approval_already_granted,
+            pre_approved_step_ids=pre_approved_step_ids,
         ):
             yield event
 

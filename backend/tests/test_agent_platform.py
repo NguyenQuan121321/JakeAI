@@ -773,13 +773,26 @@ async def test_api_create_run_and_cancel(async_client: AsyncClient) -> None:
     assert res_status.status_code == status.HTTP_200_OK
     assert res_status.json()["run_id"] == run_id
 
-    # Cancel run
+    # Cancel run. R-LOGIC-00 terminal-state invariant: cancelling an
+    # already-terminal run is a no-op that preserves its terminal status
+    # (previously a COMPLETED run was silently flipped to CANCELLED).
     res_cancel = await async_client.post(
         f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel",
         headers=headers,
     )
     assert res_cancel.status_code == status.HTTP_200_OK
-    assert res_cancel.json()["status"] == RunStatus.CANCELLED
+    status_after_cancel = res_cancel.json()["status"]
+    if RunStatus(status_after_cancel).is_terminal:
+        # The run finished before the cancellation landed; the cancel must
+        # not have mutated its terminal state.
+        res_status_after = await async_client.get(
+            f"/api/v1/agent/tasks/{task_id}/runs/{run_id}",
+            headers=headers,
+        )
+        assert res_status_after.status_code == status.HTTP_200_OK
+        assert res_status_after.json()["status"] == status_after_cancel
+    else:
+        assert status_after_cancel == RunStatus.CANCELLED
 
 
 @pytest.mark.asyncio

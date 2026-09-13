@@ -148,6 +148,11 @@ class AgentRunner:
     ) -> None:
         """Resume an execution run that was paused awaiting approval."""
         appr = self.loop.approval_manager.get_request(approval_id, task.tenant_id)
+        if appr.run_id != run.run_id:
+            raise ValueError(
+                f"Approval '{approval_id}' belongs to run '{appr.run_id}', "
+                f"not to run '{run.run_id}'."
+            )
         if appr.status != ApprovalStatus.APPROVED:
             raise ValueError(
                 f"Approval '{approval_id}' is not in approved state (status: {appr.status})."

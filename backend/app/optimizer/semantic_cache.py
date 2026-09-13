@@ -73,6 +73,53 @@ class SemanticCacheEntry(BaseModel):
     system_instructions: str = ""
     tools: list[dict[str, Any]] | None = None
     response_format: dict[str, Any] | str | None = None
+    messages_hash: str | None = Field(
+        default=None,
+        description=(
+            "SHA-256 fingerprint of the prior conversation context (all messages "
+            "before the embedded prompt); semantic hits require an exact match."
+        ),
+    )
+
+
+def _prior_context(
+    effective_messages: list[dict[str, Any]] | list[Any], prompt: str
+) -> list[dict[str, Any]] | list[Any]:
+    """Return the conversation context that precedes the embedded prompt.
+
+    The embedded prompt itself is already compared by vector similarity; only
+    the surrounding history is invisible to the semantic tier and therefore
+    needs an exact fingerprint.
+    """
+    if effective_messages:
+        last = effective_messages[-1]
+        content = (
+            last.get("content")
+            if isinstance(last, dict)
+            else getattr(last, "content", None)
+        )
+        if content == prompt:
+            return effective_messages[:-1]
+    return effective_messages
+
+
+def _messages_fingerprint(
+    messages: list[dict[str, Any]] | list[Any] | None,
+) -> str:
+    """SHA-256 fingerprint over the canonical prior conversation context.
+
+    The exact tier folds the full history into its identity hash; the semantic
+    tier cannot compare vectors for history, so entries carry this fingerprint
+    and semantic hits require an exact match. Returns "" for prompt-only
+    requests (no prior context), which also matches legacy entries that carry
+    no fingerprint only when the incoming request equally has no prior context.
+    """
+    if not messages:
+        return ""
+    canonical = _canonical_messages_repr(messages)
+    if not canonical:
+        return ""
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _normalize_system_text(text: str) -> str:
@@ -395,6 +442,7 @@ class SemanticCacheManager:
         effective_tools: list[dict[str, Any]] | None,
         effective_rf: dict[str, Any] | str | None,
         effective_params: dict[str, Any] | None = None,
+        incoming_messages_hash: str | None = None,
     ) -> bool:
         """Enforce strict generation compatibility guardrails for semantic hits.
 
@@ -403,12 +451,19 @@ class SemanticCacheManager:
         provider, and generation parameters are compared with the same
         normalization used by ``compute_cache_identity`` so that the semantic
         tier can never serve a response the exact tier would have isolated.
+        The full conversation history is compared via its fingerprint: a
+        response cached under one history must never be served for another.
         """
         if entry.model.strip().lower() != model.strip().lower():
             return False
         if entry.provider.strip().lower() != provider.strip().lower():
             return False
         if entry.version != version:
+            return False
+        # Conversation history is generation-relevant (the exact tier hashes
+        # it into the identity); entries without a fingerprint (legacy) never
+        # match, fail-closed.
+        if (entry.messages_hash or "") != (incoming_messages_hash or ""):
             return False
         if (
             entry.system_instructions
@@ -551,6 +606,9 @@ class SemanticCacheManager:
             generation_params=combined_params if combined_params else None,
             version=version,
         )
+        incoming_messages_hash = _messages_fingerprint(
+            _prior_context(effective_messages, prompt)
+        )
         now = time.time()
 
         # 1. Tier 1: Check Exact Match in Redis
@@ -649,6 +707,7 @@ class SemanticCacheManager:
                         system_instructions=str(payload.get("system_instructions", "")),
                         tools=payload.get("tools"),
                         response_format=payload.get("response_format"),
+                        messages_hash=payload.get("messages_hash"),
                     )
                     if self._is_compatible_for_semantic_hit(
                         candidate,
@@ -659,6 +718,7 @@ class SemanticCacheManager:
                         effective_tools=effective_tools,
                         effective_rf=effective_rf,
                         effective_params=combined_params,
+                        incoming_messages_hash=incoming_messages_hash,
                     ):
                         self.metrics.semantic_hits += 1
                         self.metrics.tokens_avoided += candidate.tokens_avoided
@@ -693,6 +753,7 @@ class SemanticCacheManager:
                 effective_tools=effective_tools,
                 effective_rf=effective_rf,
                 effective_params=combined_params,
+                incoming_messages_hash=incoming_messages_hash,
             ):
                 continue
             if entry.vector is not None:
@@ -727,6 +788,7 @@ class SemanticCacheManager:
                 system_instructions=best_match.system_instructions,
                 tools=best_match.tools,
                 response_format=best_match.response_format,
+                messages_hash=best_match.messages_hash,
             )
 
         self.metrics.misses += 1
@@ -822,6 +884,9 @@ class SemanticCacheManager:
             system_instructions=effective_system,
             tools=effective_tools,
             response_format=effective_rf,
+            messages_hash=_messages_fingerprint(
+                _prior_context(effective_messages, prompt)
+            ),
         )
 
         # 1. Write Exact Match to Redis

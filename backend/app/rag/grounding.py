@@ -181,9 +181,12 @@ class GroundingVerifier:
                 # Qualitative claim verification
                 overlap = len(claim_terms.intersection(chunk_terms))
                 ratio = overlap / max(1, len(claim_terms))
+                # Record the best ratio even below the support threshold so the
+                # weak-overlap UNCERTAIN band (0.20 <= ratio < 0.40) is
+                # reachable instead of collapsing into UNSUPPORTED.
+                max_overlap_ratio = max(max_overlap_ratio, ratio)
                 if ratio >= 0.40:
                     best_support_chunks.append(chunk.chunk_id)
-                    max_overlap_ratio = max(max_overlap_ratio, ratio)
 
         # Classify entailment
         if best_support_chunks:
@@ -281,8 +284,9 @@ class GroundingVerifier:
             if claim_obj.entailment == ClaimEntailment.SUPPORTED:
                 verified_sentences.append(claim_obj.claim_text)
             elif claim_obj.entailment == ClaimEntailment.UNCERTAIN:
-                # Include uncertain claims with caveat
-                verified_sentences.append(claim_obj.claim_text)
+                # Include uncertain claims with an explicit caveat so that
+                # unverified content is never presented as verified fact.
+                verified_sentences.append(f"{claim_obj.claim_text} [unverified]")
             else:
                 logger.warning(
                     "Dropping unsupported claim from user answer: '%s' (Reason: %s)",
