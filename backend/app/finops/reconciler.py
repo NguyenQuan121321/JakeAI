@@ -72,11 +72,16 @@ class BillingReconciler:
         # Two reporting shapes exist:
         #  - explicit totals: prompt_tokens/input_tokens (prompt minus cached is uncached)
         #  - ProviderCacheTelemetry dumps: uncached_input_tokens + cached_tokens
-        prov_cached = int(
-            provider_usage.get("cached_tokens")
-            or provider_usage.get("cached_prompt_tokens")
-            or cached_tokens
-            or 0
+        # Provider-reported values are authoritative: an explicitly reported 0
+        # must win over any stale local assumption passed as fallback (R-LOGIC-03).
+        def _prov_int(*keys: str, fallback: int = 0) -> int:
+            for k in keys:
+                if k in provider_usage and provider_usage[k] is not None:
+                    return int(provider_usage[k])
+            return int(fallback or 0)
+
+        prov_cached = _prov_int(
+            "cached_tokens", "cached_prompt_tokens", fallback=cached_tokens
         )
         if (
             provider_usage.get("prompt_tokens") is not None
@@ -92,25 +97,17 @@ class BillingReconciler:
             # Telemetry-style usage reports uncached input directly; the
             # provider-reported prompt total is uncached + cached. Dropping
             # this key would silently under-settle input token consumption.
-            uncached_input = int(
-                provider_usage.get("uncached_input_tokens")
-                or provider_usage.get("uncached_tokens")
-                or 0
-            )
+            uncached_input = _prov_int("uncached_input_tokens", "uncached_tokens")
             prompt_tokens = uncached_input + prov_cached
-        completion_tokens = int(
-            provider_usage.get("completion_tokens")
-            or provider_usage.get("output_tokens")
-            or 0
-        )
-        total_tokens = int(
-            provider_usage.get("total_tokens") or (prompt_tokens + completion_tokens)
+        completion_tokens = _prov_int("completion_tokens", "output_tokens")
+        total_tokens = _prov_int(
+            "total_tokens", fallback=prompt_tokens + completion_tokens
         )
 
-        prov_write = int(
-            provider_usage.get("cache_write_tokens")
-            or provider_usage.get("cache_creation_input_tokens")
-            or cache_write_tokens
+        prov_write = _prov_int(
+            "cache_write_tokens",
+            "cache_creation_input_tokens",
+            fallback=cache_write_tokens,
         )
         actual_billed_cost = calculate_billed_cost(
             model=model,

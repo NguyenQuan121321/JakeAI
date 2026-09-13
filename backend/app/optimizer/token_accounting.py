@@ -20,18 +20,22 @@ from app.optimizer.provider_pricing import get_model_pricing
 
 
 class TokenUsageRecord(BaseModel):
-    """Accounting entry for a single inference request."""
+    """Accounting entry for a single inference request.
+
+    All token counts are non-negative by contract: a negative value reaching
+    the ledger would fabricate quota refunds or false savings (R-LOGIC-03).
+    """
 
     request_id: str
     tenant_id: str
     model: str
-    raw_prompt_tokens: int
-    pruned_prompt_tokens: int
-    completion_tokens: int
+    raw_prompt_tokens: int = Field(ge=0)
+    pruned_prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
     cache_hit: bool  # Layer A (JakeAI Redis exact / Qdrant semantic response cache)
     cache_type: str = "none"  # "none", "exact", "semantic"
-    tokens_saved: int
-    actual_billed_tokens: int
+    tokens_saved: int = Field(default=0, ge=0)
+    actual_billed_tokens: int = Field(default=0, ge=0)
     reduction_percentage: float = Field(
         ...,
         description="Percentage of tokens saved: (tokens_saved / total_baseline) * 100",
@@ -45,14 +49,17 @@ class TokenUsageRecord(BaseModel):
     )
     provider_cached_tokens: int = Field(
         default=0,
+        ge=0,
         description="Layer B: Input tokens served from upstream KV cache",
     )
     provider_uncached_tokens: int = Field(
         default=0,
+        ge=0,
         description="Layer B: Input tokens processed normally without cache hit",
     )
     provider_cache_write_tokens: int = Field(
         default=0,
+        ge=0,
         description="Layer B: Input tokens written to upstream cache (Anthropic cache_creation)",
     )
     provider_miss_reason: str = Field(
@@ -74,10 +81,12 @@ class TokenUsageRecord(BaseModel):
     )
     provider_cache_write_cost: float = Field(
         default=0.0,
+        ge=0.0,
         description="Upstream cost incurred for writing tokens to provider prompt cache",
     )
     effective_input_cost: float = Field(
         default=0.0,
+        ge=0.0,
         description="Effective total dollar cost incurred for input tokens after caching discounts and write fees",
     )
     is_estimate: bool = Field(
@@ -88,27 +97,37 @@ class TokenUsageRecord(BaseModel):
     # Canonical Token Accounting Dimensions (TOK-02)
     raw_input_tokens: int = Field(
         default=0,
+        ge=0,
         description="Total model-visible input envelope tokens before optimization",
     )
     optimized_input_tokens: int = Field(
         default=0,
+        ge=0,
         description="Model-visible input tokens submitted to provider after optimization",
     )
     provider_cached_input_tokens: int = Field(
         default=0,
+        ge=0,
         description="Input tokens served from upstream provider KV prompt cache",
     )
     physical_tokens_pruned: int = Field(
         default=0,
+        ge=0,
         description="Physical tokens removed by local context optimization/pruning",
     )
     response_cache_avoided_tokens: int = Field(
         default=0,
+        ge=0,
         description="Tokens avoided because request was answered from response cache",
     )
     effective_billed_tokens: int = Field(
         default=0,
-        description="Net tokens billed/counted against tenant quota for this request",
+        ge=0,
+        description=(
+            "Provider-cache-discounted billed token equivalent used as the savings "
+            "basis (baseline - saved). Tenant quota settles provider-reported "
+            "totals; dollar truth lives in the FinOps ledger."
+        ),
     )
     reconciled_with_provider: bool = Field(
         default=False,
@@ -447,17 +466,18 @@ class TokenAccounting:
         )
 
         baseline_total = max(1, raw_in + completion_tokens)
+        total_work = raw_in + completion_tokens
 
         if cache_hit:
             resp_avoided = (
                 response_cache_avoided_tokens
                 if response_cache_avoided_tokens is not None
-                else baseline_total
+                else (baseline_total if total_work > 0 else 0)
             )
             phys_pruned = 0
             billed = 0
             saved = resp_avoided
-            reduction_pct = 100.0
+            reduction_pct = 100.0 if saved > 0 else 0.0
         else:
             resp_avoided = 0
             phys_pruned = (
@@ -485,8 +505,15 @@ class TokenAccounting:
                 billed = uncached_in + cached_equiv + write_equiv + completion_tokens
             else:
                 billed = opt_in + completion_tokens
-            saved = max(0, baseline_total - billed)
-            reduction_pct = round((saved / baseline_total) * 100.0, 2)
+            if total_work <= 0:
+                # A zero-token request has no baseline: report no savings
+                # instead of fabricating a 100% reduction off the max(1, ...)
+                # division guard (R-LOGIC-03 false-savings defect).
+                saved = 0
+                reduction_pct = 0.0
+            else:
+                saved = max(0, baseline_total - billed)
+                reduction_pct = round((saved / baseline_total) * 100.0, 2)
 
         return TokenUsageRecord(
             request_id=request_id,

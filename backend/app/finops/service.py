@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from app.finops.attribution import compute_savings_attribution
-from app.finops.budget import FinOpsBudgetManager, get_budget_manager
+from app.finops.budget import FinOpsBudgetManager, QuotaReservation, get_budget_manager
 from app.finops.ledger import FinOpsLedger, get_finops_ledger
 from app.finops.models import (
     FinOpsRecord,
@@ -127,9 +127,15 @@ class FinOpsService:
         provider_cached_tokens: int = 0,
         provider_cache_write_tokens: int = 0,
         avoided_retries_cost_usd: float = 0.0,
+        reservation: QuotaReservation | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> FinOpsRecord:
-        """Record upstream LLM inference with authoritative reconciliation and non-overlapping attribution."""
+        """Record upstream LLM inference with authoritative reconciliation and non-overlapping attribution.
+
+        When a QuotaReservation is supplied, settlement finalizes the reservation
+        (usage adjusted by actual - reserved) instead of adding an absolute
+        amount, keeping exactly-once quota accounting for reserved requests.
+        """
         pricing = get_pricing(model)
         requested = requested_model or model
 
@@ -222,17 +228,25 @@ class FinOpsService:
         # 6. Persist to Ledger
         self.ledger.record(record)
 
-        # 7. Settle Budget Atomically
+        # 7. Settle Budget exactly once: finalize the pre-flight reservation
+        # (delta = actual - reserved) when one exists, else settle absolutely.
         billed_tokens = (
             rec_result.provider_reported_total
             if rec_result.provider_reported_total is not None
             else (optimized_tokens + output_tokens)
         )
-        await self.budget_mgr.settle_request(
-            tenant_id=tenant_id,
-            billed_tokens=billed_tokens,
-            billed_cost_usd=effective_cost,
-        )
+        if reservation is not None:
+            await self.budget_mgr.finalize_reservation(
+                reservation,
+                actual_tokens=billed_tokens,
+                actual_cost_usd=effective_cost,
+            )
+        else:
+            await self.budget_mgr.settle_request(
+                tenant_id=tenant_id,
+                billed_tokens=billed_tokens,
+                billed_cost_usd=effective_cost,
+            )
 
         return record
 
