@@ -66,8 +66,29 @@ async def test_quota_manager_lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_gateway_inference_proxy_caching():
+async def test_gateway_inference_proxy_caching(monkeypatch):
     """Verify inference proxy caches responses via Tier 1 exact match cache."""
+    from unittest.mock import AsyncMock
+
+    from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
+    # R-LOGIC-04: outage fallbacks are no longer cached, so inject a genuine
+    # upstream response for the cache population/hit lifecycle.
+    async def genuine_upstream(*args, **kwargs) -> UpstreamLLMResponse:
+        return UpstreamLLMResponse(
+            text="The capital of Vietnam is Hanoi.",
+            model="gemini-1.5-flash",
+            provider="gemini",
+            telemetry=ProviderCacheTelemetry(
+                provider="gemini", model="gemini-1.5-flash"
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.services.ai_gateway.call_upstream_llm_detailed",
+        AsyncMock(side_effect=genuine_upstream),
+    )
+
     quota_mgr = QuotaManager()
     proxy = GatewayInferenceProxy(quota_mgr)
     tenant_id = "tenant-proxy-caching"

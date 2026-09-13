@@ -344,4 +344,8 @@ async def call_upstream_llm_stream(
                 if chunk and chunk.delta_text:
                     yield chunk.delta_text
     except Exception as exc:
+        # Failure classification (R-LOGIC-04): a provider or stream failure
+        # must propagate to the caller so a mid-stream consumer can signal an
+        # error terminal state instead of silently truncating the stream.
         logger.debug("call_upstream_llm_stream error: %s", exc)
+        raise

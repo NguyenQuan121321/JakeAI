@@ -168,6 +168,31 @@ class RAGPipeline:
             max_context_tokens=max_context_tokens,
         )
 
+        # Explicit Abstention: retrieval infrastructure failure (both dense
+        # and sparse legs raised). This must not be reported as empty
+        # evidence: an empty index and a dead search backend are different
+        # failure classes with different operator responses (R-LOGIC-04).
+        if (
+            not context_res.selected_chunks
+            and _retrieval_res.retrieval_mode == "failed"
+        ):
+            elapsed = round((time.time() - start_time) * 1000, 2)
+            return RAGGenerationResult(
+                query=query,
+                tenant_id=tenant_id,
+                answer=(
+                    "I cannot answer this question because the retrieval "
+                    "infrastructure is currently unavailable. Please retry "
+                    "once the search backend has recovered."
+                ),
+                citations=[],
+                context_selection=context_res,
+                latency_ms=elapsed,
+                status="ABSTAINED",
+                abstention_reason=AbstentionReason.RETRIEVAL_FAILURE,
+                correlation_id=correlation_id,
+            )
+
         # Explicit Abstention: No relevant evidence available
         if not context_res.selected_chunks:
             answer = (

@@ -1124,10 +1124,37 @@ class ExecutionEngine:
             )
             step.selected_model = actual_model
             step.selected_provider = actual_provider
+            # Failure classification (R-LOGIC-04): backends signal upstream
+            # failure with an error finish_reason ("error", "exception",
+            # "http_<status>", "error_missing_credentials") and/or empty
+            # content. Converting such responses into a completed step with a
+            # fabricated output would bypass recovery entirely and report a
+            # failed generation as run success.
+            backend_failed = (resp.finish_reason or "").startswith(
+                ("error", "exception", "http_")
+            ) or not (resp.content or "").strip()
+            if backend_failed:
+                err = (
+                    f"Backend model generation failed "
+                    f"(finish_reason={resp.finish_reason or 'empty_output'})."
+                )
+                logger.warning(
+                    "Step '%s' backend generation failed: %s", step.step_id, err
+                )
+                res = StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.FAILED,
+                    error=err,
+                    agent_id=agent_sel.agent_id,
+                    model_used=selected_model,
+                    provider_used=selected_provider,
+                    execution_time_ms=(time.time() - step_start) * 1000,
+                )
+                return step, res, events
             res = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.COMPLETED,
-                output=resp.content or "Completed step execution.",
+                output=resp.content,
                 agent_id=agent_sel.agent_id,
                 model_used=actual_model,
                 provider_used=actual_provider,

@@ -37,6 +37,7 @@ from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
 from app.optimizer.two_zone_compiler import get_two_zone_compiler
 from app.providers.base import ChatMessage
+from app.providers.errors import ProviderUnavailableError
 from app.providers.registry import get_provider_registry
 
 logger = logging.getLogger(__name__)
@@ -522,14 +523,27 @@ class GatewayInferenceProxy:
             if legacy_text:
                 return legacy_text
 
-            # Deterministic generator for gateway requests with BYOK provenance
+            # Total upstream failure must reach the circuit breaker as a
+            # failure (R-LOGIC-04): swallowing it here would record a success
+            # for a dead provider and the breaker could never trip.
+            raise ProviderUnavailableError(
+                message="All upstream providers failed for gateway inference",
+                provider="ai_gateway",
+                model=request.model,
+            )
+
+        def offline_fallback() -> str:
+            # Deterministic labeled response so the gateway keeps its
+            # no-HTTP-500 availability guarantee during total outages.
             key_tag = " [BYOK active]" if byok_key else ""
             return (
                 f"[JakeAI Gateway Response via {request.model}{key_tag}]\n"
                 f"Processed query: {effective_query[:120]}"
             )
 
-        output_text = await self.breaker.call_with_fallback(call_model)
+        output_text = await self.breaker.call_with_fallback(
+            call_model, deterministic_fallback_fn=offline_fallback
+        )
 
         # Output Inspection & Leakage Blocking (TASK OPS-03)
         from app.guardrails import GuardrailsEngine
@@ -594,19 +608,22 @@ class GatewayInferenceProxy:
             provider_telemetry=telemetry,
         )
 
-        # 6. Populate Tier 1 Cache for future hits
-        await self.cache_mgr.set(
-            prompt=last_user_msg,
-            tenant_id=tenant_id,
-            response=output_text,
-            model=request.model,
-            provider=provider,
-            system_instructions=system_instructions,
-            messages=messages_as_dicts,
-            tools=request.tools,
-            response_format=request.response_format,
-            generation_params=generation_params,
-        )
+        # 6. Populate Tier 1 Cache for future hits — only for genuine upstream
+        # responses (R-LOGIC-04): caching the offline-fallback text would serve
+        # the outage fallback as a cache hit even after providers recover.
+        if upstream_response is not None:
+            await self.cache_mgr.set(
+                prompt=last_user_msg,
+                tenant_id=tenant_id,
+                response=output_text,
+                model=request.model,
+                provider=provider,
+                system_instructions=system_instructions,
+                messages=messages_as_dicts,
+                tools=request.tools,
+                response_format=request.response_format,
+                generation_params=generation_params,
+            )
 
         # 7. Settlement happens exactly once, inside
         # FinOpsService.record_upstream_inference (tokens + dollars, using the
@@ -841,7 +858,7 @@ class GatewayInferenceProxy:
 
         from app.core.llm_provider import call_upstream_llm
 
-        output_text = await call_upstream_llm(
+        upstream_output_text = await call_upstream_llm(
             prompt=last_user_msg,
             tenant_id=tenant_id,
             model=request.model,
@@ -852,11 +869,16 @@ class GatewayInferenceProxy:
             messages=request.messages,
             correlation_id=correlation_id,
         )
-        if not output_text:
+        if not upstream_output_text:
+            # Total upstream failure (R-LOGIC-04): the labeled fallback keeps
+            # the stream alive, but it must never be persisted into the cache
+            # as if it were a genuine provider response.
             output_text = (
                 f"[JakeAI Gateway Stream via {request.model}]\n"
                 f"Processed query: {last_user_msg[:120]}"
             )
+        else:
+            output_text = upstream_output_text
 
         # Output Inspection & Leakage Blocking (TASK OPS-03)
         from app.guardrails import GuardrailsEngine
@@ -954,7 +976,7 @@ class GatewayInferenceProxy:
                     req_id,
                     tenant_id,
                 )
-            if len(streamed_words) == len(words):
+            if len(streamed_words) == len(words) and upstream_output_text:
                 await self.cache_mgr.set(
                     prompt=last_user_msg,
                     tenant_id=tenant_id,

@@ -205,6 +205,7 @@ class JakeAIBackend(AgentBackendInterface):
             logger.debug("Prompt context optimization skipped: %s", exc)
 
         streamed_any = False
+        stream_failed = False
         try:
             from app.core.llm_provider import call_upstream_llm_stream
 
@@ -225,6 +226,19 @@ class JakeAIBackend(AgentBackendInterface):
                     )
         except Exception as exc:
             logger.debug("Live provider streaming failed, falling back: %s", exc)
+            stream_failed = True
+
+        if stream_failed and streamed_any:
+            # Mid-stream failure (R-LOGIC-04): content already emitted cannot
+            # be retried without duplicating output and billing. Signal the
+            # failure with an error terminal chunk so consumers never mistake
+            # a truncated stream for a complete one.
+            yield BackendStreamChunk(
+                delta_content="",
+                finish_reason="error",
+                is_complete=True,
+            )
+            return
 
         if not streamed_any:
             full_resp = await self.generate(request)
