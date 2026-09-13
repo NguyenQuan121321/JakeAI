@@ -106,6 +106,7 @@ class CitationGenerator:
                             snippet=snip,
                             tenant_id=matched_chunk.tenant_id,
                             confidence=confidence,
+                            chunk_id=cid,
                         )
                     )
                     citation_index += 1

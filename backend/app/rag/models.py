@@ -65,6 +65,13 @@ class Citation(BaseModel):
     snippet: str = Field(description="Verbatim excerpt from context supporting claim")
     tenant_id: str = Field(description="Tenant boundary verification")
     confidence: float = Field(default=1.0, description="Groundedness confidence score")
+    chunk_id: str | None = Field(
+        default=None,
+        description=(
+            "Identifier of the retrieved chunk backing this citation, resolvable "
+            "against ingestion/retrieval evidence (None for non-chunk sources)."
+        ),
+    )
 
 
 class RetrievalResult(BaseModel):

@@ -134,6 +134,7 @@ async def stream_multi_agent_workflow(
     prompt: str,
     context: TenantContext,
     conversation_id: str,
+    model: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Execute LangGraph multi-agent workflow and stream incremental step events."""
     initial_state: AgentState = {
@@ -145,6 +146,7 @@ async def stream_multi_agent_workflow(
         "conversation_id": conversation_id,
         "correlation_id": context.correlation_id,
         "obo_token": exchange_obo_token(context),
+        "model": model or "gemini-1.5-flash",
         "messages": [f"User query received: '{prompt}'"],
         "tool_calls": [],
         "financial_analysis": {},
@@ -154,7 +156,10 @@ async def stream_multi_agent_workflow(
         "execution_plan": {},
     }
 
-    config = {"configurable": {"thread_id": conversation_id}}
+    # Thread ids are namespaced per tenant: the checkpointer is process-global,
+    # so a bare client-supplied conversation id would let one tenant's workflow
+    # inherit another tenant's conversation state (retrieved chunks, verdicts).
+    config = {"configurable": {"thread_id": f"{context.tenant_id}:{conversation_id}"}}
     async for event in agent_graph.astream(initial_state, config=config):
         for node_name, node_state in event.items():
             yield {
@@ -166,6 +171,8 @@ async def stream_multi_agent_workflow(
                 "final_response": node_state.get("final_response"),
                 "citations": node_state.get("citations", []),
                 "verification_verdict": node_state.get("verification_verdict"),
+                "provider_telemetry": node_state.get("provider_telemetry"),
+                "model_used": node_state.get("model_used"),
             }
 
 
@@ -216,7 +223,9 @@ class LangGraphExecutionAdapter:
             ),
         }
 
-        config = {"configurable": {"thread_id": conversation_id}}
+        config = {
+            "configurable": {"thread_id": f"{task_spec.tenant_id}:{conversation_id}"}
+        }
         final_output = ""
         verdict = "PASS"
 

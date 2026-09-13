@@ -194,15 +194,22 @@ class ResumeBridgeManager:
             )
 
         # 3. Multi-Tenancy Boundary Isolation -> 403 Forbidden
+        # Fail closed: a checkpoint record without a tenant cannot be matched
+        # to the caller, so it must never be applied.
         cp_tenant = checkpoint.get("tenant_id")
-        if cp_tenant and cp_tenant != tenant_id:
+        if not cp_tenant or cp_tenant != tenant_id:
             if redis is not None:
                 try:
                     await redis.delete(f"lock:tool_call:{call_id}")
                 except Exception as exc:
                     logger.debug("Redis lock release failed (%s)", exc)
             raise PermissionError(
-                f"Tenant mismatch: checkpoint belongs to '{cp_tenant}', caller is '{tenant_id}'"
+                f"Tenant mismatch: checkpoint '{call_id}' is "
+                + (
+                    f"scoped to '{cp_tenant}', caller is '{tenant_id}'"
+                    if cp_tenant
+                    else "not tenant-scoped; refusing to apply tool result"
+                )
             )
 
         # 4. In-flight Lock Guard (Concurrent duplicate execution) -> 409 Conflict

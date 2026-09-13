@@ -27,6 +27,11 @@ class AgentState(TypedDict, total=False):
     current_agent: str
     workflow_phase: str
 
+    # Model Selection & Provider Telemetry (R-LOGIC-02 data flow)
+    model: str
+    model_used: str
+    provider_telemetry: Any
+
     # Agent Intermediary Buffers
     messages: list[str]
     tool_calls: list[dict[str, Any]]

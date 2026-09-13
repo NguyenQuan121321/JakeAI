@@ -97,6 +97,9 @@ async def start_run(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             max_iterations=payload.max_iterations,
+            roles=context.roles,
+            permissions=context.permissions,
+            correlation_id=context.correlation_id,
         )
 
         if payload.async_execution:

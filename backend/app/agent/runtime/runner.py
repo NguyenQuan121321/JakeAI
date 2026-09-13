@@ -171,6 +171,7 @@ class AgentRunner:
                 "user_id": task.user_id,
                 "roles": user_roles or [],
                 "permissions": user_permissions or [],
+                "correlation_id": run.correlation_id,
             },
         )
         obs_text = (

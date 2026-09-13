@@ -27,7 +27,7 @@ except ImportError:
 
 # Cache identity schema version. Bump when the cache key derivation
 # algorithm changes to prevent legacy entries from colliding with new ones.
-CACHE_VERSION = "v2.0"
+CACHE_VERSION = "v2.1"
 
 
 class CacheMetrics(BaseModel):
@@ -78,6 +78,14 @@ class SemanticCacheEntry(BaseModel):
         description=(
             "SHA-256 fingerprint of the prior conversation context (all messages "
             "before the embedded prompt); semantic hits require an exact match."
+        ),
+    )
+    context_hash: str | None = Field(
+        default=None,
+        description=(
+            "SHA-256 fingerprint of the model-visible retrieval context "
+            "(rag/dynamic context); semantic hits require an exact match. "
+            "Entries without it can only serve requests without such context."
         ),
     )
 
@@ -230,6 +238,26 @@ def _canonical_params_repr(params: dict[str, Any] | None) -> str:
     return json.dumps(filtered, sort_keys=True, separators=(",", ":"))
 
 
+def compute_context_hash(
+    rag_context: str | None = None,
+    dynamic_context: str | None = None,
+) -> str:
+    """Fingerprint the model-visible retrieval context for semantic-tier guards.
+
+    Returns "" when no retrieval context is supplied, so legacy entries stored
+    without one can only serve context-less requests.
+    """
+    if not rag_context and not dynamic_context:
+        return ""
+    combined = "\x1f".join(
+        [
+            _normalize_system_text(rag_context or ""),
+            _normalize_system_text(dynamic_context or ""),
+        ]
+    )
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+
 def compute_cache_identity(
     *,
     tenant_id: str,
@@ -240,6 +268,8 @@ def compute_cache_identity(
     tools: list[dict[str, Any]] | None = None,
     response_format: dict[str, Any] | str | None = None,
     generation_params: dict[str, Any] | None = None,
+    rag_context: str = "",
+    dynamic_context: str = "",
     version: str = CACHE_VERSION,
 ) -> str:
     """Compute canonical SHA-256 cache identity from ALL generation-relevant dimensions.
@@ -248,7 +278,8 @@ def compute_cache_identity(
     semantically equivalent with respect to every dimension that affects the
     model's generation output. Any difference in tenant, provider, model,
     system instructions, conversation history, tools, response format,
-    generation parameters, or cache schema version produces a different identity.
+    generation parameters, retrieval context (RAG/dynamic), or cache schema
+    version produces a different identity.
 
     All text inputs are NFC-normalized. User content casing and indentation
     are strictly preserved to ensure collision safety for code, identifiers,
@@ -279,6 +310,8 @@ def compute_cache_identity(
             f"tools={tools_repr}",
             f"rf={response_format_repr}",
             f"params={params_repr}",
+            f"rag={_normalize_system_text(rag_context) if rag_context else ''}",
+            f"dyn={_normalize_system_text(dynamic_context) if dynamic_context else ''}",
         ]
     ).encode("utf-8")
 
@@ -443,6 +476,7 @@ class SemanticCacheManager:
         effective_rf: dict[str, Any] | str | None,
         effective_params: dict[str, Any] | None = None,
         incoming_messages_hash: str | None = None,
+        incoming_context_hash: str | None = None,
     ) -> bool:
         """Enforce strict generation compatibility guardrails for semantic hits.
 
@@ -453,6 +487,9 @@ class SemanticCacheManager:
         tier can never serve a response the exact tier would have isolated.
         The full conversation history is compared via its fingerprint: a
         response cached under one history must never be served for another.
+        The model-visible retrieval context (rag/dynamic) is compared the same
+        way: a response grounded in one retrieval context must never be served
+        for a request carrying a different one.
         """
         if entry.model.strip().lower() != model.strip().lower():
             return False
@@ -464,6 +501,10 @@ class SemanticCacheManager:
         # it into the identity); entries without a fingerprint (legacy) never
         # match, fail-closed.
         if (entry.messages_hash or "") != (incoming_messages_hash or ""):
+            return False
+        # Retrieval context (rag/dynamic) is generation-relevant too; entries
+        # without a context fingerprint can only serve context-less requests.
+        if (entry.context_hash or "") != (incoming_context_hash or ""):
             return False
         if (
             entry.system_instructions
@@ -554,6 +595,8 @@ class SemanticCacheManager:
         tools: list[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | str | None = None,
         generation_params: dict[str, Any] | None = None,
+        rag_context: str | None = None,
+        dynamic_context: str | None = None,
         exact_only: bool = False,
     ) -> SemanticCacheEntry | None:
         """Query cache for exact or semantic matches using canonical cache identity.
@@ -604,11 +647,14 @@ class SemanticCacheManager:
             tools=effective_tools,
             response_format=effective_rf,
             generation_params=combined_params if combined_params else None,
+            rag_context=rag_context or "",
+            dynamic_context=dynamic_context or "",
             version=version,
         )
         incoming_messages_hash = _messages_fingerprint(
             _prior_context(effective_messages, prompt)
         )
+        incoming_context_hash = compute_context_hash(rag_context, dynamic_context)
         now = time.time()
 
         # 1. Tier 1: Check Exact Match in Redis
@@ -708,6 +754,7 @@ class SemanticCacheManager:
                         tools=payload.get("tools"),
                         response_format=payload.get("response_format"),
                         messages_hash=payload.get("messages_hash"),
+                        context_hash=payload.get("context_hash"),
                     )
                     if self._is_compatible_for_semantic_hit(
                         candidate,
@@ -719,6 +766,7 @@ class SemanticCacheManager:
                         effective_rf=effective_rf,
                         effective_params=combined_params,
                         incoming_messages_hash=incoming_messages_hash,
+                        incoming_context_hash=incoming_context_hash,
                     ):
                         self.metrics.semantic_hits += 1
                         self.metrics.tokens_avoided += candidate.tokens_avoided
@@ -754,6 +802,7 @@ class SemanticCacheManager:
                 effective_rf=effective_rf,
                 effective_params=combined_params,
                 incoming_messages_hash=incoming_messages_hash,
+                incoming_context_hash=incoming_context_hash,
             ):
                 continue
             if entry.vector is not None:
@@ -814,6 +863,8 @@ class SemanticCacheManager:
         tools: list[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | str | None = None,
         generation_params: dict[str, Any] | None = None,
+        rag_context: str | None = None,
+        dynamic_context: str | None = None,
     ) -> SemanticCacheEntry:
         """Store prompt and response in both exact and semantic cache tiers.
 
@@ -860,6 +911,8 @@ class SemanticCacheManager:
             tools=effective_tools,
             response_format=effective_rf,
             generation_params=combined_params if combined_params else None,
+            rag_context=rag_context or "",
+            dynamic_context=dynamic_context or "",
             version=version,
         )
         vector = self._embed_text(prompt)
@@ -887,6 +940,7 @@ class SemanticCacheManager:
             messages_hash=_messages_fingerprint(
                 _prior_context(effective_messages, prompt)
             ),
+            context_hash=compute_context_hash(rag_context, dynamic_context) or None,
         )
 
         # 1. Write Exact Match to Redis

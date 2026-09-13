@@ -2,8 +2,8 @@ import logging
 from typing import Any
 
 from app.agents.state import AgentState
+from app.core import llm_provider
 from app.core.circuit_breaker import CircuitBreaker
-from app.core.llm_provider import call_upstream_llm
 from app.rag.citations import CitationGenerator
 from app.rag.models import DocumentChunk
 
@@ -14,8 +14,6 @@ _synthesizer_circuit = CircuitBreaker(
     failure_threshold=3,
     recovery_timeout_seconds=15.0,
 )
-
-_call_gemini_or_openai = call_upstream_llm
 
 
 async def synthesizer_node(state: AgentState) -> dict[str, Any]:
@@ -29,6 +27,8 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
 
     verdict = state.get("verification_verdict", "PASS")
     critique_notes = state.get("critique_notes", "")
+    provider_telemetry: Any | None = None
+    model_used: str | None = None
 
     if verdict in ("FAILED", "REJECTED"):
         failure_msg = (
@@ -134,7 +134,18 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
             citations.append(cite.model_dump())
     else:
         if not financial_data and not tool_calls:
-            llm_text = await _call_gemini_or_openai(prompt, tenant_id=tenant_id)
+            # Dispatch with the requested model and the request's correlation id
+            # so the served model and provider telemetry stay attributable to
+            # the originating request (R-LOGIC-02 data flow).
+            llm_res = await llm_provider.call_upstream_llm_detailed(
+                prompt=prompt,
+                tenant_id=tenant_id,
+                model=state.get("model") or "gemini-1.5-flash",
+                correlation_id=state.get("correlation_id"),
+            )
+            llm_text = llm_res.text if llm_res is not None else None
+            provider_telemetry = llm_res.telemetry if llm_res is not None else None
+            model_used = llm_res.model if llm_res is not None else None
             if llm_text:
                 markdown_parts.append(f"\n{llm_text}\n")
             else:
@@ -154,6 +165,8 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
         "final_response": final_response,
         "mascot_state": "idle",
         "citations": citations,
+        "provider_telemetry": provider_telemetry,
+        "model_used": model_used,
         "messages": [
             *state.get("messages", []),
             "Synthesizer: Markdown response synthesized with citations and mascot.",

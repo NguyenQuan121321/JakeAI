@@ -109,7 +109,10 @@ async def generate_chat_stream(
     # 2. PII Redaction & Model-Visible Request Envelope Accounting
     sanitized_prompt, _ = GuardrailsEngine.redact_pii(prompt)
     params = parameters or {}
-    model_name = params.get("model", "default")
+    # The absent-model default must name the model that actually serves the
+    # request (the dispatcher's default), not a fictional "default" label —
+    # the label keys the response cache and prices token accounting.
+    model_name = params.get("model") or "gemini-1.5-flash"
     system_instruction = (
         params.get("system_instruction")
         or params.get("system_prompt")
@@ -186,6 +189,8 @@ async def generate_chat_stream(
     )
     final_response: str = ""
     accounting_recorded = False
+    provider_telemetry: Any | None = None
+    model_used: str | None = None
 
     try:
         # 3. Initial Handshake & Context Acknowledgment
@@ -219,6 +224,8 @@ async def generate_chat_stream(
                 tools=tool_schemas,
                 response_format=params.get("response_format"),
                 generation_params=params.get("generation_params"),
+                rag_context=optimized_rag_context,
+                dynamic_context=optimized_dynamic_context,
             )
         )
         if cached_entry:
@@ -291,14 +298,15 @@ async def generate_chat_stream(
         citations: list[dict[str, Any]] = []
         final_mascot_state: str = "idle"
         has_tool_execution = False
-        provider_telemetry: Any | None = None
 
         # 5. Real-time LangGraph Event Stream
         async for event in stream_multi_agent_workflow(
-            sanitized_prompt, context, conversation_id
+            sanitized_prompt, context, conversation_id, model=model_name
         ):
             if event.get("provider_telemetry"):
                 provider_telemetry = event["provider_telemetry"]
+            if event.get("model_used"):
+                model_used = event["model_used"]
 
             # Check for Bounded Stream Timeout
             if (time.time() - start_time) > settings.STREAM_TIMEOUT_SECONDS:
@@ -328,7 +336,7 @@ async def generate_chat_stream(
                     TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
-                        model=model_name,
+                        model=model_used or model_name,
                         raw_input_tokens=raw_prompt_tokens,
                         optimized_input_tokens=optimized_prompt_tokens,
                         completion_tokens=comp_tokens,
@@ -412,6 +420,8 @@ async def generate_chat_stream(
                     tools=tool_schemas,
                     response_format=params.get("response_format"),
                     generation_params=params.get("generation_params"),
+                    rag_context=optimized_rag_context,
+                    dynamic_context=optimized_dynamic_context,
                 )
 
             # Stream Real Token Deltas (providing delta, token, and content aliases without artificial sleep)
@@ -424,7 +434,7 @@ async def generate_chat_stream(
                     TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
-                        model=model_name,
+                        model=model_used or model_name,
                         raw_input_tokens=raw_prompt_tokens,
                         optimized_input_tokens=optimized_prompt_tokens,
                         completion_tokens=comp_tokens,
@@ -450,7 +460,7 @@ async def generate_chat_stream(
         record = TokenAccounting.record_transaction(
             request_id=f"stream-{conversation_id}",
             tenant_id=context.tenant_id,
-            model=model_name,
+            model=model_used or model_name,
             raw_input_tokens=raw_prompt_tokens,
             optimized_input_tokens=optimized_prompt_tokens,
             completion_tokens=comp_tokens,
@@ -480,6 +490,7 @@ async def generate_chat_stream(
                 "elapsed_ms": elapsed_ms,
                 "mascot_state": final_mascot_state,
                 "citations": citations,
+                "model": model_used or model_name,
             },
         )
     except asyncio.CancelledError:
@@ -507,6 +518,24 @@ async def generate_chat_stream(
     except Exception as exc:
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
         metrics.stream_completed(elapsed_ms)
+        # A workflow failure still consumed upstream tokens: finalize partial
+        # accounting exactly like the disconnect/cancel paths do.
+        if not accounting_recorded:
+            comp_tokens = (
+                max(1, estimate_tokens(final_response)) if final_response else 1
+            )
+            TokenAccounting.record_transaction(
+                request_id=f"stream-{conversation_id}",
+                tenant_id=context.tenant_id,
+                model=model_used or model_name,
+                raw_input_tokens=raw_prompt_tokens,
+                optimized_input_tokens=optimized_prompt_tokens,
+                completion_tokens=comp_tokens,
+                cache_hit=False,
+                cache_type="none",
+                provider_telemetry=provider_telemetry,
+            )
+            accounting_recorded = True
         yield _format_sse_event(
             "error",
             {

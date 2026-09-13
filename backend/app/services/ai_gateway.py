@@ -589,7 +589,10 @@ class GatewayInferenceProxy:
         return GatewayChatResponse(
             id=req_id,
             created=now_ts,
-            model=request.model,
+            # Report the model that actually served the request (failover or
+            # rerouting may select a different candidate than requested);
+            # accounting above already uses served_model.
+            model=served_model,
             choices=[
                 {
                     "index": 0,

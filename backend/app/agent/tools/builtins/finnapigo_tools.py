@@ -45,7 +45,7 @@ class FinnApiGoBalanceTool(Tool):
     ) -> ToolResult:
         start_ts = time.time()
         ctx = context or {}
-        tenant_id = ctx.get("tenant_id", "default_tenant")
+        tenant_id = ctx.get("tenant_id", "default")
         user_id = ctx.get("user_id", "anonymous")
 
         # Authenticate via On-Behalf-Of (OBO) token exchange
@@ -107,7 +107,7 @@ class FinnApiGoTransactionsTool(Tool):
     ) -> ToolResult:
         start_ts = time.time()
         ctx = context or {}
-        tenant_id = ctx.get("tenant_id", "default_tenant")
+        tenant_id = ctx.get("tenant_id", "default")
         user_id = ctx.get("user_id", "anonymous")
 
         t_ctx = TenantContext(
@@ -175,7 +175,7 @@ class FinnApiGoLimitsTool(Tool):
         _ = arguments
         start_ts = time.time()
         ctx = context or {}
-        tenant_id = ctx.get("tenant_id", "default_tenant")
+        tenant_id = ctx.get("tenant_id", "default")
 
         result_payload = {
             "tenant_id": tenant_id,
