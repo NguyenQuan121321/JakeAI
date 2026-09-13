@@ -234,8 +234,19 @@ All commands run from `backend/` with the repo venv (`backend/.venv`, Python 3.1
 
 ## 8. CI Result
 
-- Local CI-equivalent checks (ruff check, ruff format, mypy, chunked pytest over all affected areas): **GREEN** (known environment failure excluded — pre-existing on main).
-- GitHub CI: to be confirmed on the PR for this branch (`chore/r-logic-00-invariants`). Coverage gate note: the changed modules are exercised by the new 24-test invariant suite plus all pre-existing suites; CI is authoritative for the 85 % line / 80 % patch gates and the Redis/Qdrant-backed paths.
+**GitHub CI: GREEN on commit `197874d` (run 34729755653) — all 9 checks passed:**
+
+| Check | Conclusion |
+|---|---|
+| Automated Tests & AI RAG Regression (3.11 / 3.12) | success (full suite incl. 30 new invariant tests, real Redis 7 + Qdrant, 85 % coverage + patch-diff gates) |
+| Code Quality & Type Analysis (3.11 / 3.12) | success (ruff check, ruff format, mypy) |
+| Container Packaging & Vulnerability Scan | success |
+| DevSecOps - Secret & Key Leak Detection | success |
+| DevSecOps - Vulnerability Audit, SAST & License Compliance | success |
+| Frontend Widget Build & Quality Verification | success |
+| Infrastructure & Workflow Linting | success |
+
+**CI incident during verification (classified and fixed):** the first CI run (commit `1d2a8a6`, run 34729616353) failed only **Container Packaging & Vulnerability Scan** — Trivy flagged 13 HIGH/CRITICAL CVEs in Debian 13.6 **OS packages** of the base image (`python:3.12-slim`: gzip, pcre2, sqlite3, libssh2, perl), all with fixed point releases available and **all Python-package entries clean**. Classification: **BASELINE/ENVIRONMENT FAILURE** (vulnerability-DB drift: the same scan on main's commit would now fail identically; the Dockerfile was untouched by this task). Per the CI rule it was fixed, not bypassed: `backend/Dockerfile` now runs `apt-get upgrade -y` in both stages so Debian security point releases are applied at build time; the Trivy gate (exit-code 1) is unchanged and passes.
 
 ## 9. Remaining Issues & Risks
 
