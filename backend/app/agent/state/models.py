@@ -457,7 +457,14 @@ class RunState(BaseModel):
             self.completed_at = time.time()
 
     def to_agent_state(self) -> dict[str, Any]:
-        """Convert canonical RunState to LangGraph AgentState dictionary."""
+        """Convert canonical RunState to LangGraph AgentState dictionary.
+
+        R-ARCH-01 adapter note: this bridge (and ``from_agent_state``) is the
+        single declared projection between the canonical run lifecycle and the
+        LangGraph adapter state. It is exercised at the component boundary;
+        the chat path does not yet materialize a canonical RunState per
+        conversation (documented R-ARCH-00 F-03 disposition).
+        """
         return {
             "prompt": self.prompt or "",
             "tenant_id": self.tenant_id,

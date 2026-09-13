@@ -1,4 +1,11 @@
-"""Agent Platform Telemetry and Metrics Tracker with zero secret leakage."""
+"""Agent Platform Telemetry and Metrics Tracker with zero secret leakage.
+
+R-ARCH-01 authority note: ``app.telemetry.metrics`` is the platform-wide
+telemetry authority. This module is a subsystem façade — every significant
+agent event is forwarded to the platform registry (``record_agent_*``) while a
+bounded in-memory snapshot is kept for the agent REST endpoint
+(``GET /api/v1/agent/metrics``). It introduces no competing telemetry store.
+"""
 
 from __future__ import annotations
 

@@ -48,14 +48,18 @@ class FinnApiGoBalanceTool(Tool):
         tenant_id = ctx.get("tenant_id", "default")
         user_id = ctx.get("user_id", "anonymous")
 
-        # Authenticate via On-Behalf-Of (OBO) token exchange
-        t_ctx = TenantContext(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            roles=ctx.get("roles", []),
-            permissions=ctx.get("permissions", []),
-        )
-        obo_token = exchange_obo_token(t_ctx)
+        # Authenticate via On-Behalf-Of (OBO) token exchange. The tool is the
+        # single exchange authority: it honors a caller-provided OBO token and
+        # otherwise exchanges one itself (R-ARCH-01).
+        obo_token = ctx.get("obo_token")
+        if not obo_token:
+            t_ctx = TenantContext(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                roles=ctx.get("roles", []),
+                permissions=ctx.get("permissions", []),
+            )
+            obo_token = exchange_obo_token(t_ctx)
 
         account_id = arguments.get("account_id", f"ACC-{tenant_id[:8].upper()}-01")
         result_payload = {
@@ -110,13 +114,17 @@ class FinnApiGoTransactionsTool(Tool):
         tenant_id = ctx.get("tenant_id", "default")
         user_id = ctx.get("user_id", "anonymous")
 
-        t_ctx = TenantContext(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            roles=ctx.get("roles", []),
-            permissions=ctx.get("permissions", []),
-        )
-        obo_token = exchange_obo_token(t_ctx)
+        # Single OBO exchange authority (R-ARCH-01): honor caller-provided
+        # token, otherwise exchange one here.
+        obo_token = ctx.get("obo_token")
+        if not obo_token:
+            t_ctx = TenantContext(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                roles=ctx.get("roles", []),
+                permissions=ctx.get("permissions", []),
+            )
+            obo_token = exchange_obo_token(t_ctx)
 
         limit = arguments.get("limit", 10)
         transactions = [

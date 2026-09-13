@@ -7,14 +7,12 @@ from app.agent.domain.contracts import (
     AgentCapability,
     ExecutionContext,
     ExecutionPlan,
-    ExecutionStateStatus,
     PlanStep,
     RecoveryAction,
     RecoveryDecision,
     StepResult,
     StepStatus,
     TaskSpec,
-    TerminalState,
     VerificationResult,
     VerificationVerdict,
 )
@@ -200,25 +198,34 @@ class TestRecoveryDecisionContract:
         assert rec.alternative_model == "gemini-1.5-flash"
 
 
-class TestTerminalStateContract:
-    def test_terminal_state_model(self) -> None:
-        terminal = TerminalState(
-            status=ExecutionStateStatus.COMPLETED,
-            final_output="Financial report generated successfully.",
-            duration_ms=3200.0,
-            tokens_consumed=450,
-            cost_usd=0.0012,
-        )
-        assert terminal.status == ExecutionStateStatus.COMPLETED
-        assert terminal.tokens_consumed == 450
-        assert terminal.duration_ms == 3200.0
+class TestTerminalRunSemantics:
+    """Terminal-outcome semantics live on the canonical RunStatus machine.
 
-    def test_non_terminal_state_raises_validation_error(self) -> None:
-        with pytest.raises(ValidationError):
-            TerminalState(
-                status=ExecutionStateStatus.EXECUTING,
-                final_output="In progress",
-            )
+    (R-ARCH-01: the duplicate ExecutionStateStatus/TerminalState contract pair
+    was removed; run lifecycle status is owned solely by app.agent.state.models.)
+    """
+
+    def test_terminal_status_flags(self) -> None:
+        assert RunStatus.COMPLETED.is_terminal
+        assert RunStatus.COMPLETED.is_success
+        assert RunStatus.FAILED.is_terminal
+        assert not RunStatus.FAILED.is_success
+        assert RunStatus.CANCELLED.is_terminal
+        assert RunStatus.REJECTED.is_terminal
+        assert RunStatus.TIMEOUT.is_terminal
+
+    def test_non_terminal_statuses_are_not_terminal(self) -> None:
+        for status in (
+            RunStatus.CREATED,
+            RunStatus.PLANNING,
+            RunStatus.READY,
+            RunStatus.RUNNING,
+            RunStatus.EXECUTING,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.VERIFYING,
+            RunStatus.REPLANNING,
+        ):
+            assert not status.is_terminal
 
 
 class TestRunStateTransitions:

@@ -1,4 +1,12 @@
-"""Workflow execution engine executing observable, resumable multi-step pipelines."""
+"""Workflow execution engine executing observable, resumable multi-step pipelines.
+
+R-ARCH-01 scope note: this is a secondary linear pipeline utility, NOT a
+competing orchestration lifecycle authority. It is not wired to any HTTP
+endpoint or production driver; the canonical run lifecycle remains
+``app.agent.execution.engine.ExecutionEngine`` plus the ReAct AgentRunner and
+the LangGraph adapter. All tool execution and model calls here still funnel
+through the canonical ToolRegistry and AgentBackendInterface authorities.
+"""
 
 from __future__ import annotations
 

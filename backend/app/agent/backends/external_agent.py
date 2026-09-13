@@ -2,6 +2,11 @@
 
 Enables JakeAI-Agent to delegate tasks or subtasks to an external Agent API,
 normalizing requests, streaming deltas, task statuses, and error handling.
+
+R-ARCH-01 adapter boundary (non-canonical): delegation target is an external
+agent service, not the JakeAI provider dispatch chain. This backend is not
+wired into the managed agent runtime; production upstream dispatch must go
+through ``app.core.llm_provider``.
 """
 
 from __future__ import annotations

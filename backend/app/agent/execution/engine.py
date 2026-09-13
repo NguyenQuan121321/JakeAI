@@ -787,11 +787,10 @@ class ExecutionEngine:
             )
             arguments: dict[str, Any] = getattr(step, "tool_args", None) or {}
             if not arguments:
-                if tool_name == "get_account_balance":
-                    arguments = {
-                        "account_id": f"ACC-{task_spec.tenant_id[:8].upper()}-01"
-                    }
-                elif tool_name == "list_transactions":
+                # get_account_balance intentionally gets no account_id default
+                # here: the FinnApiGo tool owns the canonical tenant account
+                # identity derivation (R-ARCH-01).
+                if tool_name == "list_transactions":
                     arguments = {"limit": 5}
                 elif tool_name in ("mock_dangerous_shell", "terminal_exec"):
                     arguments = {"command": "rm -rf /tmp/cache"}

@@ -4,6 +4,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.agent.registry.capability_patterns import (
+    BANKING_PATTERN,
+    FINANCIAL_PATTERN,
+)
 from app.agents.state import AgentState
 from app.rag.context_selector import get_context_selector
 from app.rag.retriever import get_hybrid_retriever
@@ -20,16 +24,12 @@ class SupervisorDecision(BaseModel):
     specialist_guidance: str | None = None
 
 
-FINANCIAL_PATTERNS = [
-    r"(?i)\b(?:ebitda|margins?|revenues?|profits?|expenses?|ratios?|balances?|debts?|equity)\b",
-    r"(?i)\b(?:cash\s*flow|incomes?|statements?|financial|ledgers?|taxes?|roi)\b",
-    r"\$\d+",
-]
-
-TOOL_PATTERNS = [
-    r"(?i)\b(?:finnapi|transactions?|profiles?|transfers?|invoices?|limits?)\b",
-    r"(?i)\b(?:fetch|lookup|api\s*calls?|endpoints?|query\s*data)\b",
-]
+# Supervisor-local routing vocabulary for its own three-node LangGraph
+# vocabulary (generic data-access verbs). Capability classification itself
+# comes from the canonical app.agent.registry.capability_patterns authority.
+TOOL_VERBS_PATTERN = re.compile(
+    r"(?i)\b(?:fetch|lookup|api\s*calls?|endpoints?|query\s*data)\b"
+)
 
 
 def classify_intent(prompt: str) -> str:
@@ -37,13 +37,14 @@ def classify_intent(prompt: str) -> str:
     if re.search(r"(?i)\bfinnapi\b", prompt):
         return "finnapigo_tool"
 
-    for pattern in FINANCIAL_PATTERNS:
-        if re.search(pattern, prompt):
-            return "financial_specialist"
+    if FINANCIAL_PATTERN.search(prompt):
+        return "financial_specialist"
 
-    for pattern in TOOL_PATTERNS:
-        if re.search(pattern, prompt):
-            return "finnapigo_tool"
+    if BANKING_PATTERN.search(prompt):
+        return "finnapigo_tool"
+
+    if TOOL_VERBS_PATTERN.search(prompt):
+        return "finnapigo_tool"
 
     return "synthesizer"
 

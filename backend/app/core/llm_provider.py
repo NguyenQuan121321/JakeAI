@@ -30,6 +30,30 @@ from app.routing.workload_classifier import get_workload_classifier
 
 logger = logging.getLogger(__name__)
 
+# Single credential-resolution authority (R-ARCH-01): platform fallback setting
+# per provider, shared by the non-streaming and streaming dispatch variants so
+# they can never drift apart.
+_PROVIDER_SETTINGS_KEYS = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+
+async def resolve_provider_credentials(
+    settings: Any, byok_mgr: Any, tenant_id: str, provider: str
+) -> str | None:
+    """Resolve upstream credentials: tenant BYOK key first, then platform key."""
+    key: str | None = await byok_mgr.get_decrypted_key(tenant_id, provider)
+    if key:
+        return key
+    s_key = _PROVIDER_SETTINGS_KEYS.get(provider)
+    platform_key: str | None = getattr(settings, s_key, None) if s_key else None
+    return platform_key
+
 
 async def call_upstream_llm_detailed(
     prompt: str = "",
@@ -108,25 +132,10 @@ async def call_upstream_llm_detailed(
     # Determine explicit key for the authoritatively resolved provider from
     # tenant BYOK first, then platform fallback key (supports mocked settings
     # tests and BYOK-prioritized credential injection).
-    provider_settings_keys = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-    }
+    async def resolve_credentials(t_id: str, prov: str) -> str | None:
+        return await resolve_provider_credentials(settings, byok_mgr, t_id, prov)
 
-    async def resolve_provider_credentials(t_id: str, prov: str) -> str | None:
-        key = await byok_mgr.get_decrypted_key(t_id, prov)
-        if key:
-            return key
-        s_key = provider_settings_keys.get(prov)
-        return getattr(settings, s_key, None) if s_key else None
-
-    explicit_key = await resolve_provider_credentials(
-        tenant_id, decision.selected_provider
-    )
+    explicit_key = await resolve_credentials(tenant_id, decision.selected_provider)
 
     provider_req = ProviderRequest(
         model=decision.selected_model,
@@ -167,7 +176,7 @@ async def call_upstream_llm_detailed(
                     request=provider_req,
                     decision=decision,
                     client=client,
-                    credential_resolver=resolve_provider_credentials,
+                    credential_resolver=resolve_credentials,
                 )
             else:
                 resp = await failover_mgr.execute_with_failover(
@@ -285,25 +294,10 @@ async def call_upstream_llm_stream(
         reason="; ".join(decision.decision_reasons[:2]),
     )
 
-    provider_settings_keys = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-    }
+    async def resolve_credentials(t_id: str, prov: str) -> str | None:
+        return await resolve_provider_credentials(settings, byok_mgr, t_id, prov)
 
-    async def resolve_provider_credentials(t_id: str, prov: str) -> str | None:
-        key = await byok_mgr.get_decrypted_key(t_id, prov)
-        if key:
-            return key
-        s_key = provider_settings_keys.get(prov)
-        return getattr(settings, s_key, None) if s_key else None
-
-    explicit_key = await resolve_provider_credentials(
-        tenant_id, decision.selected_provider
-    )
+    explicit_key = await resolve_credentials(tenant_id, decision.selected_provider)
 
     provider_req = ProviderRequest(
         model=decision.selected_model,
@@ -332,7 +326,7 @@ async def call_upstream_llm_stream(
                     request=provider_req,
                     decision=decision,
                     client=client,
-                    credential_resolver=resolve_provider_credentials,
+                    credential_resolver=resolve_credentials,
                 )
             else:
                 stream_iter = failover_mgr.stream_with_failover(

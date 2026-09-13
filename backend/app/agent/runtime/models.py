@@ -20,7 +20,13 @@ class AgentConfig(BaseModel):
     system_instructions: str | None = None
     default_model: str = Field(default="gemini-1.5-flash")
     backend_type: str = Field(
-        default="jakeai", description="jakeai | direct_provider | external_agent"
+        default="jakeai",
+        description=(
+            "jakeai | direct_provider | external_agent. Only 'jakeai' (the "
+            "canonical app.core.llm_provider dispatch chain) is wired into the "
+            "managed runtime; the others are standalone adapter backends "
+            "outside canonical dispatch (R-ARCH-01)."
+        ),
     )
     max_iterations: int = Field(default=10, ge=1, le=50)
     timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
