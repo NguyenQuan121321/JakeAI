@@ -69,12 +69,35 @@ class BillingReconciler:
             )
 
         # Extract tokens from provider usage object
-        prompt_tokens = int(
-            provider_usage.get("prompt_tokens")
-            or provider_usage.get("input_tokens")
-            or provider_usage.get("uncached_tokens")
+        # Two reporting shapes exist:
+        #  - explicit totals: prompt_tokens/input_tokens (prompt minus cached is uncached)
+        #  - ProviderCacheTelemetry dumps: uncached_input_tokens + cached_tokens
+        prov_cached = int(
+            provider_usage.get("cached_tokens")
+            or provider_usage.get("cached_prompt_tokens")
+            or cached_tokens
             or 0
         )
+        if (
+            provider_usage.get("prompt_tokens") is not None
+            or provider_usage.get("input_tokens") is not None
+        ):
+            prompt_tokens = int(
+                provider_usage.get("prompt_tokens")
+                or provider_usage.get("input_tokens")
+                or 0
+            )
+            uncached_input = max(0, prompt_tokens - prov_cached)
+        else:
+            # Telemetry-style usage reports uncached input directly; the
+            # provider-reported prompt total is uncached + cached. Dropping
+            # this key would silently under-settle input token consumption.
+            uncached_input = int(
+                provider_usage.get("uncached_input_tokens")
+                or provider_usage.get("uncached_tokens")
+                or 0
+            )
+            prompt_tokens = uncached_input + prov_cached
         completion_tokens = int(
             provider_usage.get("completion_tokens")
             or provider_usage.get("output_tokens")
@@ -84,19 +107,11 @@ class BillingReconciler:
             provider_usage.get("total_tokens") or (prompt_tokens + completion_tokens)
         )
 
-        prov_cached = int(
-            provider_usage.get("cached_tokens")
-            or provider_usage.get("cached_prompt_tokens")
-            or cached_tokens
-        )
         prov_write = int(
             provider_usage.get("cache_write_tokens")
             or provider_usage.get("cache_creation_input_tokens")
             or cache_write_tokens
         )
-
-        # Calculate authoritative billed cost
-        uncached_input = max(0, prompt_tokens - prov_cached)
         actual_billed_cost = calculate_billed_cost(
             model=model,
             uncached_input_tokens=uncached_input,

@@ -192,6 +192,12 @@ class AgentRuntimeManager:
         task = self.get_task(task_id, tenant_id)
         run = self.get_run(run_id, tenant_id)
 
+        if run.status.is_terminal:
+            raise ValueError(
+                f"Run '{run_id}' is already in terminal state '{run.status.value}' "
+                "and cannot be executed again."
+            )
+
         await self.runner.start_run(
             task=task,
             run=run,
@@ -220,9 +226,21 @@ class AgentRuntimeManager:
             yield event
 
     def cancel_run(self, task_id: str, run_id: str, tenant_id: str) -> RunState:
-        """Signal cooperative cancellation to a running task run."""
+        """Signal cooperative cancellation to a running task run.
+
+        Terminal states are immutable: cancelling a run that already reached a
+        terminal state is a no-op that preserves its terminal status.
+        """
         task = self.get_task(task_id, tenant_id)
         run = self.get_run(run_id, tenant_id)
+
+        if run.status.is_terminal:
+            logger.info(
+                "Cancel ignored: run %s already in terminal state %s",
+                run_id,
+                run.status.value,
+            )
+            return run
 
         self.runner.request_cancellation(run_id)
         run.status = RunStatus.CANCELLED
@@ -275,8 +293,11 @@ class AgentRuntimeManager:
                 )
             )
             run.pending_approval_id = None
-            run.status = RunStatus.RUNNING
-            task.status = TaskStatus.RUNNING
+            # Terminal states are immutable: a late decision on an already
+            # terminal run must not resurrect it.
+            if not run.status.is_terminal:
+                run.status = RunStatus.RUNNING
+                task.status = TaskStatus.RUNNING
 
         return appr
 

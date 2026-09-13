@@ -60,6 +60,11 @@ class AgentExecutionLoop:
         user_permissions: list[str] | None = None,
     ) -> AsyncIterator[AgentRunEvent]:
         """Run execution loop until completion, failure, cancellation, or approval gate."""
+        if run.status.is_terminal:
+            raise ValueError(
+                f"Run '{run.run_id}' is already in terminal state "
+                f"'{run.status.value}' and cannot be executed again."
+            )
         start_ts = time.time()
         short_term_mem = self.memory_manager.get_run_memory(run.run_id)
 

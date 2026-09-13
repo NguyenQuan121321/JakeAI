@@ -522,10 +522,22 @@ class GatewayInferenceProxy:
         )
         physical_tokens_pruned = max(0, raw_input_tokens - optimized_input_tokens)
 
+        # The model that actually served the request (failover/rerouting may
+        # select a different candidate than the requested one).
+        served_model = (
+            upstream_response.model
+            if (
+                upstream_response
+                and upstream_response.model
+                and upstream_response.model != "unknown"
+            )
+            else request.model
+        )
+
         record = TokenAccounting.record_transaction(
             request_id=req_id,
             tenant_id=tenant_id,
-            model=request.model,
+            model=served_model,
             raw_input_tokens=raw_input_tokens,
             optimized_input_tokens=optimized_input_tokens,
             physical_tokens_pruned=physical_tokens_pruned,
@@ -549,15 +561,10 @@ class GatewayInferenceProxy:
             generation_params=generation_params,
         )
 
-        # 7. Deduct token usage & record tokens saved
-        billed_prompt_tokens = max(
-            0, record.actual_billed_tokens - record.completion_tokens
-        )
-        await self.quota_mgr.record_usage(
-            tenant_id=tenant_id,
-            prompt_tokens=billed_prompt_tokens,
-            completion_tokens=record.completion_tokens,
-        )
+        # 7. Settlement happens exactly once, inside
+        # FinOpsService.record_upstream_inference (tokens + dollars, using the
+        # authoritative provider-reported totals when available). The gateway
+        # must NOT settle quota separately, or every request is double-counted.
         if record.tokens_saved > 0:
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
 
@@ -566,7 +573,8 @@ class GatewayInferenceProxy:
                 request_id=req_id,
                 tenant_id=tenant_id,
                 provider=telemetry.provider if telemetry else provider,
-                model=request.model,
+                model=served_model,
+                requested_model=request.model,
                 raw_tokens=record.raw_input_tokens,
                 optimized_tokens=record.optimized_input_tokens,
                 output_tokens=record.completion_tokens,
