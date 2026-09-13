@@ -244,6 +244,9 @@ async def test_inv_a1_cancel_of_terminal_run_preserves_terminal_state() -> None:
 
     task = manager.create_task(goal="done already", tenant_id="tenant-a", user_id="u")
     run = manager.create_run(task_id=task.task_id, tenant_id="tenant-a", user_id="u")
+    # Arrange a terminal run through legal machine transitions (RL01-F-01
+    # enforcement rejects the old CREATED→COMPLETED fixture shortcut).
+    run.status = RunStatus.RUNNING
     run.status = RunStatus.COMPLETED
     run.completed_at = time.time()
 
@@ -425,9 +428,15 @@ async def test_inv_a6_cancel_of_active_run_still_cancels() -> None:
 
 
 @pytest.mark.asyncio
-async def test_inv_b10_rejection_on_paused_run_resumes_planning_state() -> None:
-    """Pin accepted behavior: rejecting a gate on a genuinely paused run moves
-    it out of the approval pause (RUNNING) so the planner can adjust."""
+async def test_inv_b10_rejection_on_paused_run_terminates_rejected() -> None:
+    """Rejecting a gate on a genuinely paused run terminates it REJECTED.
+
+    Updated by R-LOGIC-01 (RL01-F-06): the previous accepted behavior moved
+    the paused run back to RUNNING, but nothing ever re-entered the loop — an
+    immortal zombie state. Rejection now terminates the run REJECTED,
+    consistent with the canonical engine's rejection semantics and the run
+    state machine (WAITING/PAUSED→REJECTED).
+    """
     backend = MockControllableBackend()
     manager = AgentRuntimeManager(backend=backend)
 
@@ -438,6 +447,8 @@ async def test_inv_b10_rejection_on_paused_run_resumes_planning_state() -> None:
 
     task = manager.create_task(goal="paused task", tenant_id="tenant-a", user_id="u")
     run = manager.create_run(task_id=task.task_id, tenant_id="tenant-a", user_id="u")
+    # Arrange the approval pause through legal machine transitions.
+    run.status = RunStatus.RUNNING
     run.status = RunStatus.PAUSED_APPROVAL
     run.pending_approval_id = "appr_x"
     appr = manager.approval_manager.create_request(
@@ -458,9 +469,10 @@ async def test_inv_b10_rejection_on_paused_run_resumes_planning_state() -> None:
         tenant_id="tenant-a",
         user_id="op",
     )
-    assert run.status == RunStatus.RUNNING, (
-        f"Paused run must leave the approval pause after rejection, got {run.status}"
+    assert run.status == RunStatus.REJECTED, (
+        f"Rejected run must terminate REJECTED, got {run.status}"
     )
+    assert run.completed_at is not None
     assert run.pending_approval_id is None
 
 
@@ -693,6 +705,7 @@ async def test_inv_b5_late_approval_decision_preserves_terminal_run() -> None:
 
     task = manager.create_task(goal="late decision", tenant_id="tenant-a", user_id="u")
     run = manager.create_run(task_id=task.task_id, tenant_id="tenant-a", user_id="u")
+    run.status = RunStatus.RUNNING
     run.status = RunStatus.COMPLETED
     appr = manager.approval_manager.create_request(
         task_id=task.task_id,
@@ -1289,6 +1302,7 @@ async def test_inv_e1_cross_tenant_agent_run_access_forbidden(monkeypatch) -> No
 
     task = manager.create_task(goal="secret goal", tenant_id="tenant-a", user_id="u")
     run = manager.create_run(task_id=task.task_id, tenant_id="tenant-a", user_id="u")
+    run.status = RunStatus.RUNNING
     run.status = RunStatus.COMPLETED
 
     jwt_a = make_agent_jwt("tenant-a")

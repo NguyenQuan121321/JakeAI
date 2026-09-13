@@ -116,9 +116,12 @@ class AgentRunner:
             ):
                 await self._broadcast_event(run.run_id, event)
         except asyncio.CancelledError:
-            run.status = RunStatus.CANCELLED
-            task.status = TaskStatus.CANCELLED
-            run.completed_at = time.time()
+            # Terminal states are immutable: a cancellation delivered after the
+            # run already reached a terminal state must not corrupt it.
+            if not run.status.is_terminal:
+                run.status = RunStatus.CANCELLED
+                task.status = TaskStatus.CANCELLED
+                run.completed_at = time.time()
             logger.info(
                 "Run %s was cancelled via asyncio task cancellation", run.run_id
             )
