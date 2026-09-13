@@ -8,7 +8,11 @@ This module defines the single authoritative contract suite for:
 - Tool selection and policy validation (ToolSelection)
 - Multi-tenant execution contexts (ExecutionContext)
 - Step execution outputs and verification results (StepResult, VerificationResult)
-- Bounded recovery decisions and terminal states (RecoveryDecision, TerminalState)
+- Bounded recovery decisions (RecoveryDecision)
+
+Run/task lifecycle status (TaskStatus, RunStatus, TaskState, RunState) is owned
+exclusively by ``app.agent.state.models`` — do not define competing lifecycle
+enums here (R-ARCH-01 canonical authority).
 """
 
 from __future__ import annotations
@@ -19,39 +23,6 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-
-
-class ExecutionStateStatus(StrEnum):
-    """Canonical lifecycle states of an orchestration run."""
-
-    CREATED = "created"
-    PLANNING = "planning"
-    READY = "ready"
-    EXECUTING = "executing"
-    WAITING_APPROVAL = "waiting_approval"
-    VERIFYING = "verifying"
-    REPLANNING = "replanning"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    TIMEOUT = "timeout"
-
-    @property
-    def is_terminal(self) -> bool:
-        """Return True if this state is terminal."""
-        return self in (
-            ExecutionStateStatus.COMPLETED,
-            ExecutionStateStatus.FAILED,
-            ExecutionStateStatus.CANCELLED,
-            ExecutionStateStatus.REJECTED,
-            ExecutionStateStatus.TIMEOUT,
-        )
-
-    @property
-    def is_success(self) -> bool:
-        """Return True if and only if execution completed successfully."""
-        return self == ExecutionStateStatus.COMPLETED
 
 
 class StepStatus(StrEnum):
@@ -382,23 +353,3 @@ class RecoveryDecision(BaseModel):
     max_attempts: int = Field(default=3, ge=1)
     alternative_agent: str | None = None
     alternative_model: str | None = None
-
-
-class TerminalState(BaseModel):
-    """Authoritative outcome of an orchestration run upon completion or failure."""
-
-    status: ExecutionStateStatus
-    final_output: str | None = None
-    error: str | None = None
-    reason: str | None = None
-    tokens_consumed: int = Field(default=0, ge=0)
-    cost_usd: float = Field(default=0.0, ge=0.0)
-    duration_ms: float = Field(default=0.0, ge=0.0)
-    completed_at: float = Field(default_factory=time.time)
-
-    @field_validator("status")
-    @classmethod
-    def validate_terminal(cls, v: ExecutionStateStatus) -> ExecutionStateStatus:
-        if not v.is_terminal:
-            raise ValueError(f"Status '{v}' is not a valid terminal state.")
-        return v

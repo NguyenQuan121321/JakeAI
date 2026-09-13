@@ -7,6 +7,13 @@ Guarantees strict credential hygiene:
 - Credentials are NEVER logged
 - Credentials are NEVER included in telemetry or responses
 - Tenant and user context isolation is strictly enforced.
+
+R-ARCH-01 adapter boundary (non-canonical): this backend performs raw provider
+HTTP calls and deliberately bypasses the canonical dispatch chain (ModelRouter,
+FailoverManager, BYOK vault, FinOps accounting, provider prompt caching). It is
+NOT wired into the managed agent runtime — production upstream dispatch must go
+through ``app.core.llm_provider``. Keep usage limited to isolated/test scopes
+unless it is explicitly promoted with its own governance story.
 """
 
 from __future__ import annotations

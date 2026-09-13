@@ -35,7 +35,26 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRuntimeManager:
-    """Central entrypoint for the JakeAI-Agent platform."""
+    """Central entrypoint for the JakeAI-Agent platform.
+
+    R-ARCH-01 lifecycle authority note — this manager fronts two orchestration
+    drivers over one shared set of canonical semantic authorities (state
+    machine, planner, tool registry, approvals, checkpointing, provider
+    dispatch):
+
+    - ``execute_run`` / ``AgentRunner``: the ReAct driver wired to the
+      ``/api/v1/agent`` REST surface (bounded iterative loop with approval
+      gates).
+    - ``execute_task_spec`` / ``ExecutionEngine``: the canonical DAG driver
+      (topological concurrency, verification/replan stage); currently exposed
+      at the component boundary, not yet wired to HTTP.
+
+    The LangGraph chat path (``app/agents/graph.py``) is an adapter, not a
+    third lifecycle store. Migrating the REST surface onto the DAG driver is a
+    documented, deliberate follow-up (R-ARCH-00 F-01 / R-ARCH-01 result):
+    until then the drivers differ only in orchestration strategy, never in
+    business semantics.
+    """
 
     def __init__(
         self,

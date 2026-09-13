@@ -18,11 +18,13 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
 
     from app.agent.tools.registry import get_tool_registry
 
-    # Determine tool name from prompt or state
+    # Determine tool name from prompt or state. Account identity is NOT
+    # pre-derived here: the FinnApiGo tool owns the canonical tenant account
+    # default (R-ARCH-01 single authority).
     arguments: dict[str, Any]
     if "balance" in prompt.lower():
         tool_name = "get_account_balance"
-        arguments = {"account_id": f"ACC-{tenant_id[:8].upper()}-01"}
+        arguments = {}
     elif "transaction" in prompt.lower():
         tool_name = "list_transactions"
         arguments = {"limit": 5}

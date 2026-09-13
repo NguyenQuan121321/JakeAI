@@ -25,6 +25,10 @@ from app.agent.planning.models import (
     PlanStep,
     PlanStepStatus,
 )
+from app.agent.registry.capability_patterns import (
+    BANKING_PATTERN,
+    FINANCIAL_PATTERN,
+)
 from app.agent.utils.structured_output import extract_json_dict
 from app.routing.router import ModelRouter, RoutingPolicy
 from app.routing.workload_classifier import WorkloadClassifier
@@ -35,16 +39,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Heuristic classifiers for goal decomposition
-_FINANCIAL_KW = re.compile(
-    r"(?i)\b(?:ebitda|margin|revenue|expense|profit|operating income|financial|ratio|variance|statements?)\b|\$\d+"
-)
-_BANKING_KW = re.compile(
-    r"(?i)\b(?:finnapi|account balance|transactions?|transfer|invoice|limit|banking)\b"
-)
-_RETRIEVAL_KW = re.compile(
-    r"(?i)\b(?:retrieve|search|lookup|documents?|qdrant|bm25|rag|sources?)\b"
-)
+# Planner-local plan-shaping heuristics (capability classification itself comes
+# from the canonical app.agent.registry.capability_patterns authority).
 _MULTI_SOURCE_KW = re.compile(
     r"(?i)\b(?:two independent|combine|merge|multiple sources?|cross-reference|both|compare|versus|vs)\b"
 )
@@ -395,7 +391,7 @@ class BoundedPlanner:
             steps = [step_1a, step_1b, step_2, step_3]
 
         # 2. Tool-required banking & financial analysis task
-        elif _BANKING_KW.search(goal) and _FINANCIAL_KW.search(goal):
+        elif BANKING_PATTERN.search(goal) and FINANCIAL_PATTERN.search(goal):
             analysis = "Integrated banking retrieval and quantitative financial analysis workflow."
             step_1 = PlanStep(
                 step_id="step_fetch_banking",
@@ -466,7 +462,7 @@ class BoundedPlanner:
             steps = [step_1, step_2]
 
         # 4. Pure financial calculation task
-        elif _FINANCIAL_KW.search(goal):
+        elif FINANCIAL_PATTERN.search(goal):
             analysis = "Quantitative financial modeling and reasoning workflow."
             step_1 = PlanStep(
                 step_id="step_financial_analysis",
@@ -839,8 +835,8 @@ class BoundedPlanner:
                         tool_args = {"expression": "1500000 - 950000"}
                     elif req_tool in ("terminal_exec", "mock_dangerous_shell"):
                         tool_args = {"command": "system maintenance audit"}
-                    elif req_tool == "get_account_balance":
-                        tool_args = {"account_id": f"ACC-{tenant_id[:8].upper()}-01"}
+                    # get_account_balance intentionally gets no account_id here:
+                    # the FinnApiGo tool owns the canonical tenant account default.
                 return NextAction(
                     action_type=NextActionType.TOOL_CALL,
                     tool_name=req_tool,
@@ -860,7 +856,7 @@ class BoundedPlanner:
             )
 
         # B. Financial modeling / calculations
-        if _FINANCIAL_KW.search(goal) and not has_tool_observation:
+        if FINANCIAL_PATTERN.search(goal) and not has_tool_observation:
             calc_available = any(t.name == "calculator" for t in available_tools)
             if calc_available:
                 return NextAction(
@@ -878,7 +874,7 @@ class BoundedPlanner:
                 last_tool_output = msg.content
                 break
 
-        if _FINANCIAL_KW.search(goal):
+        if FINANCIAL_PATTERN.search(goal):
             calc_val = "550,000.00"
             if last_tool_output:
                 if "'result':" in str(last_tool_output):

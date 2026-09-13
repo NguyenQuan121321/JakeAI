@@ -19,6 +19,11 @@ from app.agent.domain.contracts import (
     TaskSpec,
 )
 from app.agent.registry.agent_registry import AgentMetadata, get_agent_registry
+from app.agent.registry.capability_patterns import (
+    BANKING_PATTERN,
+    FINANCIAL_PATTERN,
+    RETRIEVAL_PATTERN,
+)
 from app.agent.utils.structured_output import extract_json_dict
 
 if TYPE_CHECKING:
@@ -27,16 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Heuristic patterns for degraded mode fallback
-_FINANCIAL_PATTERNS = re.compile(
-    r"(?i)\b(?:ebitda|margin|revenue|expense|profit|operating income|financial|ratio|tax|ledger|cost)\b|\$\d+"
-)
-_BANKING_PATTERNS = re.compile(
-    r"(?i)\b(?:finnapi|account balance|bank|transaction|transfer|invoice|limit|account_id)\b"
-)
-_RETRIEVAL_PATTERNS = re.compile(
-    r"(?i)\b(?:search|retrieve|lookup|query docs|find document|rag|cite)\b"
-)
+# Selector-local heuristics (no counterpart in other layers)
 _VERIFICATION_PATTERNS = re.compile(
     r"(?i)\b(?:verify|audit|check consistency|critique|groundedness|validate math)\b"
 )
@@ -225,19 +221,19 @@ class AgentSelector:
                     f"{task_spec.goal} {plan_step.description if plan_step else ''}"
                 )
                 if (
-                    _FINANCIAL_PATTERNS.search(text_to_eval)
+                    FINANCIAL_PATTERN.search(text_to_eval)
                     and AgentCapability.FINANCIAL_ANALYSIS.value in agent.capabilities
                 ):
                     score += 3.0
                     matched_caps.append(AgentCapability.FINANCIAL_ANALYSIS.value)
                 if (
-                    _BANKING_PATTERNS.search(text_to_eval)
+                    BANKING_PATTERN.search(text_to_eval)
                     and AgentCapability.BANKING_API.value in agent.capabilities
                 ):
                     score += 3.0
                     matched_caps.append(AgentCapability.BANKING_API.value)
                 if (
-                    _RETRIEVAL_PATTERNS.search(text_to_eval)
+                    RETRIEVAL_PATTERN.search(text_to_eval)
                     and AgentCapability.RAG_RETRIEVAL.value in agent.capabilities
                 ):
                     score += 2.5
@@ -304,11 +300,11 @@ class AgentSelector:
         """Explicit deterministic fallback rule when capability matching yields zero candidates."""
         content = f"{task_spec.goal} {plan_step.description if plan_step else ''}"
 
-        if _BANKING_PATTERNS.search(content):
+        if BANKING_PATTERN.search(content):
             return "finnapigo_specialist", "Matched banking/FinnApiGo keywords"
-        if _FINANCIAL_PATTERNS.search(content):
+        if FINANCIAL_PATTERN.search(content):
             return "financial_specialist", "Matched quantitative financial keywords"
-        if _RETRIEVAL_PATTERNS.search(content):
+        if RETRIEVAL_PATTERN.search(content):
             return "retrieval_specialist", "Matched search/retrieval keywords"
         if _VERIFICATION_PATTERNS.search(content):
             return "verifier", "Matched verification keywords"
