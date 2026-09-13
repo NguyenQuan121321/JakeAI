@@ -10,7 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -31,8 +33,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/install/bin:${PATH}" \
     PYTHONPATH="/app:${PYTHONPATH}"
 
-# Install curl for container health check
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install curl for container health check; upgrade OS packages so Debian
+# point-release security fixes (base-image CVE drift) are applied at build time.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
