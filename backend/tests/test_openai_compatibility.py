@@ -74,8 +74,27 @@ def test_chat_completions_root_proxy() -> None:
     assert "tokens_saved" in data
 
 
-def test_chat_completions_exact_caching() -> None:
+def test_chat_completions_exact_caching(monkeypatch) -> None:
     """Repeated prompt to /v1/chat/completions hits Tier 1 cache with 0 prompt tokens."""
+    from unittest.mock import AsyncMock
+
+    from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
+    # R-LOGIC-04: outage fallbacks are no longer cached; inject a genuine
+    # upstream response so the cache population/hit lifecycle is exercised.
+    async def genuine_upstream(*args: Any, **kwargs: Any) -> UpstreamLLMResponse:
+        return UpstreamLLMResponse(
+            text="EBIT ratio answered by the provider.",
+            model="gpt-4o-mini",
+            provider="openai",
+            telemetry=ProviderCacheTelemetry(provider="openai", model="gpt-4o-mini"),
+        )
+
+    monkeypatch.setattr(
+        "app.services.ai_gateway.call_upstream_llm_detailed",
+        AsyncMock(side_effect=genuine_upstream),
+    )
+
     headers = get_auth_headers(tenant_id="tenant-root-cache")
     unique_prompt = f"What is our EBIT ratio for FY-{int(time.time())}?"
     payload = {

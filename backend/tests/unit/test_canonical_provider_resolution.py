@@ -186,11 +186,22 @@ class TestGatewayChatCompletionsCanonicalResolution:
         proxy = _make_proxy(cache_stub)
         byok_stub = RecordingByokManager()
 
+        # A genuine (non-fallback) upstream response is required for the cache
+        # population path: R-LOGIC-04 stops outage fallbacks from being cached.
+        from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
+        upstream = UpstreamLLMResponse(
+            text="authoritative provider response",
+            model=model,
+            provider=expected_provider,
+            telemetry=ProviderCacheTelemetry(provider=expected_provider, model=model),
+        )
+
         with (
             patch("app.services.ai_gateway.get_byok_manager", return_value=byok_stub),
             patch(
                 "app.services.ai_gateway.call_upstream_llm_detailed",
-                new=AsyncMock(return_value=None),
+                new=AsyncMock(return_value=upstream),
             ),
             patch(
                 "app.services.ai_gateway.call_upstream_llm",
@@ -286,9 +297,11 @@ class TestGatewayStreamCanonicalResolution:
         cache_stub = ProviderCapturingCache()
         proxy = _make_proxy(cache_stub)
 
+        # A genuine (non-fallback) upstream response is required for the cache
+        # population path: R-LOGIC-04 stops outage fallbacks from being cached.
         with patch(
             "app.core.llm_provider.call_upstream_llm",
-            new=AsyncMock(return_value=None),
+            new=AsyncMock(return_value="authoritative provider response"),
         ):
             chunks = [
                 chunk

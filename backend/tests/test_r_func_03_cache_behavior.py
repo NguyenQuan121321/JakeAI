@@ -1083,6 +1083,25 @@ async def test_scenario_21_gateway_http_exact_hit_and_identity_isolation(
     tenant = unique_tenant("r03-http-gw")
     headers = auth_headers(tenant)
 
+    # R-LOGIC-04: outage fallbacks are no longer cached, so inject a genuine
+    # upstream response; the replay-hit assertion needs a populated cache.
+    from unittest.mock import AsyncMock
+
+    from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
+    async def genuine_upstream(*args: Any, **kwargs: Any) -> UpstreamLLMResponse:
+        return UpstreamLLMResponse(
+            text="Gateway identity probe answer.",
+            model="gpt-4o",
+            provider="openai",
+            telemetry=ProviderCacheTelemetry(provider="openai", model="gpt-4o"),
+        )
+
+    monkeypatch.setattr(
+        "app.services.ai_gateway.call_upstream_llm_detailed",
+        AsyncMock(side_effect=genuine_upstream),
+    )
+
     base_request = {
         "model": "gpt-4o",
         "messages": GATEWAY_BASE_MESSAGES,
@@ -1159,6 +1178,25 @@ async def test_scenario_22_gateway_http_no_false_hit_on_tool_call_structure(
     monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
     tenant = unique_tenant("r03-http-gw-tool")
     headers = auth_headers(tenant)
+
+    # R-LOGIC-04: outage fallbacks are no longer cached, so inject a genuine
+    # upstream response; the replay-hit assertion needs a populated cache.
+    from unittest.mock import AsyncMock
+
+    from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
+    async def genuine_upstream(*args: Any, **kwargs: Any) -> UpstreamLLMResponse:
+        return UpstreamLLMResponse(
+            text="Balance summary from provider.",
+            model="gpt-4o",
+            provider="openai",
+            telemetry=ProviderCacheTelemetry(provider="openai", model="gpt-4o"),
+        )
+
+    monkeypatch.setattr(
+        "app.services.ai_gateway.call_upstream_llm_detailed",
+        AsyncMock(side_effect=genuine_upstream),
+    )
 
     request_with_tools = {
         "model": "gpt-4o",

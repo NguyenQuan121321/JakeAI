@@ -8,6 +8,9 @@ And the complementary property:
   Equivalent requests MUST produce equivalent canonical cache identities.
 """
 
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from app.optimizer.semantic_cache import (
@@ -16,6 +19,58 @@ from app.optimizer.semantic_cache import (
     _compute_hash,
     compute_cache_identity,
 )
+
+
+async def _run_gateway_cache_isolation(proxy, req_base) -> None:
+    """Exercise exact-cache isolation across dimensions via the gateway proxy."""
+    from app.services.ai_gateway import ChatMessage
+
+    # 1. Initial request -> cache miss, populates cache
+    res1 = await proxy.chat_completions("tenant_gw", req_base)
+    assert res1.cached is False
+
+    # 2. Identical request -> exact cache hit
+    res2 = await proxy.chat_completions("tenant_gw", req_base)
+    assert res2.cached is True
+    assert (
+        res2.choices[0]["message"]["content"] == res1.choices[0]["message"]["content"]
+    )
+
+    # 3. Different model (gemini-1.5-flash) -> cache miss (no cross-model collision)
+    req_diff_model = req_base.model_copy(update={"model": "gemini-1.5-flash"})
+    res3 = await proxy.chat_completions("tenant_gw", req_diff_model)
+    assert res3.cached is False
+
+    # 4. Different system prompt -> cache miss
+    req_diff_system = req_base.model_copy(
+        update={
+            "messages": [
+                ChatMessage(role="system", content="You are a creative writer."),
+                ChatMessage(role="user", content="Analyze this statement."),
+            ]
+        }
+    )
+    res4 = await proxy.chat_completions("tenant_gw", req_diff_system)
+    assert res4.cached is False
+
+    # 5. Different tools -> cache miss
+    req_diff_tools = req_base.model_copy(
+        update={"tools": [{"type": "function", "function": {"name": "calc"}}]}
+    )
+    res5 = await proxy.chat_completions("tenant_gw", req_diff_tools)
+    assert res5.cached is False
+
+    # 6. Different response_format -> cache miss
+    req_diff_rf = req_base.model_copy(
+        update={"response_format": {"type": "json_object"}}
+    )
+    res6 = await proxy.chat_completions("tenant_gw", req_diff_rf)
+    assert res6.cached is False
+
+    # 7. Different tenant -> cache miss (strict tenant isolation)
+    res7 = await proxy.chat_completions("tenant_other", req_base)
+    assert res7.cached is False
+
 
 # ---------------------------------------------------------------------------
 # 1. compute_cache_identity unit tests — determinism and collision freedom
@@ -822,6 +877,11 @@ async def test_gateway_exact_cache_isolation_across_dimensions() -> None:
     # Ensure fresh cache
     await proxy.cache_mgr.invalidate()
 
+    # R-LOGIC-04: outage fallbacks are no longer cached, so inject a genuine
+    # upstream response whose text is keyed to the requested model. Cache
+    # isolation is then observable on real provider responses.
+    from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+
     req_base = GatewayChatRequest(
         model="gpt-4o",
         messages=[
@@ -834,48 +894,17 @@ async def test_gateway_exact_cache_isolation_across_dimensions() -> None:
         response_format=None,
     )
 
-    # 1. Initial request -> cache miss, populates cache
-    res1 = await proxy.chat_completions("tenant_gw", req_base)
-    assert res1.cached is False
+    async def genuine_upstream(*args: Any, **kwargs: Any) -> UpstreamLLMResponse:
+        model_name = kwargs.get("model") or "gpt-4o"
+        return UpstreamLLMResponse(
+            text=f"GENERIC UPSTREAM ANSWER for {model_name}",
+            model=model_name,
+            provider="test",
+            telemetry=ProviderCacheTelemetry(provider="test", model=model_name),
+        )
 
-    # 2. Identical request -> exact cache hit
-    res2 = await proxy.chat_completions("tenant_gw", req_base)
-    assert res2.cached is True
-    assert (
-        res2.choices[0]["message"]["content"] == res1.choices[0]["message"]["content"]
-    )
-
-    # 3. Different model (gemini-1.5-flash) -> cache miss (no cross-model collision)
-    req_diff_model = req_base.model_copy(update={"model": "gemini-1.5-flash"})
-    res3 = await proxy.chat_completions("tenant_gw", req_diff_model)
-    assert res3.cached is False
-
-    # 4. Different system prompt -> cache miss
-    req_diff_system = req_base.model_copy(
-        update={
-            "messages": [
-                ChatMessage(role="system", content="You are a creative writer."),
-                ChatMessage(role="user", content="Analyze this statement."),
-            ]
-        }
-    )
-    res4 = await proxy.chat_completions("tenant_gw", req_diff_system)
-    assert res4.cached is False
-
-    # 5. Different tools -> cache miss
-    req_diff_tools = req_base.model_copy(
-        update={"tools": [{"type": "function", "function": {"name": "calc"}}]}
-    )
-    res5 = await proxy.chat_completions("tenant_gw", req_diff_tools)
-    assert res5.cached is False
-
-    # 6. Different response_format -> cache miss
-    req_diff_rf = req_base.model_copy(
-        update={"response_format": {"type": "json_object"}}
-    )
-    res6 = await proxy.chat_completions("tenant_gw", req_diff_rf)
-    assert res6.cached is False
-
-    # 7. Different tenant -> cache miss (strict tenant isolation)
-    res7 = await proxy.chat_completions("tenant_other", req_base)
-    assert res7.cached is False
+    with patch(
+        "app.services.ai_gateway.call_upstream_llm_detailed",
+        new=AsyncMock(side_effect=genuine_upstream),
+    ):
+        await _run_gateway_cache_isolation(proxy, req_base)

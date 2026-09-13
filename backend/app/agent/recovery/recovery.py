@@ -78,7 +78,9 @@ class BoundedRecoveryEngine:
                 action=RecoveryAction.TERMINATE_FAILED,
                 step_id=step.step_id,
                 reason=f"Recovery aborted: total execution time ({elapsed_time_seconds:.1f}s) exceeded limit.",
-                attempt=current_step_retries,
+                # attempt is contract-bound to >= 1; a first-attempt timeout
+                # has current_step_retries == 0.
+                attempt=max(1, current_step_retries),
                 max_attempts=self.limits.MAX_STEP_RETRIES,
             )
 
@@ -138,6 +140,60 @@ class BoundedRecoveryEngine:
 
         # 3. Classify error type
         err_lower = error_message.lower()
+
+        # 3a. Non-retryable failures: retrying can never succeed and must not
+        # consume the bounded retry budget. Markers cover the provider error
+        # taxonomy (ProviderError.__str__ embeds the category name and HTTP
+        # status), tool-policy denials, and approval-gate refusals.
+        non_retryable_markers = (
+            # Authentication / authorization
+            "authentication",
+            "unauthorized",
+            "forbidden",
+            "permission denied",
+            "access denied",
+            "http 401",
+            "http 403",
+            "http_401",
+            "http_403",
+            "(401)",
+            "(403)",
+            "api key",
+            "api_key",
+            "missing_credentials",
+            # Quota / billing exhaustion
+            "quota",
+            "billing",
+            "insufficient credit",
+            # Policy / safety rejection
+            "policy",
+            "safety",
+            "moderation",
+            "content_filter",
+            "content violation",
+            "guardrail",
+            # Context window exhaustion
+            "context length",
+            "context_limit",
+            "maximum context",
+            "token limit",
+            "too many tokens",
+            "prompt is too long",
+            # Approval gates are human decisions, never retryable
+            "approval gate",
+            "requires human approval",
+        )
+        if any(marker in err_lower for marker in non_retryable_markers):
+            return RecoveryDecision(
+                action=RecoveryAction.TERMINATE_FAILED,
+                step_id=step.step_id,
+                reason=(
+                    f"Non-retryable failure in step '{step.step_id}': {error_message}"
+                ),
+                attempt=max(1, current_step_retries),
+                max_attempts=self.limits.MAX_STEP_RETRIES,
+            )
+
         if "rate limit" in err_lower or "429" in err_lower or "overloaded" in err_lower:
             # Model or provider congestion -> switch model or retry with backoff
             return RecoveryDecision(
@@ -178,7 +234,7 @@ class BoundedRecoveryEngine:
             return RecoveryDecision(
                 action=RecoveryAction.NONE,
                 reason="All quality gates verified successfully.",
-                attempt=current_replans,
+                attempt=max(1, current_replans),
                 max_attempts=self.limits.MAX_REPLANS,
             )
 
@@ -186,7 +242,7 @@ class BoundedRecoveryEngine:
             return RecoveryDecision(
                 action=RecoveryAction.TERMINATE_REJECTED,
                 reason=f"Hard security rejection: {verification.reason}",
-                attempt=current_replans,
+                attempt=max(1, current_replans),
                 max_attempts=self.limits.MAX_REPLANS,
             )
 
@@ -195,7 +251,7 @@ class BoundedRecoveryEngine:
             return RecoveryDecision(
                 action=RecoveryAction.TERMINATE_FAILED,
                 reason=f"Execution budget exceeded ({elapsed_time_seconds:.1f}s) during verification recovery.",
-                attempt=current_replans,
+                attempt=max(1, current_replans),
                 max_attempts=self.limits.MAX_REPLANS,
             )
 
@@ -222,7 +278,7 @@ class BoundedRecoveryEngine:
         return RecoveryDecision(
             action=RecoveryAction.TERMINATE_FAILED,
             reason=f"Terminal verification failure: {verification.reason}",
-            attempt=current_replans,
+            attempt=max(1, current_replans),
             max_attempts=self.limits.MAX_REPLANS,
         )
 
