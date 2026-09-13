@@ -1,6 +1,6 @@
 # R-LOGIC-03 — Accounting — Result
 
-**Status**: VERIFIED — all confirmed defects fixed, regression-tested, all CI-equivalent checks green locally. One CI regression (RL03-F-08, Redis-path denial message) caught by run 1, fixed, and CI green on run 2 (evidence in §10).
+**Status**: VERIFIED — all confirmed defects fixed, regression-tested, all CI-equivalent checks green locally. One CI regression (RL03-F-08, Redis-path denial message) caught by run 1 (34751257085), fixed, and **GitHub CI GREEN** on run 2 (34751728486, all 9 check runs success, PR #41 mergeable: clean).
 **Baseline**: `main` @ `ea95b07` (post R-LOGIC-02 merge, PR #40)
 **Branch**: `chore/r-logic-03-accounting` → PR: see git log / GitHub
 **Date**: 2026-09-13
@@ -236,7 +236,8 @@ cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Check | Result |
 |---|---|
 | Run 1 — 34751257085 (8 check runs before fix) | 7 green; **Automated Tests (3.11) FAILED** → RL03-F-08 (CURRENT TASK REGRESSION, 1 failed / 916 passed); 3.12 cancelled by needs |
-| Run 2 — post-fix (see commit "ci-regression" / latest run on PR #41) | **GREEN — all 9 check runs success** (test jobs 3.11+3.12 incl. real-Redis Lua reservation path, coverage ≥85% + patch gates, benchmark gates, contract gates, SAST, container scan) |
+| Run 2 — 34751728486 attempt 1 | 8/9 jobs green; the 3.11 test job stalled >50 min inside the pytest coverage step on its runner (no test output; identical suite passed on 3.12 in 1.7 min). **ENVIRONMENT/INFRA STALL** — cancelled and re-run on fresh runners |
+| Run 2 — 34751728486 attempt 2 (final) | **GREEN — all 9 check runs success**: Automated Tests & AI RAG Regression 3.11 AND 3.12 (real Redis 7 Lua reservation path, ≥85% coverage + patch gates), Token Optimization ≥40% gate, Phase 00 AI Evaluation gate, Internal Mutual Auth, RAG Quality, LLMOps Safety, OpenAPI contract & breaking-change, Ruff/Mypy/Bandit/pip-audit/licenses/gitleaks/hadolint/actionlint, frontend build, container build + Trivy |
 
 ---
 
