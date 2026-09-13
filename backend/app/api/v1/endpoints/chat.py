@@ -2,12 +2,13 @@
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
@@ -16,12 +17,17 @@ from app.core.config import get_settings
 from app.core.context import TenantContext
 from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
+from app.finops.budget import QuotaReservation, get_budget_manager
+from app.finops.pricing import calculate_baseline_cost
+from app.finops.service import get_finops_service
 from app.guardrails import GuardrailsEngine
 from app.optimizer.semantic_cache import get_semantic_cache_manager
 from app.optimizer.token_accounting import TokenAccounting
 from app.optimizer.token_pruner import estimate_tokens
 from app.providers.errors import sanitize_error_message
 from app.telemetry.metrics import metrics
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -76,6 +82,69 @@ def _format_sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json_data}\n\n"
 
 
+async def _settle_stream_finops(
+    record: Any,
+    *,
+    cache_hit: bool,
+    cache_type: str,
+    telemetry: Any | None,
+    reservation: QuotaReservation | None,
+) -> None:
+    """Single FinOps settlement authority for the chat SSE stream (R-LOGIC-03).
+
+    Records the per-request ledger entry (cache hit or upstream inference) and
+    settles the tenant budget exactly once — finalizing the pre-flight
+    reservation when present, else settling absolutely. Failures are logged,
+    never raised: settlement must not break an in-flight stream.
+    """
+    try:
+        svc = get_finops_service()
+        if cache_hit:
+            if reservation is not None:
+                await get_budget_manager().finalize_reservation(reservation, 0, 0.0)
+            await svc.record_cache_hit(
+                request_id=record.request_id,
+                tenant_id=record.tenant_id,
+                model=record.model,
+                raw_tokens=record.raw_input_tokens,
+                output_tokens=record.completion_tokens,
+                cache_type=cache_type,
+            )
+            return
+
+        provider_usage = None
+        provider = "langgraph"
+        cache_write_tokens = 0
+        if telemetry is not None:
+            provider_usage = (
+                telemetry.model_dump()
+                if hasattr(telemetry, "model_dump")
+                else telemetry
+            )
+            provider = getattr(telemetry, "provider", None) or provider
+            cache_write_tokens = int(getattr(telemetry, "cache_write_tokens", 0) or 0)
+        await svc.record_upstream_inference(
+            request_id=record.request_id,
+            tenant_id=record.tenant_id,
+            provider=provider,
+            model=record.model,
+            raw_tokens=record.raw_input_tokens,
+            optimized_tokens=record.optimized_input_tokens,
+            output_tokens=record.completion_tokens,
+            provider_usage=provider_usage,
+            provider_cached_tokens=record.provider_cached_input_tokens,
+            provider_cache_write_tokens=cache_write_tokens,
+            reservation=reservation,
+            metadata={"route": "chat_stream"},
+        )
+    except Exception:
+        logger.exception(
+            "FinOps settlement failed for stream request %s (tenant %s)",
+            record.request_id,
+            record.tenant_id,
+        )
+
+
 _semantic_cache = get_semantic_cache_manager()
 
 
@@ -85,8 +154,14 @@ async def generate_chat_stream(
     conversation_id: str,
     request: Request | None = None,
     parameters: dict[str, Any] | None = None,
+    reservation: QuotaReservation | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Stream real-time LangGraph multi-agent events via SSE with guardrails & caching."""
+    """Stream real-time LangGraph multi-agent events via SSE with guardrails & caching.
+
+    When a quota reservation is supplied (created by the HTTP endpoint), every
+    terminal path finalizes it — refunded on pre-inference exits, trued up to
+    actual usage after inference (R-LOGIC-03 exactly-once settlement).
+    """
     start_time = time.time()
     settings = get_settings()
     metrics.stream_started()
@@ -94,6 +169,14 @@ async def generate_chat_stream(
     # 1. Perimeter Input Guardrail Check
     guard_decision = GuardrailsEngine.inspect_input(prompt)
     if not guard_decision.allowed:
+        # Nothing was sent upstream: release the reservation in full.
+        if reservation is not None:
+            try:
+                await get_budget_manager().finalize_reservation(reservation, 0, 0.0)
+            except Exception:
+                logger.exception(
+                    "Reservation refund failed for stream %s", conversation_id
+                )
         metrics.stream_completed(round((time.time() - start_time) * 1000, 2))
         yield _format_sse_event(
             "error",
@@ -269,6 +352,13 @@ async def generate_chat_stream(
                 cache_type=cached_entry.cache_type or "exact",
             )
             accounting_recorded = True
+            await _settle_stream_finops(
+                record,
+                cache_hit=True,
+                cache_type=cached_entry.cache_type or "exact",
+                telemetry=None,
+                reservation=reservation,
+            )
             yield _format_sse_event(
                 "telemetry",
                 {
@@ -310,6 +400,32 @@ async def generate_chat_stream(
 
             # Check for Bounded Stream Timeout
             if (time.time() - start_time) > settings.STREAM_TIMEOUT_SECONDS:
+                # Workflow execution already consumed upstream tokens: finalize
+                # accounting exactly like the disconnect/failure paths (the
+                # former silent return skipped settlement entirely).
+                if not accounting_recorded:
+                    comp_tokens = (
+                        max(1, estimate_tokens(final_response)) if final_response else 0
+                    )
+                    record = TokenAccounting.record_transaction(
+                        request_id=f"stream-{conversation_id}",
+                        tenant_id=context.tenant_id,
+                        model=model_used or model_name,
+                        raw_input_tokens=raw_prompt_tokens,
+                        optimized_input_tokens=optimized_prompt_tokens,
+                        completion_tokens=comp_tokens,
+                        cache_hit=False,
+                        cache_type="none",
+                        provider_telemetry=provider_telemetry,
+                    )
+                    accounting_recorded = True
+                    await _settle_stream_finops(
+                        record,
+                        cache_hit=False,
+                        cache_type="none",
+                        telemetry=provider_telemetry,
+                        reservation=reservation,
+                    )
                 yield _format_sse_event(
                     "error",
                     {
@@ -333,7 +449,7 @@ async def generate_chat_stream(
                     comp_tokens = (
                         max(1, estimate_tokens(final_response)) if final_response else 0
                     )
-                    TokenAccounting.record_transaction(
+                    record = TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
                         model=model_used or model_name,
@@ -345,6 +461,13 @@ async def generate_chat_stream(
                         provider_telemetry=provider_telemetry,
                     )
                     accounting_recorded = True
+                    await _settle_stream_finops(
+                        record,
+                        cache_hit=False,
+                        cache_type="none",
+                        telemetry=provider_telemetry,
+                        reservation=reservation,
+                    )
                 return
 
             node = event.get("node")
@@ -390,6 +513,29 @@ async def generate_chat_stream(
                 metrics.record_security_incident(
                     "OUTPUT_DATA_LEAKAGE", context.tenant_id
                 )
+                # Upstream tokens were already consumed: finalize accounting
+                # before blocking the response from reaching the client.
+                if not accounting_recorded:
+                    comp_tokens = max(1, estimate_tokens(final_response))
+                    record = TokenAccounting.record_transaction(
+                        request_id=f"stream-{conversation_id}",
+                        tenant_id=context.tenant_id,
+                        model=model_used or model_name,
+                        raw_input_tokens=raw_prompt_tokens,
+                        optimized_input_tokens=optimized_prompt_tokens,
+                        completion_tokens=comp_tokens,
+                        cache_hit=False,
+                        cache_type="none",
+                        provider_telemetry=provider_telemetry,
+                    )
+                    accounting_recorded = True
+                    await _settle_stream_finops(
+                        record,
+                        cache_hit=False,
+                        cache_type="none",
+                        telemetry=provider_telemetry,
+                        reservation=reservation,
+                    )
                 yield _format_sse_event(
                     "error",
                     {
@@ -431,7 +577,7 @@ async def generate_chat_stream(
                 )
                 if not accounting_recorded:
                     comp_tokens = max(1, estimate_tokens(final_response))
-                    TokenAccounting.record_transaction(
+                    record = TokenAccounting.record_transaction(
                         request_id=f"stream-{conversation_id}",
                         tenant_id=context.tenant_id,
                         model=model_used or model_name,
@@ -443,6 +589,13 @@ async def generate_chat_stream(
                         provider_telemetry=provider_telemetry,
                     )
                     accounting_recorded = True
+                    await _settle_stream_finops(
+                        record,
+                        cache_hit=False,
+                        cache_type="none",
+                        telemetry=provider_telemetry,
+                        reservation=reservation,
+                    )
                 return
 
             yield _format_sse_event(
@@ -469,6 +622,13 @@ async def generate_chat_stream(
             provider_telemetry=provider_telemetry,
         )
         accounting_recorded = True
+        await _settle_stream_finops(
+            record,
+            cache_hit=False,
+            cache_type="none",
+            telemetry=provider_telemetry,
+            reservation=reservation,
+        )
         yield _format_sse_event(
             "telemetry",
             {
@@ -502,7 +662,7 @@ async def generate_chat_stream(
             comp_tokens = (
                 max(1, estimate_tokens(final_response)) if final_response else 1
             )
-            TokenAccounting.record_transaction(
+            record = TokenAccounting.record_transaction(
                 request_id=f"stream-{conversation_id}",
                 tenant_id=context.tenant_id,
                 model=model_name,
@@ -514,6 +674,13 @@ async def generate_chat_stream(
                 provider_telemetry=provider_telemetry,
             )
             accounting_recorded = True
+            await _settle_stream_finops(
+                record,
+                cache_hit=False,
+                cache_type="none",
+                telemetry=provider_telemetry,
+                reservation=reservation,
+            )
         return
     except Exception as exc:
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
@@ -524,7 +691,7 @@ async def generate_chat_stream(
             comp_tokens = (
                 max(1, estimate_tokens(final_response)) if final_response else 1
             )
-            TokenAccounting.record_transaction(
+            record = TokenAccounting.record_transaction(
                 request_id=f"stream-{conversation_id}",
                 tenant_id=context.tenant_id,
                 model=model_used or model_name,
@@ -536,6 +703,13 @@ async def generate_chat_stream(
                 provider_telemetry=provider_telemetry,
             )
             accounting_recorded = True
+            await _settle_stream_finops(
+                record,
+                cache_hit=False,
+                cache_type="none",
+                telemetry=provider_telemetry,
+                reservation=reservation,
+            )
         yield _format_sse_event(
             "error",
             {
@@ -566,10 +740,43 @@ async def chat_stream_endpoint(
     request: Request,
     context: TenantContext = Depends(get_current_tenant),
 ) -> StreamingResponse:
-    """Enforce security & rate limits, then initiate real-time SSE stream."""
+    """Enforce security, rate limits, and budget reservation, then start the SSE stream."""
     await enforce_rate_limit(request, context.tenant_id)
 
     conv_id = payload.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
+
+    # Atomic budget reservation (R-LOGIC-03): the hard-stop check and the usage
+    # increment are one operation, so concurrent streams cannot oversubscribe
+    # the tenant's quota/dollar budget via check-then-act interleaving. The
+    # generator finalizes (or refunds) the reservation on every terminal path.
+    params = payload.parameters or {}
+    stream_model = params.get("model") or "gemini-1.5-flash"
+    est_input = TokenAccounting.calculate_envelope_tokens(
+        messages=params.get("messages", []),
+        system_instruction=params.get("system_instruction")
+        or params.get("system_prompt"),
+        user_query=payload.prompt,
+        model=stream_model,
+    )
+    try:
+        est_completion = int(params.get("max_tokens") or 1024)
+    except (TypeError, ValueError):
+        est_completion = 1024
+    est_cost = calculate_baseline_cost(
+        model=stream_model,
+        raw_input_tokens=est_input,
+        output_tokens=est_completion,
+    )
+    reservation, deny_msg = await get_budget_manager().reserve_budget(
+        context.tenant_id,
+        estimated_tokens=est_input + est_completion,
+        estimated_cost_usd=est_cost,
+    )
+    if reservation is None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=deny_msg or "Token budget quota exceeded",
+        )
 
     return StreamingResponse(
         generate_chat_stream(
@@ -578,6 +785,7 @@ async def chat_stream_endpoint(
             conversation_id=conv_id,
             request=request,
             parameters=payload.parameters,
+            reservation=reservation,
         ),
         media_type="text/event-stream",
         headers={

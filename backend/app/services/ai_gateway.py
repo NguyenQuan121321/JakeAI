@@ -28,7 +28,8 @@ from app.core.llm_provider import (
     call_upstream_llm,
     call_upstream_llm_detailed,
 )
-from app.finops.budget import FinOpsBudgetManager, get_budget_manager
+from app.finops.budget import FinOpsBudgetManager, QuotaReservation, get_budget_manager
+from app.finops.pricing import calculate_baseline_cost
 from app.finops.service import get_finops_service
 from app.optimizer.context_optimizer import get_context_optimizer
 from app.optimizer.semantic_cache import get_semantic_cache_manager
@@ -165,13 +166,45 @@ class QuotaManager:
     async def check_quota(
         self, tenant_id: str, estimated_tokens: int = 100
     ) -> tuple[bool, str | None]:
-        """Check if tenant has quota remaining before inference.
+        """Advisory quota check without reserving usage.
 
-        Returns:
-            (is_allowed, warning_or_error_message)
+        Prefer reserve_budget() on inference paths: it combines the hard-stop
+        check with an atomic usage reservation, closing the check-then-act
+        race that lets concurrent requests oversubscribe a shared budget.
         """
-        return await self._get_manager().check_budget(
+        allowed, message = await self._get_manager().check_budget(
             tenant_id, estimated_tokens=estimated_tokens
+        )
+        return allowed, message
+
+    async def reserve_budget(
+        self,
+        tenant_id: str,
+        estimated_tokens: int,
+        estimated_cost_usd: float = 0.0,
+    ) -> tuple[QuotaReservation | None, str | None]:
+        """Atomically reserve quota before inference (R-LOGIC-03).
+
+        Returns (reservation, None) on success or (None, denial_message) when
+        the tenant's token quota or dollar budget hard stop triggers.
+        """
+        return await self._get_manager().reserve_budget(
+            tenant_id,
+            estimated_tokens=estimated_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+        )
+
+    async def finalize_reservation(
+        self,
+        reservation: QuotaReservation,
+        actual_tokens: int,
+        actual_cost_usd: float,
+    ) -> tuple[int, float]:
+        """Replace a reservation with actual consumption (refunds the unused share)."""
+        return await self._get_manager().finalize_reservation(
+            reservation,
+            actual_tokens=actual_tokens,
+            actual_cost_usd=actual_cost_usd,
         )
 
     async def record_usage(
@@ -271,10 +304,26 @@ class GatewayInferenceProxy:
         correlation_id: str | None = None,
     ) -> GatewayChatResponse:
         """Execute chat completion with Tier 1 Redis exact cache and quota deduction."""
-        # 1. Quota Pre-check
-        allowed, error_msg = await self.quota_mgr.check_quota(tenant_id)
-        if not allowed:
-            raise ValueError(error_msg or "Token budget quota exceeded")
+        # 1. Atomic quota reservation: the estimated model-visible envelope plus
+        # the completion ceiling is reserved up front (check + increment in one
+        # atomic step), so concurrent requests cannot oversubscribe the budget.
+        raw_input_tokens = TokenAccounting.calculate_envelope_tokens(
+            messages=request.messages,
+            tools=request.tools,
+            model=request.model,
+        )
+        est_cost_usd = calculate_baseline_cost(
+            model=request.model,
+            raw_input_tokens=raw_input_tokens,
+            output_tokens=request.max_tokens,
+        )
+        reservation, deny_msg = await self.quota_mgr.reserve_budget(
+            tenant_id,
+            estimated_tokens=raw_input_tokens + request.max_tokens,
+            estimated_cost_usd=est_cost_usd,
+        )
+        if reservation is None:
+            raise ValueError(deny_msg or "Token budget quota exceeded")
 
         # Extract last user message for display/optimization
         last_user_msg = (
@@ -321,13 +370,9 @@ class GatewayInferenceProxy:
             exact_only=True,
         )
         now_ts = int(time.time())
-        # Compute canonical model-visible input envelope tokens across all dimensions
-        # (system instructions, conversation history, user query, tools, and RAG context)
-        raw_input_tokens = TokenAccounting.calculate_envelope_tokens(
-            messages=request.messages,
-            tools=request.tools,
-            model=request.model,
-        )
+        # Canonical model-visible input envelope tokens already computed above
+        # for the reservation (system instructions, conversation history, user
+        # query, tools, and RAG context).
 
         if cache_entry is not None:
             # Output Guardrail leak check on cached response (OPS-03)
@@ -344,7 +389,8 @@ class GatewayInferenceProxy:
                 raise ValueError(
                     "Output blocked due to security data leakage policy violation."
                 )
-            # Immediate zero-cost return with exact accounting
+            # Immediate zero-cost return: refund the reservation in full and
+            # record the cache-hit accounting entry.
             est_completion = max(1, estimate_tokens(cache_entry.response))
             req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
             record = TokenAccounting.record_transaction(
@@ -357,6 +403,7 @@ class GatewayInferenceProxy:
                 cache_hit=True,
                 cache_type=cache_entry.cache_type or "exact",
             )
+            await self.quota_mgr.finalize_reservation(reservation, 0, 0.0)
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
             with contextlib.suppress(Exception):
                 await get_finops_service().record_cache_hit(
@@ -563,12 +610,13 @@ class GatewayInferenceProxy:
 
         # 7. Settlement happens exactly once, inside
         # FinOpsService.record_upstream_inference (tokens + dollars, using the
-        # authoritative provider-reported totals when available). The gateway
-        # must NOT settle quota separately, or every request is double-counted.
+        # authoritative provider-reported totals when available, finalizing the
+        # pre-flight reservation). The gateway must NOT settle quota separately,
+        # or every request is double-counted.
         if record.tokens_saved > 0:
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
 
-        with contextlib.suppress(Exception):
+        try:
             await get_finops_service().record_upstream_inference(
                 request_id=req_id,
                 tenant_id=tenant_id,
@@ -583,7 +631,14 @@ class GatewayInferenceProxy:
                 provider_cache_write_tokens=telemetry.cache_write_tokens
                 if telemetry
                 else 0,
+                reservation=reservation,
                 metadata={"prefix_hash": compiled.static_prefix_hash},
+            )
+        except Exception:
+            # Never mask a successful inference behind a settlement failure; the
+            # reservation stays counted (conservative) if finalization failed.
+            logger.exception(
+                "FinOps settlement failed for request %s (tenant %s)", req_id, tenant_id
             )
 
         return GatewayChatResponse(
@@ -603,7 +658,11 @@ class GatewayInferenceProxy:
             usage={
                 "prompt_tokens": record.optimized_input_tokens,
                 "completion_tokens": record.completion_tokens,
-                "total_tokens": record.actual_billed_tokens,
+                # OpenAI-compatible totals must equal prompt + completion. The
+                # provider-cache discount equivalent lives in the ledger record
+                # (effective_billed_tokens), not in the client-facing usage.
+                "total_tokens": record.optimized_input_tokens
+                + record.completion_tokens,
             },
             cached=False,
             tokens_saved=record.tokens_saved,
@@ -619,20 +678,6 @@ class GatewayInferenceProxy:
         correlation_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream OpenAI-compatible chat completion chunks via SSE."""
-        # 1. Quota Pre-check
-        allowed, error_msg = await self.quota_mgr.check_quota(tenant_id)
-        if not allowed:
-            err_payload = {
-                "error": {
-                    "message": error_msg or "Token budget quota exceeded",
-                    "type": "insufficient_quota",
-                    "param": None,
-                    "code": "quota_exceeded",
-                }
-            }
-            yield f"data: {json.dumps(err_payload)}\n\n"
-            return
-
         req_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         now_ts = int(time.time())
 
@@ -654,6 +699,29 @@ class GatewayInferenceProxy:
             tools=request.tools,
             model=request.model,
         )
+
+        # 1. Atomic quota reservation (check + increment in one step, R-LOGIC-03)
+        est_cost_usd = calculate_baseline_cost(
+            model=request.model,
+            raw_input_tokens=raw_input_tokens,
+            output_tokens=request.max_tokens,
+        )
+        reservation, deny_msg = await self.quota_mgr.reserve_budget(
+            tenant_id,
+            estimated_tokens=raw_input_tokens + request.max_tokens,
+            estimated_cost_usd=est_cost_usd,
+        )
+        if reservation is None:
+            err_payload = {
+                "error": {
+                    "message": deny_msg or "Token budget quota exceeded",
+                    "type": "insufficient_quota",
+                    "param": None,
+                    "code": "quota_exceeded",
+                }
+            }
+            yield f"data: {json.dumps(err_payload)}\n\n"
+            return
 
         # Build generation-relevant fields for canonical cache identity
         system_instructions = "\n".join(
@@ -752,7 +820,19 @@ class GatewayInferenceProxy:
                 cache_hit=True,
                 cache_type=cache_entry.cache_type or "exact",
             )
+            # Zero-cost hit: refund the reservation and record ledger accounting
+            # exactly like the non-stream path (R-LOGIC-03: no silent gaps).
+            await self.quota_mgr.finalize_reservation(reservation, 0, 0.0)
             await self.quota_mgr.record_tokens_saved(tenant_id, record.tokens_saved)
+            with contextlib.suppress(Exception):
+                await get_finops_service().record_cache_hit(
+                    request_id=req_id,
+                    tenant_id=tenant_id,
+                    model=request.model,
+                    raw_tokens=record.raw_input_tokens,
+                    output_tokens=est_completion,
+                    cache_type=cache_entry.cache_type or "exact",
+                )
             return
 
         # 3. Model Generation via Provider Stream or Fallback
@@ -839,7 +919,10 @@ class GatewayInferenceProxy:
             yield f"data: {json.dumps(final_chunk)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
-            # Deduct usage & populate cache even on disconnect
+            # Settle usage & populate cache even on disconnect. Settlement goes
+            # through FinOpsService exactly once (tokens + estimated dollars +
+            # ledger record, finalizing the reservation) instead of the former
+            # token-only quota increment that bypassed dollar budgets entirely.
             completion_tokens = max(1, estimate_tokens("".join(streamed_words)))
             record = TokenAccounting.record_transaction(
                 request_id=req_id,
@@ -851,11 +934,26 @@ class GatewayInferenceProxy:
                 cache_hit=False,
                 cache_type="none",
             )
-            await self.quota_mgr.record_usage(
-                tenant_id=tenant_id,
-                prompt_tokens=record.optimized_input_tokens,
-                completion_tokens=record.completion_tokens,
-            )
+            try:
+                await get_finops_service().record_upstream_inference(
+                    request_id=req_id,
+                    tenant_id=tenant_id,
+                    provider=provider,
+                    model=request.model,
+                    requested_model=request.model,
+                    raw_tokens=record.raw_input_tokens,
+                    optimized_tokens=record.optimized_input_tokens,
+                    output_tokens=record.completion_tokens,
+                    provider_usage=None,
+                    reservation=reservation,
+                    metadata={"route": "gateway_stream"},
+                )
+            except Exception:
+                logger.exception(
+                    "FinOps settlement failed for stream request %s (tenant %s)",
+                    req_id,
+                    tenant_id,
+                )
             if len(streamed_words) == len(words):
                 await self.cache_mgr.set(
                     prompt=last_user_msg,
