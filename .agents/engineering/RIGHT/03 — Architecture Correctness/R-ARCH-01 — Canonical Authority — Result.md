@@ -337,10 +337,14 @@ git push -u origin chore/r-arch-01-canonical-authority          # PR opened
 
 ## 7. CI Result
 
-- GitHub Actions run for this branch: **GREEN (all 9 checks)** — run ID recorded in the
-  PR/commit evidence below.
-- Classification if any failure had occurred: n/a — no CURRENT/SHARED/PREVIOUS regressions
-  introduced; sandbox test failure is environment-local (passes in CI).
+- **GREEN — 9/9 checks**, run [34786116651](https://github.com/NguyenQuan121321/JakeAI/actions/runs/34786116651)
+  on PR [#44](https://github.com/NguyenQuan121321/JakeAI/pull/44), head `bd1942c`,
+  `mergeable_state: clean`. Both coverage-floor jobs
+  ("Automated Tests & AI RAG Regression" 3.11 and 3.12) passed, confirming the
+  two local WSL environment failures are environment-only. No CI modification
+  was made or needed.
+- Classification: n/a — no CURRENT/SHARED/PREVIOUS regressions introduced; the
+  sandbox and RAG-HTTP-OOM failures are environment-local (documented in §5).
 
 ## 8. Remaining Issues & Risks
 
