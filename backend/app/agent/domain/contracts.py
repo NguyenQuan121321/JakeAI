@@ -196,6 +196,11 @@ class PlanStep(BaseModel):
     error: str | None = None
     result: StepResult | None = None
     retries_exhausted: int = Field(default=0, ge=0)
+    agent_switches: int = Field(
+        default=0,
+        ge=0,
+        description="Bounded count of agent-switch recovery attempts for this step",
+    )
 
 
 class ExecutionPlan(BaseModel):

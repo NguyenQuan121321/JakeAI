@@ -25,6 +25,7 @@ class RecoveryLimits(BaseModel):
     """Hard bounded limits preventing runaway execution or infinite recovery loops."""
 
     MAX_STEP_RETRIES: int = Field(default=3, alias="max_step_retries")
+    MAX_AGENT_SWITCHES: int = Field(default=2, alias="max_agent_switches")
     MAX_REPLANS: int = Field(default=2, alias="max_replans")
     MAX_TOTAL_ITERATIONS: int = Field(default=10, alias="max_total_iterations")
     MAX_EXECUTION_TIME_SECONDS: float = Field(
@@ -83,6 +84,21 @@ class BoundedRecoveryEngine:
 
         # 2. Check retry limit
         if current_step_retries >= self.limits.MAX_STEP_RETRIES:
+            # Agent-switch recovery is itself bounded: without a cap, a
+            # permanently failing step with several eligible agents would
+            # alternate between them until the run timeout.
+            if step.agent_switches >= self.limits.MAX_AGENT_SWITCHES:
+                return RecoveryDecision(
+                    action=RecoveryAction.TERMINATE_FAILED,
+                    step_id=step.step_id,
+                    reason=(
+                        f"Step '{step.step_id}' exceeded max retries "
+                        f"({self.limits.MAX_STEP_RETRIES}) and max agent switches "
+                        f"({self.limits.MAX_AGENT_SWITCHES}). Error: {error_message}"
+                    ),
+                    attempt=current_step_retries,
+                    max_attempts=self.limits.MAX_STEP_RETRIES,
+                )
             # Check if another eligible agent can take over this step
             eligible = self.agent_registry.find_eligible(
                 required_capabilities=step.required_capabilities,
@@ -92,7 +108,7 @@ class BoundedRecoveryEngine:
                 a.agent_id for a in eligible if a.agent_id != step.assigned_agent
             ]
             if other_agents:
-                alt_agent = other_agents[0]
+                alt_agent = other_agents[step.agent_switches % len(other_agents)]
                 logger.info(
                     "Step %s retries exhausted for agent %s. Switching to alternative agent: %s",
                     step.step_id,
@@ -102,7 +118,11 @@ class BoundedRecoveryEngine:
                 return RecoveryDecision(
                     action=RecoveryAction.SWITCH_AGENT,
                     step_id=step.step_id,
-                    reason=f"Retries exhausted on {step.assigned_agent}; transferring to alternative agent {alt_agent}.",
+                    reason=(
+                        f"Retries exhausted on {step.assigned_agent}; transferring to "
+                        f"alternative agent {alt_agent} "
+                        f"(switch {step.agent_switches + 1}/{self.limits.MAX_AGENT_SWITCHES})."
+                    ),
                     attempt=current_step_retries,
                     max_attempts=self.limits.MAX_STEP_RETRIES,
                     alternative_agent=alt_agent,

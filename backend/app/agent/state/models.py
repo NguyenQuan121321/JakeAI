@@ -6,7 +6,7 @@ import time
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -29,6 +29,17 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
     REJECTED = "rejected"
     TIMEOUT = "timeout"
+
+    @property
+    def is_terminal(self) -> bool:
+        """Return True if this status is terminal."""
+        return self in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.REJECTED,
+            TaskStatus.TIMEOUT,
+        )
 
 
 class RunStatus(StrEnum):
@@ -66,6 +77,223 @@ class RunStatus(StrEnum):
         return self == RunStatus.COMPLETED
 
 
+# Canonical run state machine (R-LOGIC-01). Keys are source states; values are
+# the successors the machine may enter. Terminal states have no successors.
+RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
+    RunStatus.CREATED: frozenset(
+        {
+            RunStatus.PLANNING,
+            RunStatus.READY,
+            RunStatus.RUNNING,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+    ),
+    RunStatus.PLANNING: frozenset(
+        {RunStatus.READY, RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED}
+    ),
+    RunStatus.READY: frozenset(
+        {RunStatus.RUNNING, RunStatus.EXECUTING, RunStatus.FAILED, RunStatus.CANCELLED}
+    ),
+    RunStatus.RUNNING: frozenset(
+        {
+            RunStatus.EXECUTING,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.PAUSED_APPROVAL,
+            RunStatus.VERIFYING,
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.REJECTED,
+            RunStatus.TIMEOUT,
+        }
+    ),
+    RunStatus.EXECUTING: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.PAUSED_APPROVAL,
+            RunStatus.VERIFYING,
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.REJECTED,
+            RunStatus.TIMEOUT,
+        }
+    ),
+    RunStatus.WAITING_APPROVAL: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.EXECUTING,
+            RunStatus.REJECTED,
+            RunStatus.CANCELLED,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.PAUSED_APPROVAL: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.EXECUTING,
+            RunStatus.REJECTED,
+            RunStatus.CANCELLED,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.VERIFYING: frozenset(
+        {
+            RunStatus.COMPLETED,
+            RunStatus.REPLANNING,
+            RunStatus.PLANNING,
+            RunStatus.RUNNING,
+            RunStatus.FAILED,
+            RunStatus.REJECTED,
+            RunStatus.CANCELLED,
+        }
+    ),
+    # After a replan, revised execution resumes.
+    RunStatus.REPLANNING: frozenset(
+        {
+            RunStatus.PLANNING,
+            RunStatus.READY,
+            RunStatus.RUNNING,
+            RunStatus.EXECUTING,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+    ),
+}
+
+
+def assert_run_transition(current: RunStatus, target: RunStatus) -> None:
+    """Raise ValueError unless current→target is a legal run state transition.
+
+    Re-assigning the identical status is an idempotent no-op. Terminal states
+    are immutable: no writer may move a run out of COMPLETED, FAILED,
+    CANCELLED, REJECTED, or TIMEOUT.
+    """
+    if current == target:
+        return
+    if current.is_terminal:
+        raise ValueError(
+            f"Invalid run state transition: cannot transition from terminal "
+            f"state '{current}' to '{target}'."
+        )
+    if target not in RUN_TRANSITIONS.get(current, frozenset()):
+        raise ValueError(
+            f"Invalid run state transition from '{current}' to '{target}'."
+        )
+
+
+# Canonical task state machine mirrors the run machine. A task aggregates
+# attempts: a terminal task may be explicitly re-opened to RUNNING only when a
+# new run attempt starts — the immutable unit of retry is the run.
+TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
+    TaskStatus.PENDING: frozenset(
+        {
+            TaskStatus.PLANNING,
+            TaskStatus.READY,
+            TaskStatus.RUNNING,
+            TaskStatus.FAILED,
+            TaskStatus.REJECTED,
+            TaskStatus.CANCELLED,
+        }
+    ),
+    TaskStatus.PLANNING: frozenset(
+        {TaskStatus.READY, TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED}
+    ),
+    TaskStatus.READY: frozenset(
+        {
+            TaskStatus.RUNNING,
+            TaskStatus.EXECUTING,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }
+    ),
+    TaskStatus.RUNNING: frozenset(
+        {
+            TaskStatus.EXECUTING,
+            TaskStatus.WAITING_APPROVAL,
+            TaskStatus.PAUSED_APPROVAL,
+            TaskStatus.VERIFYING,
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.REJECTED,
+            TaskStatus.TIMEOUT,
+        }
+    ),
+    TaskStatus.EXECUTING: frozenset(
+        {
+            TaskStatus.RUNNING,
+            TaskStatus.WAITING_APPROVAL,
+            TaskStatus.PAUSED_APPROVAL,
+            TaskStatus.VERIFYING,
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.REJECTED,
+            TaskStatus.TIMEOUT,
+        }
+    ),
+    TaskStatus.WAITING_APPROVAL: frozenset(
+        {
+            TaskStatus.RUNNING,
+            TaskStatus.EXECUTING,
+            TaskStatus.REJECTED,
+            TaskStatus.CANCELLED,
+            TaskStatus.FAILED,
+        }
+    ),
+    TaskStatus.PAUSED_APPROVAL: frozenset(
+        {
+            TaskStatus.RUNNING,
+            TaskStatus.EXECUTING,
+            TaskStatus.REJECTED,
+            TaskStatus.CANCELLED,
+            TaskStatus.FAILED,
+        }
+    ),
+    TaskStatus.VERIFYING: frozenset(
+        {
+            TaskStatus.COMPLETED,
+            TaskStatus.REPLANNING,
+            TaskStatus.PLANNING,
+            TaskStatus.RUNNING,
+            TaskStatus.FAILED,
+            TaskStatus.REJECTED,
+            TaskStatus.CANCELLED,
+        }
+    ),
+    TaskStatus.REPLANNING: frozenset(
+        {
+            TaskStatus.PLANNING,
+            TaskStatus.READY,
+            TaskStatus.RUNNING,
+            TaskStatus.EXECUTING,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }
+    ),
+}
+
+
+def assert_task_transition(current: TaskStatus, target: TaskStatus) -> None:
+    """Raise ValueError unless current→target is a legal task state transition."""
+    if current == target:
+        return
+    if current.is_terminal:
+        if target == TaskStatus.RUNNING:
+            return  # explicit re-open for a bounded new attempt
+        raise ValueError(
+            f"Invalid task state transition: cannot transition from terminal "
+            f"state '{current}' to '{target}'."
+        )
+    if target not in TASK_TRANSITIONS.get(current, frozenset()):
+        raise ValueError(
+            f"Invalid task state transition from '{current}' to '{target}'."
+        )
+
+
 class StepExecutionRecord(BaseModel):
     """Observable record of an individual step executed in an agent run."""
 
@@ -94,6 +322,41 @@ class TaskState(BaseModel):
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    _enforced_status: TaskStatus | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def _init_status_tracking(self) -> TaskState:
+        """Initialize transition tracking after construction."""
+        if self._enforced_status is None:
+            self._enforced_status = self.status
+        return self
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "status" and self.__pydantic_complete__:
+            current = self._enforced_status
+            if current is None:
+                super().__setattr__(name, value)
+                self._enforced_status = self.status
+                return
+            try:
+                target = TaskStatus(value)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"Invalid task status value: {value!r}") from exc
+            assert_task_transition(current, target)
+            super().__setattr__(name, value)
+            self._enforced_status = target
+            return
+        super().__setattr__(name, value)
+
+    def transition_to(
+        self, target_status: TaskStatus, reason: str | None = None
+    ) -> None:
+        """Explicitly transition the task through the state machine."""
+        assert_task_transition(self.status, target_status)
+        self.status = target_status
+        if reason:
+            self.metadata["status_reason"] = reason
 
 
 class RunState(BaseModel):
@@ -153,106 +416,44 @@ class RunState(BaseModel):
     completed_at: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    _enforced_status: RunStatus | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def _init_status_tracking(self) -> RunState:
+        """Initialize transition tracking after construction (restored
+        checkpoints and adapter mappings may start in any legal state)."""
+        if self._enforced_status is None:
+            self._enforced_status = self.status
+        return self
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "status" and self.__pydantic_complete__:
+            current = self._enforced_status
+            if current is None:
+                super().__setattr__(name, value)
+                self._enforced_status = self.status
+                return
+            try:
+                target = RunStatus(value)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"Invalid run status value: {value!r}") from exc
+            # Validate BEFORE mutation: an illegal write must raise without
+            # changing the persisted status.
+            assert_run_transition(current, target)
+            super().__setattr__(name, value)
+            self._enforced_status = target
+            return
+        super().__setattr__(name, value)
+
     def transition_to(
         self, target_status: RunStatus, reason: str | None = None
     ) -> None:
         """Deterministically transition run status with explicit state machine verification."""
-        terminal_statuses = {
-            RunStatus.COMPLETED,
-            RunStatus.FAILED,
-            RunStatus.CANCELLED,
-            RunStatus.REJECTED,
-            RunStatus.TIMEOUT,
-        }
-        if self.status in terminal_statuses:
-            raise ValueError(
-                f"Invalid run state transition: cannot transition from terminal state '{self.status}' to '{target_status}'."
-            )
-
-        valid_transitions: dict[RunStatus, set[RunStatus]] = {
-            RunStatus.CREATED: {
-                RunStatus.PLANNING,
-                RunStatus.READY,
-                RunStatus.RUNNING,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-            },
-            RunStatus.PLANNING: {
-                RunStatus.READY,
-                RunStatus.RUNNING,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-            },
-            RunStatus.READY: {
-                RunStatus.RUNNING,
-                RunStatus.EXECUTING,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-            },
-            RunStatus.RUNNING: {
-                RunStatus.EXECUTING,
-                RunStatus.WAITING_APPROVAL,
-                RunStatus.PAUSED_APPROVAL,
-                RunStatus.VERIFYING,
-                RunStatus.COMPLETED,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-                RunStatus.REJECTED,
-                RunStatus.TIMEOUT,
-            },
-            RunStatus.EXECUTING: {
-                RunStatus.RUNNING,
-                RunStatus.WAITING_APPROVAL,
-                RunStatus.PAUSED_APPROVAL,
-                RunStatus.VERIFYING,
-                RunStatus.COMPLETED,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-                RunStatus.REJECTED,
-                RunStatus.TIMEOUT,
-            },
-            RunStatus.WAITING_APPROVAL: {
-                RunStatus.RUNNING,
-                RunStatus.EXECUTING,
-                RunStatus.REJECTED,
-                RunStatus.CANCELLED,
-                RunStatus.FAILED,
-            },
-            RunStatus.PAUSED_APPROVAL: {
-                RunStatus.RUNNING,
-                RunStatus.EXECUTING,
-                RunStatus.REJECTED,
-                RunStatus.CANCELLED,
-                RunStatus.FAILED,
-            },
-            RunStatus.VERIFYING: {
-                RunStatus.COMPLETED,
-                RunStatus.REPLANNING,
-                RunStatus.PLANNING,
-                RunStatus.RUNNING,
-                RunStatus.FAILED,
-                RunStatus.REJECTED,
-                RunStatus.CANCELLED,
-            },
-            RunStatus.REPLANNING: {
-                RunStatus.PLANNING,
-                RunStatus.READY,
-                RunStatus.RUNNING,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-            },
-        }
-
-        allowed = valid_transitions.get(self.status, set())
-        if target_status not in allowed:
-            raise ValueError(
-                f"Invalid run state transition from '{self.status}' to '{target_status}'."
-            )
-
+        assert_run_transition(self.status, target_status)
         self.status = target_status
         if reason:
             self.termination_reason = reason
-        if target_status in terminal_statuses:
+        if target_status.is_terminal:
             self.completed_at = time.time()
 
     def to_agent_state(self) -> dict[str, Any]:

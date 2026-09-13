@@ -214,6 +214,8 @@ class ExecutionEngine:
         tenant_id = task_spec.tenant_id
         pre_approved = pre_approved_step_ids or set()
 
+        self._normalize_to_executing(run_state)
+
         completed_step_ids: set[str] = {
             s.step_id for s in plan.steps if s.status == StepStatus.COMPLETED
         }
@@ -317,6 +319,7 @@ class ExecutionEngine:
                         run_state.error = (
                             "Plan execution halted due to unrecoverable step failure."
                         )
+                        run_state.completed_at = time.time()
                         await self.checkpoint_manager.save_checkpoint(run_state)
                         yield AgentRunEvent(
                             event_type="failed",
@@ -444,7 +447,11 @@ class ExecutionEngine:
                             )
                         elif rec_decision.action == RecoveryAction.SWITCH_AGENT:
                             step_obj.assigned_agent = rec_decision.alternative_agent
-                            step_obj.retries_exhausted += 1
+                            # Bounded new attempt: the alternative agent gets a
+                            # fresh retry budget; the total switch count is
+                            # capped by RecoveryLimits.MAX_AGENT_SWITCHES.
+                            step_obj.agent_switches += 1
+                            step_obj.retries_exhausted = 0
                             step_obj.status = StepStatus.PENDING
                             plan.mark_step_status(
                                 step_id=step_obj.step_id,
@@ -484,6 +491,7 @@ class ExecutionEngine:
                         else:
                             run_state.status = RunStatus.FAILED
                             run_state.error = rec_decision.reason
+                            run_state.completed_at = time.time()
                             await self.checkpoint_manager.save_checkpoint(run_state)
                             yield AgentRunEvent(
                                 event_type="failed",
@@ -543,6 +551,7 @@ class ExecutionEngine:
                 return
 
             # 4. Actual Result Verification (Phase 13)
+            run_state.status = RunStatus.VERIFYING
             yield AgentRunEvent(
                 event_type="verification_started",
                 task_id=task_spec.task_id,
@@ -620,6 +629,7 @@ class ExecutionEngine:
                     return
 
                 # Replan workflow
+                run_state.status = RunStatus.REPLANNING
                 yield AgentRunEvent(
                     event_type="replan_started",
                     task_id=task_spec.task_id,
@@ -642,6 +652,7 @@ class ExecutionEngine:
                     tenant_id=tenant_id,
                 )
                 run_state.plan = plan.model_dump()
+                run_state.status = RunStatus.EXECUTING
                 await self.checkpoint_manager.save_checkpoint(run_state)
                 revision_count += 1
                 continue
@@ -1324,6 +1335,32 @@ class ExecutionEngine:
             pre_approved_step_ids=pre_approved_step_ids,
         ):
             yield event
+
+    @staticmethod
+    def _normalize_to_executing(run_state: RunState) -> None:
+        """Bring a restored run into EXECUTING via matrix-legal intermediate hops.
+
+        Checkpoints captured before dispatch (e.g. READY) or mid-flight (e.g.
+        RUNNING) must re-enter the machine legally: driving a restored run
+        straight to a terminal state would otherwise perform transitions the
+        state machine forbids (e.g. READY→COMPLETED).
+        """
+        status = run_state.status
+        if status.is_terminal or status in (
+            RunStatus.EXECUTING,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.PAUSED_APPROVAL,
+        ):
+            return
+        if status in (
+            RunStatus.CREATED,
+            RunStatus.PLANNING,
+            RunStatus.VERIFYING,
+            RunStatus.REPLANNING,
+        ):
+            # Route through RUNNING so every hop is a legal transition.
+            run_state.status = RunStatus.RUNNING
+        run_state.status = RunStatus.EXECUTING
 
     @staticmethod
     def _is_cancelled(cancellation_token: Any) -> bool:

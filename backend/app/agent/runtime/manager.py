@@ -243,8 +243,9 @@ class AgentRuntimeManager:
             return run
 
         self.runner.request_cancellation(run_id)
-        run.status = RunStatus.CANCELLED
-        task.status = TaskStatus.CANCELLED
+        run.transition_to(RunStatus.CANCELLED)
+        if not task.status.is_terminal:
+            task.transition_to(TaskStatus.CANCELLED)
         return run
 
     async def decide_approval(
@@ -293,11 +294,13 @@ class AgentRuntimeManager:
                 )
             )
             run.pending_approval_id = None
-            # Terminal states are immutable: a late decision on an already
-            # terminal run must not resurrect it.
+            # A rejected approval terminates the run REJECTED — consistent with
+            # the canonical engine's rejection semantics. Leaving the run
+            # RUNNING would strand it in a state nothing will ever execute.
             if not run.status.is_terminal:
-                run.status = RunStatus.RUNNING
-                task.status = TaskStatus.RUNNING
+                run.transition_to(RunStatus.REJECTED)
+                if not task.status.is_terminal:
+                    task.transition_to(TaskStatus.REJECTED)
 
         return appr
 
