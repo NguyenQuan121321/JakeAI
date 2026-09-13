@@ -2882,6 +2882,18 @@
             "title": "Confidence",
             "description": "Groundedness confidence score",
             "default": 1.0
+          },
+          "chunk_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Id",
+            "description": "Identifier of the retrieved chunk backing this citation, resolvable against ingestion/retrieval evidence (None for non-chunk sources)."
           }
         },
         "type": "object",
