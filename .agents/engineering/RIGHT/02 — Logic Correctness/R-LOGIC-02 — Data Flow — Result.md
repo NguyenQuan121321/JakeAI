@@ -186,9 +186,11 @@ backend/.venv/bin/mypy --config-file mypy.ini app
 
 ## 8. CI Status
 
-**GREEN.** Pushed as `chore/r-logic-02-data-flow` → PR to `main` (`https://github.com/NguyenQuan121321/JakeAI/pull/40`).
+**GREEN.** Pushed as `chore/r-logic-02-data-flow` → PR #40 to `main` (`https://github.com/NguyenQuan121321/JakeAI/pull/40`).
 
-GitHub Actions run **34737015162** ("Continuous Integration") — conclusion **success**; PR mergeable_state: **clean**. All 9 checks:
+**First CI run — 34745482734 — FAILED; classified: CURRENT TASK REGRESSION.** All test steps and coverage gates passed (Global line coverage 89.46% ≥ 85%, PR patch coverage 100%); the failure was the **OpenAPI contract gate** (`git diff --exit-code openapi.json` after `--export-openapi`): the additive `Citation.chunk_id` field (RL02-F-08) made the committed `openapi.json` stale. Fixed by regenerating the spec (`python -m app.main --export-openapi openapi.json`); `scripts/check_openapi_breaking_changes.py` confirms zero breaking changes (additive optional field). Committed as `2c639a6`.
+
+**Final CI run — 34745888493 ("Continuous Integration") on commit `2c639a6` — conclusion success; PR mergeable_state: clean.** All 9 checks:
 
 | Check | Conclusion |
 |---|---|
