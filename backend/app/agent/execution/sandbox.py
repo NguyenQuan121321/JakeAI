@@ -59,6 +59,7 @@ class LocalSafeSandbox(ExecutionInterface):
     ALLOWED_COMMANDS = {
         "git",
         "python",
+        "python3",
         "pytest",
         "echo",
         "ls",

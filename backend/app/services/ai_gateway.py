@@ -483,12 +483,6 @@ class GatewayInferenceProxy:
                 messages_to_send.append(m)
         messages_to_send.reverse()
 
-        response_format_dict = (
-            request.response_format
-            if isinstance(request.response_format, dict)
-            else None
-        )
-
         async def call_model() -> str:
             nonlocal upstream_response
             upstream_res = await call_upstream_llm_detailed(
@@ -500,7 +494,7 @@ class GatewayInferenceProxy:
                 compiled_prompt=compiled,
                 tools=request.tools,
                 messages=messages_to_send,
-                response_format=response_format_dict,
+                response_format=request.response_format,
                 correlation_id=correlation_id,
             )
             if upstream_res:

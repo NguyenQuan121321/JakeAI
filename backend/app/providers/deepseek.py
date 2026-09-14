@@ -114,7 +114,10 @@ class DeepSeekAdapter(LLMProvider):
         if request.tools:
             payload["tools"] = request.tools
         if request.response_format:
-            payload["response_format"] = request.response_format
+            if isinstance(request.response_format, str):
+                payload["response_format"] = {"type": request.response_format}
+            else:
+                payload["response_format"] = request.response_format
         if request.extra_params:
             payload.update(request.extra_params)
 

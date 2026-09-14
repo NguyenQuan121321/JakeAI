@@ -52,6 +52,9 @@ class InternalResumeSubmission(BaseModel):
     tenant_id: str = Field(..., min_length=1, max_length=128)
     result: dict[str, Any] = Field(...)
     thread_id: str | None = Field(default=None)
+    conversation_id: str | None = Field(
+        default=None, max_length=128, description="Optional conversation identifier"
+    )
 
 
 @router.post("/tool-result", response_model=ResumedExecutionResult)

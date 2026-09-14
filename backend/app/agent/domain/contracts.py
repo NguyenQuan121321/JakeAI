@@ -166,6 +166,8 @@ class PlanStep(BaseModel):
     observation: str | None = None
     error: str | None = None
     result: StepResult | None = None
+    tool_name: str | None = None
+    tool_args: dict[str, Any] = Field(default_factory=dict)
     retries_exhausted: int = Field(default=0, ge=0)
     agent_switches: int = Field(
         default=0,
@@ -178,7 +180,7 @@ class ExecutionPlan(BaseModel):
     """Directed dependency graph of planned operations fulfilling a TaskSpec."""
 
     plan_id: str = Field(default_factory=lambda: f"plan_{uuid.uuid4().hex[:12]}")
-    task_id: str
+    task_id: str = Field(default_factory=lambda: f"task_{uuid.uuid4().hex[:12]}")
     goal: str
     analysis: str = ""
     steps: list[PlanStep] = Field(default_factory=list)
@@ -297,7 +299,7 @@ class ToolSelection(BaseModel):
 
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
-    risk_level: str = "safe"
+    risk_level: str = "read_only"
     requires_approval: bool = False
     policy_decision: str = "allowed"
 

@@ -51,7 +51,7 @@ async def call_upstream_llm_detailed(
     compiled_prompt: CompiledPrompt | None = None,
     tools: list[dict[str, Any]] | None = None,
     messages: list[ChatMessage] | None = None,
-    response_format: dict[str, Any] | None = None,
+    response_format: dict[str, Any] | str | None = None,
     correlation_id: str | None = None,
 ) -> UpstreamLLMResponse | None:
     """Call upstream LLM provider and capture full Tier 5 cache telemetry.

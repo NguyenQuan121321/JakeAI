@@ -7,6 +7,8 @@ import logging
 import time
 from typing import Any
 
+from pydantic import Field
+
 from app.agent.state.models import RunState, RunStatus
 from app.core.redis_client import (
     acquire_redis_client,
@@ -22,7 +24,7 @@ class CheckpointRecord(RunState):
 
     checkpoint_id: str
     checkpoint_created_at: float
-    short_term_memory_snapshot: list[dict[str, Any]] = []
+    short_term_memory_snapshot: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CheckpointManager:

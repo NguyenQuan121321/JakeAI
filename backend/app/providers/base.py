@@ -175,7 +175,7 @@ class ProviderRequest(BaseModel):
         default=None,
         description="Explicit decrypted key if provided; otherwise resolved by adapter",
     )
-    response_format: dict[str, Any] | None = Field(
+    response_format: dict[str, Any] | str | None = Field(
         default=None, description="Optional structured format / JSON schema"
     )
     extra_headers: dict[str, str] | None = Field(
