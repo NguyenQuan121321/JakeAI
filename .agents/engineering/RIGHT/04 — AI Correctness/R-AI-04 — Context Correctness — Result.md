@@ -279,13 +279,29 @@ tests/test_rag_unified_envelope.py (3 passed)
 
 ## 6. Static Analysis & CI Verification
 
-| Tool | Scope | Result | Details |
+| Tool / Check | Scope | Result | Details |
 |---|---|---|---|
 | **Ruff Linter** | `backend/app/`, `backend/tests/` | **PASS (0 errors)** | `ruff check backend/` |
 | **Ruff Formatter** | Entire backend repository | **PASS (0 unformatted)** | `ruff format --check backend/` (271 files checked) |
 | **Mypy Static Type Checker** | `backend/app/` | **PASS (0 issues)** | `mypy --config-file backend/mypy.ini backend/app` (169 files checked) |
 | **Bandit SAST** | `backend/app/` | **PASS (0 security issues)** | `bandit -c pyproject.toml -r app/` (32,291 LOC scanned) |
 | **Coverage Floor Gate** | `app.rag.context_envelope` | **PASS (90.09%)** | Required floor: 85.0%, Achieved: **90.09%** with full branch coverage |
+| **GitHub Actions CI** | Full CI Matrix (PR #54) | **PASS (9/9 jobs green)** | Run `34847547366` on `chore/r-ai-04-context-correctness` |
+
+### GitHub Actions CI Run Details (Run ID: `34847547366`)
+
+- **Pull Request**: [#54](https://github.com/NguyenQuan121321/JakeAI/pull/54)
+- **Status**: `completed` | **Conclusion**: `success` (100% Green)
+- **Verified Jobs**:
+  1. `DevSecOps - Secret & Key Leak Detection`: **SUCCESS**
+  2. `Infrastructure & Workflow Linting`: **SUCCESS**
+  3. `DevSecOps - Vulnerability Audit, SAST & License Compliance`: **SUCCESS**
+  4. `Code Quality & Type Analysis (3.12)`: **SUCCESS**
+  5. `Frontend Widget Build & Quality Verification`: **SUCCESS**
+  6. `Code Quality & Type Analysis (3.11)`: **SUCCESS**
+  7. `Automated Tests & AI RAG Regression (3.11)`: **SUCCESS**
+  8. `Automated Tests & AI RAG Regression (3.12)`: **SUCCESS**
+  9. `Container Packaging & Vulnerability Scan`: **SUCCESS**
 
 ---
 
