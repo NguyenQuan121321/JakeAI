@@ -4395,6 +4395,18 @@
             ],
             "title": "Grounding",
             "description": "Claim-level grounding and verification breakdown"
+          },
+          "envelope_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Envelope Tokens",
+            "description": "Exact serialized token count of canonical 6-stage context envelope"
           }
         },
         "type": "object",
