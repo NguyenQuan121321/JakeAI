@@ -167,6 +167,22 @@ class CanonicalVerifier:
                 "tenant_id": tenant_id,
             }
         )
+
+        # 3b. Output Data Leakage Security Gate (Hard Security Invariant)
+        if getattr(eval_res, "data_leakage_detected", False):
+            reason = "Security gate failure: Output data leakage detected (credentials, system prompt, or cross-tenant data breach)"
+            evidence["data_leakage_detected"] = True
+            logger.warning("CanonicalVerifier REJECTED execution: %s", reason)
+            return VerificationResult(
+                verdict=VerificationVerdict.REJECTED,
+                reason=reason,
+                violated_invariant="Output data leakage prevention",
+                evidence=evidence,
+                recoverability=False,
+                recommended_recovery_action=RecoveryAction.TERMINATE_REJECTED,
+                groundedness_score=0.0,
+            )
+
         groundedness_score = getattr(eval_res, "faithfulness_score", 1.0)
         anti_hallucination_passed = getattr(eval_res, "anti_hallucination_passed", True)
         is_grounded = groundedness_score >= 0.80 and anti_hallucination_passed

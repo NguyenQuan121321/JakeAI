@@ -200,9 +200,14 @@ class GroundingVerificationResult(BaseModel):
     groundedness_ratio: float = Field(
         description="Ratio of supported claims: supported / total substantive claims"
     )
+    unsupported_claim_rate: float = Field(
+        default=0.0,
+        description="Ratio of ungrounded/contradicted claims: (unsupported + contradicted) / total claims",
+    )
     claims: list[GroundingClaim] = Field(default_factory=list)
     supported_claims: list[GroundingClaim] = Field(default_factory=list)
     unsupported_claims: list[GroundingClaim] = Field(default_factory=list)
+    contradicted_claims: list[GroundingClaim] = Field(default_factory=list)
     uncertain_claims: list[GroundingClaim] = Field(default_factory=list)
     verified_answer: str = Field(
         description="Answer with ungrounded claims filtered or qualified"
@@ -271,6 +276,22 @@ class GroundingVerifier:
         """Verify a single claim against candidate evidence passages."""
         if tenant_id is not None:
             passages = [p for p in passages if p.tenant_id == tenant_id]
+
+        # 0. Prompt Injection & Jailbreak Defense: Prohibit adversarial commands from grounding
+        from app.guardrails.input_guard import check_input_guardrail
+
+        guard_decision = check_input_guardrail(claim)
+        if not guard_decision.allowed:
+            return GroundingClaim(
+                claim_text=claim,
+                entailment=ClaimEntailment.UNSUPPORTED,
+                confidence=0.0,
+                supporting_chunk_ids=[],
+                reasoning=(
+                    f"Claim contains adversarial prompt injection or security override directives: "
+                    f"{guard_decision.violation_type or 'SECURITY_VIOLATION'}."
+                ),
+            )
 
         if is_epistemic_abstention(claim):
             return GroundingClaim(
@@ -363,6 +384,41 @@ class GroundingVerifier:
                     elif ratio >= 0.35 and best_support_chunks:
                         qualitative_conflict_detected = True
                         contradicting_chunks.append(chunk.chunk_id)
+
+        # Multi-chunk ensemble metric evaluation for compound claims
+        if (claim_metrics or claim_raw_numbers) and not best_support_chunks:
+            all_passage_metrics: set[tuple[str, float]] = set()
+            all_passage_raw: set[str] = set()
+            for p in passages:
+                all_passage_metrics.update(extract_canonical_metrics(p.content))
+                all_passage_raw.update(METRIC_REGEX.findall(p.content))
+
+            multi_metric_match = (
+                claim_metrics.issubset(all_passage_metrics)
+                if claim_metrics
+                else claim_raw_numbers.issubset(all_passage_raw)
+            )
+            if multi_metric_match:
+                for chunk in passages:
+                    c_metrics = extract_canonical_metrics(chunk.content)
+                    c_raw = set(METRIC_REGEX.findall(chunk.content))
+                    c_terms = {
+                        w.lower()
+                        for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", chunk.content)
+                        if w.lower() not in STOPWORDS and not w.isdigit()
+                    }
+                    overlap = len(claim_terms.intersection(c_terms))
+                    ratio = overlap / max(1, len(claim_terms))
+                    has_metric_overlap = (
+                        bool(claim_metrics.intersection(c_metrics))
+                        if claim_metrics
+                        else bool(claim_raw_numbers.intersection(c_raw))
+                    )
+                    if has_metric_overlap and ratio >= 0.15:
+                        best_support_chunks.append(chunk.chunk_id)
+                        max_overlap_ratio = max(max_overlap_ratio, ratio)
+                if best_support_chunks:
+                    number_mismatch_detected = False
 
         # Classify entailment
         if best_support_chunks:
@@ -460,20 +516,35 @@ class GroundingVerifier:
         supported = [
             c for c in verified_claims if c.entailment == ClaimEntailment.SUPPORTED
         ]
+        contradicted = [
+            c
+            for c in verified_claims
+            if c.entailment == ClaimEntailment.CONTRADICTED
+            or "contradicts" in c.reasoning.lower()
+        ]
         unsupported = [
             c
             for c in verified_claims
-            if c.entailment
-            in (ClaimEntailment.UNSUPPORTED, ClaimEntailment.CONTRADICTED)
+            if c.entailment == ClaimEntailment.UNSUPPORTED and c not in contradicted
         ]
         uncertain = [
             c for c in verified_claims if c.entailment == ClaimEntailment.UNCERTAIN
         ]
 
-        ratio = len(supported) / len(claims) if claims else 0.0
-        is_grounded = ratio >= self.min_groundedness_ratio and len(unsupported) == 0
+        total_claims_count = len(claims)
+        ratio = len(supported) / total_claims_count if total_claims_count else 0.0
+        unsupported_rate = (
+            (len(unsupported) + len(contradicted)) / total_claims_count
+            if total_claims_count
+            else 0.0
+        )
+        is_grounded = (
+            ratio >= self.min_groundedness_ratio
+            and len(unsupported) == 0
+            and len(contradicted) == 0
+        )
 
-        # Construct verified answer filtering out unsupported statements
+        # Construct verified answer filtering out unsupported and contradicted statements
         verified_sentences: list[str] = []
         for claim_obj in verified_claims:
             if claim_obj.entailment == ClaimEntailment.SUPPORTED:
@@ -486,7 +557,7 @@ class GroundingVerifier:
                     verified_sentences.append(f"{c_text} [unverified]")
             else:
                 logger.warning(
-                    "Dropping unsupported claim from user answer: '%s' (Reason: %s)",
+                    "Dropping unsupported/contradicted claim from user answer: '%s' (Reason: %s)",
                     claim_obj.claim_text,
                     claim_obj.reasoning,
                 )
@@ -496,9 +567,11 @@ class GroundingVerifier:
         return GroundingVerificationResult(
             is_grounded=is_grounded,
             groundedness_ratio=round(ratio, 4),
+            unsupported_claim_rate=round(unsupported_rate, 4),
             claims=verified_claims,
             supported_claims=supported,
-            unsupported_claims=unsupported,
+            unsupported_claims=unsupported + contradicted,
+            contradicted_claims=contradicted,
             uncertain_claims=uncertain,
             verified_answer=verified_answer,
         )
