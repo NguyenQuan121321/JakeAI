@@ -28,6 +28,7 @@ from app.rag.grounding import (
     STOPWORDS,
     GroundingVerifier,
     get_grounding_verifier,
+    is_epistemic_abstention,
 )
 from app.rag.ingestion import (
     DocumentIngestionPipeline,
@@ -38,6 +39,7 @@ from app.rag.ingestion import (
 from app.rag.models import (
     AbstentionReason,
     Citation,
+    ClaimEntailment,
     ContextSelectionResult,
     RAGGenerationResult,
     RetrievalResult,
@@ -305,9 +307,37 @@ class RAGPipeline:
             tenant_id=tenant_id,
         )
 
+        # Epistemic boundary handling: if model explicitly abstains and no supported factual claims exist
+        if is_epistemic_abstention(raw_answer) and not any(
+            c.entailment == ClaimEntailment.SUPPORTED and c.supporting_chunk_ids
+            for c in verification.claims
+        ):
+            elapsed = round((time.time() - start_time) * 1000, 2)
+            return RAGGenerationResult(
+                query=query,
+                tenant_id=tenant_id,
+                answer=raw_answer,
+                citations=[],
+                context_selection=context_res,
+                latency_ms=elapsed,
+                status="ABSTAINED",
+                abstention_reason=AbstentionReason.NO_RELEVANT_EVIDENCE,
+                grounding=verification,
+                correlation_id=correlation_id,
+            )
+
         if not verification.is_grounded and not verification.verified_answer:
             # All statements failed grounding verification: explicit generation abstention
             elapsed = round((time.time() - start_time) * 1000, 2)
+            has_contradiction = any(
+                c.entailment == ClaimEntailment.CONTRADICTED
+                for c in verification.claims
+            )
+            reason = (
+                AbstentionReason.CONTRADICTORY_EVIDENCE
+                if has_contradiction
+                else AbstentionReason.GENERATION_FAILURE
+            )
             return RAGGenerationResult(
                 query=query,
                 tenant_id=tenant_id,
@@ -316,7 +346,8 @@ class RAGPipeline:
                 context_selection=context_res,
                 latency_ms=elapsed,
                 status="ABSTAINED",
-                abstention_reason=AbstentionReason.GENERATION_FAILURE,
+                abstention_reason=reason,
+                grounding=verification,
                 correlation_id=correlation_id,
             )
 
@@ -347,6 +378,7 @@ class RAGPipeline:
             latency_ms=elapsed_ms,
             status="SUCCESS",
             abstention_reason=None,
+            grounding=verification,
             correlation_id=correlation_id,
         )
 

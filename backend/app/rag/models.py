@@ -13,6 +13,7 @@ class AbstentionReason(StrEnum):
     PROVIDER_FAILURE = "PROVIDER_FAILURE"
     GENERATION_FAILURE = "GENERATION_FAILURE"
     RETRIEVAL_FAILURE = "RETRIEVAL_FAILURE"
+    CONTRADICTORY_EVIDENCE = "CONTRADICTORY_EVIDENCE"
 
 
 class ClaimEntailment(StrEnum):
@@ -21,6 +22,7 @@ class ClaimEntailment(StrEnum):
     SUPPORTED = "SUPPORTED"
     UNSUPPORTED = "UNSUPPORTED"
     UNCERTAIN = "UNCERTAIN"
+    CONTRADICTED = "CONTRADICTED"
 
 
 class GroundingClaim(BaseModel):
@@ -181,7 +183,11 @@ class RAGGenerationResult(BaseModel):
     )
     abstention_reason: AbstentionReason | str | None = Field(
         default=None,
-        description="Reason code if status is ABSTAINED: 'NO_RELEVANT_EVIDENCE', 'PROVIDER_FAILURE', 'GENERATION_FAILURE'",
+        description="Reason code if status is ABSTAINED: 'NO_RELEVANT_EVIDENCE', 'PROVIDER_FAILURE', 'GENERATION_FAILURE', 'CONTRADICTORY_EVIDENCE'",
+    )
+    grounding: Any | None = Field(
+        default=None,
+        description="Detailed claim-level grounding verification breakdown",
     )
     correlation_id: str | None = Field(
         default=None,
