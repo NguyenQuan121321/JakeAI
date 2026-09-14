@@ -127,8 +127,27 @@ class CanonicalVerifier:
                     for item in s:
                         context_parts.append(str(item))
             for tc in tool_calls:
+                # Isolate tool result contamination: failed or blocked tool calls must not pollute grounding
+                if (
+                    tc.get("status") in ("ERROR", "BLOCKED", "FAILED")
+                    or tc.get("success") is False
+                ):
+                    continue
+
                 tc_out = tc.get("output")
                 if tc_out is not None:
+                    out_str = str(tc_out)
+                    from app.guardrails.input_guard import check_input_guardrail
+
+                    injection_decision = check_input_guardrail(out_str)
+                    if not injection_decision.allowed:
+                        logger.warning(
+                            "Tool output contains prompt injection; isolating from context: %s",
+                            injection_decision.reason,
+                        )
+                        evidence["tool_output_injection_detected"] = True
+                        continue
+
                     if isinstance(tc_out, dict):
                         for k, v in tc_out.items():
                             context_parts.append(f"{k} {v}")

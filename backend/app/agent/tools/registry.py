@@ -53,10 +53,14 @@ class ToolRegistry:
                 results.append(tool.metadata)
         return results
 
-    def validate(
-        self, tool_name: str, arguments: dict[str, Any]
-    ) -> tuple[bool, str | None]:
-        """Validate presence of required parameters based on input_schema."""
+    def validate(self, tool_name: str, arguments: Any) -> tuple[bool, str | None]:
+        """Validate presence, types, and constraints of parameters based on input_schema."""
+        if not isinstance(arguments, dict):
+            return (
+                False,
+                f"Invalid arguments: expected dictionary, got {type(arguments).__name__}.",
+            )
+
         tool = self.get(tool_name)
         if not tool:
             return False, f"Tool '{tool_name}' not found in registry."
@@ -66,6 +70,93 @@ class ToolRegistry:
         missing = [f for f in required_fields if f not in arguments]
         if missing:
             return False, f"Missing required parameters for '{tool_name}': {missing}"
+
+        properties = schema.get("properties", {})
+        additional_allowed = schema.get("additionalProperties", True)
+
+        for arg_name, arg_val in arguments.items():
+            if arg_name not in properties:
+                if additional_allowed is False:
+                    return (
+                        False,
+                        f"Unexpected argument '{arg_name}' for tool '{tool_name}'.",
+                    )
+                continue
+
+            prop_spec = properties[arg_name]
+            expected_type = prop_spec.get("type")
+
+            if expected_type == "string":
+                if not isinstance(arg_val, str):
+                    return (
+                        False,
+                        f"Argument '{arg_name}' for tool '{tool_name}' must be a string, got {type(arg_val).__name__}.",
+                    )
+                min_len = prop_spec.get("minLength")
+                if min_len is not None and len(arg_val) < min_len:
+                    return (
+                        False,
+                        f"Argument '{arg_name}' must have length >= {min_len}.",
+                    )
+
+            elif expected_type == "integer":
+                if isinstance(arg_val, bool) or not isinstance(arg_val, int):
+                    return (
+                        False,
+                        f"Argument '{arg_name}' for tool '{tool_name}' must be an integer, got {type(arg_val).__name__}.",
+                    )
+                minimum = prop_spec.get("minimum")
+                if minimum is not None and arg_val < minimum:
+                    return (
+                        False,
+                        f"Argument '{arg_name}' must be >= {minimum}, got {arg_val}.",
+                    )
+                maximum = prop_spec.get("maximum")
+                if maximum is not None and arg_val > maximum:
+                    return (
+                        False,
+                        f"Argument '{arg_name}' must be <= {maximum}, got {arg_val}.",
+                    )
+
+            elif expected_type == "number":
+                if isinstance(arg_val, bool) or not isinstance(arg_val, (int, float)):
+                    return (
+                        False,
+                        f"Argument '{arg_name}' for tool '{tool_name}' must be a number, got {type(arg_val).__name__}.",
+                    )
+                minimum = prop_spec.get("minimum")
+                if minimum is not None and arg_val < minimum:
+                    return (
+                        False,
+                        f"Argument '{arg_name}' must be >= {minimum}, got {arg_val}.",
+                    )
+                maximum = prop_spec.get("maximum")
+                if maximum is not None and arg_val > maximum:
+                    return (
+                        False,
+                        f"Argument '{arg_name}' must be <= {maximum}, got {arg_val}.",
+                    )
+
+            elif expected_type == "boolean":
+                if not isinstance(arg_val, bool):
+                    return (
+                        False,
+                        f"Argument '{arg_name}' for tool '{tool_name}' must be a boolean, got {type(arg_val).__name__}.",
+                    )
+
+            elif expected_type == "array":
+                if not isinstance(arg_val, (list, tuple)):
+                    return (
+                        False,
+                        f"Argument '{arg_name}' for tool '{tool_name}' must be an array, got {type(arg_val).__name__}.",
+                    )
+
+            elif expected_type == "object":
+                if not isinstance(arg_val, dict):
+                    return (
+                        False,
+                        f"Argument '{arg_name}' for tool '{tool_name}' must be an object (dict), got {type(arg_val).__name__}.",
+                    )
 
         return True, None
 

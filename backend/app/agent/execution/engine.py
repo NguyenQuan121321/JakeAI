@@ -806,7 +806,7 @@ class ExecutionEngine:
                 if tool_name == "list_transactions":
                     arguments = {"limit": 5}
                 elif tool_name in ("mock_dangerous_shell", "terminal_exec"):
-                    arguments = {"command": "rm -rf /tmp/cache"}
+                    arguments = {"command": "echo status"}
 
             events.append(
                 AgentRunEvent(
@@ -840,6 +840,39 @@ class ExecutionEngine:
                             existing is not None
                             and existing.status == ApprovalStatus.APPROVED
                         ):
+                            # TOCTOU Verification: Ensure arguments were not mutated after approval was granted
+                            if existing.tool_args != arguments:
+                                err = (
+                                    f"Approval gate '{bound_approval_id}' was granted for arguments "
+                                    f"{existing.tool_args}, but step attempted execution with "
+                                    f"tampered arguments {arguments}; refusing execution."
+                                )
+                                events.append(
+                                    AgentRunEvent(
+                                        event_type="tool_result",
+                                        task_id=task_spec.task_id,
+                                        run_id=run_state.run_id,
+                                        data={
+                                            "tool_name": tool_name,
+                                            "success": False,
+                                            "error": err,
+                                        },
+                                    )
+                                )
+                                return (
+                                    step,
+                                    StepResult(
+                                        step_id=step.step_id,
+                                        status=StepStatus.FAILED,
+                                        error=err,
+                                        agent_id=agent_sel.agent_id,
+                                        model_used=selected_model,
+                                        provider_used=selected_provider,
+                                        execution_time_ms=(time.time() - step_start)
+                                        * 1000,
+                                    ),
+                                    events,
+                                )
                             step.pending_approval_id = None  # consume single-use gate
                             approval_satisfied = True
                         elif existing is not None and (

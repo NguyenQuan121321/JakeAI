@@ -18,19 +18,45 @@ async def finnapigo_tool_node(state: AgentState) -> dict[str, Any]:
 
     from app.agent.tools.registry import get_tool_registry
 
-    # Determine tool name from prompt or state. Account identity is NOT
-    # pre-derived here: the FinnApiGo tool owns the canonical tenant account
-    # default (R-ARCH-01 single authority).
-    arguments: dict[str, Any]
-    if "balance" in prompt.lower():
-        tool_name = "get_account_balance"
-        arguments = {}
-    elif "transaction" in prompt.lower():
-        tool_name = "list_transactions"
-        arguments = {"limit": 5}
+    # Determine tool name from state or semantic prompt classification. Account
+    # identity is NOT pre-derived here: the FinnApiGo tool owns the canonical tenant
+    # account default (R-ARCH-01 single authority).
+    pre_tool_name = state.get("tool_name")
+    pre_args = state.get("arguments") or state.get("tool_args")
+
+    if pre_tool_name:
+        tool_name = str(pre_tool_name)
+        arguments = dict(pre_args) if isinstance(pre_args, dict) else {}
+        if tool_name == "list_transactions" and "limit" not in arguments:
+            arguments["limit"] = 5
     else:
-        tool_name = "get_tenant_limits"
-        arguments = {}
+        import re
+
+        prompt_lower = prompt.lower()
+        # Semantic synonyms & intent patterns
+        balance_pattern = re.compile(
+            r"(?i)\b(?:balances?|funds?|liquidity|capital|cash|deposits?|available|standing|solvency)\b"
+        )
+        tx_pattern = re.compile(
+            r"(?i)\b(?:transactions?|history|payments?|disbursements?|wires?|transfers?|credits?|debits?|activity|ledger\s+entries|ledger\s+history|outflows?|inflows?)\b"
+        )
+        limits_pattern = re.compile(
+            r"(?i)\b(?:limits?|quotas?|rate\s*limits?|tiers?|plans?|capacit(?:y|ies)|thresholds?|usage\s+caps?)\b"
+        )
+
+        if tx_pattern.search(prompt_lower):
+            tool_name = "list_transactions"
+            arguments = dict(pre_args) if isinstance(pre_args, dict) else {"limit": 5}
+        elif balance_pattern.search(prompt_lower):
+            tool_name = "get_account_balance"
+            arguments = dict(pre_args) if isinstance(pre_args, dict) else {}
+        elif limits_pattern.search(prompt_lower):
+            tool_name = "get_tenant_limits"
+            arguments = dict(pre_args) if isinstance(pre_args, dict) else {}
+        else:
+            # Ambiguous account queries default safely to account balance inspection
+            tool_name = "get_account_balance"
+            arguments = dict(pre_args) if isinstance(pre_args, dict) else {}
 
     # Enforce RBAC guardrail before invoking tool
     rbac_decision = check_tool_rbac_guardrail(tool_name, state)

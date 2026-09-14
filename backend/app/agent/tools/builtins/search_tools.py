@@ -31,16 +31,19 @@ class SearchSymbolsTool(Tool):
                     "query": {
                         "type": "string",
                         "description": "Symbol name or substring to search for",
+                        "minLength": 1,
                     },
                     "max_results": {
                         "type": "integer",
                         "description": "Maximum matches to return",
                         "default": 10,
+                        "minimum": 1,
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
-            permissions=["agent:search"],
+            permissions=["agent:search", "code:read"],
             risk_level=ToolRiskLevel.READ_ONLY,
         )
 
