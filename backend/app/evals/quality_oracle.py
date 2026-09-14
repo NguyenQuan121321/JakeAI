@@ -19,6 +19,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.agent.utils.structured_output import extract_json_dict
+
 # Security & Data Leakage Patterns (Invariant & Baseline requirement)
 LEAKAGE_PATTERNS = [
     re.compile(r"(?i)system\s+prompt"),
@@ -130,20 +132,18 @@ class QualityOracle:
             return 1.0, []
 
         errors = []
-        # Attempt to find JSON object or parse directly
+        # Direct parse first (preserves scoring of valid non-object JSON such as
+        # arrays); otherwise canonical extraction (R-ARCH-03) replaces the
+        # greedy brace-regex fallback.
         parsed: Any = None
         try:
             parsed = json.loads(text)
         except Exception:
-            # Try to extract JSON from markdown code block
-            json_match = re.search(r"\{[\s\S]*\}", text)
-            if json_match:
-                try:
-                    parsed = json.loads(json_match.group(0))
-                except Exception as ex:
-                    errors.append(f"Extracted JSON failed to parse: {ex}")
-            else:
+            extracted = extract_json_dict(text)
+            if extracted is None:
                 errors.append("No valid JSON structure found in candidate text")
+            else:
+                parsed = extracted
 
         if errors or parsed is None:
             return 0.0, errors

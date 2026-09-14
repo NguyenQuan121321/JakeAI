@@ -18,6 +18,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
+from app.core.redis_client import acquire_redis_client
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -555,31 +558,20 @@ class SemanticCacheManager:
         now = time.time()
         if not self._redis_available and now < self._redis_retry_after:
             return None
-        try:
-            import redis.asyncio as aioredis
-
-            from app.core.config import get_settings
-
-            settings = get_settings()
-            client = aioredis.from_url(
-                settings.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
-                socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
-            )
-            await client.ping()
-            self.redis_client = client
-            self._redis_available = True
-            self._redis_retry_after = 0.0
-            return self.redis_client
-        except Exception:
-            from app.core.config import get_settings
-
-            settings = get_settings()
+        settings = get_settings()
+        client = await acquire_redis_client(
+            connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+        )
+        if client is None:
             self._redis_available = False
             self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
             self.redis_client = None
             return None
+        self.redis_client = client
+        self._redis_available = True
+        self._redis_retry_after = 0.0
+        return client
 
     async def get(
         self,

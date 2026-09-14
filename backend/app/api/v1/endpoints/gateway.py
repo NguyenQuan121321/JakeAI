@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.context import TenantContext
 from app.core.security import get_current_tenant
+from app.core.sse import streaming_sse_headers
 from app.services.ai_gateway import (
     GatewayChatRequest,
     GatewayChatResponse,
@@ -88,13 +89,7 @@ async def proxy_chat_completions(
                 correlation_id=context.correlation_id,
             ),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "X-Tenant-ID": context.tenant_id,
-                "X-Correlation-ID": context.correlation_id,
-            },
+            headers=streaming_sse_headers(context),
         )
 
     try:

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from app.core.sse import format_sse_event
 
 
 class AgentConfig(BaseModel):
@@ -50,5 +51,4 @@ class AgentRunEvent(BaseModel):
 
     def to_sse(self) -> str:
         """Format as W3C standard Server-Sent Event frame."""
-        payload = json.dumps(self.model_dump())
-        return f"event: {self.event_type}\ndata: {payload}\n\n"
+        return format_sse_event(self.event_type, self.model_dump())

@@ -233,9 +233,24 @@ def test_canonical_status_machine_is_the_lifecycle_authority() -> None:
 
 
 def test_provider_credential_map_defined_once() -> None:
-    """The platform-key map must exist exactly once in llm_provider."""
-    src = (BACKEND_DIR / "app/core/llm_provider.py").read_text(encoding="utf-8")
-    assert src.count("OPENROUTER_API_KEY") == 1
+    """The platform-key map must exist exactly once (canonical credentials module).
+
+    R-ARCH-03 moved the map from llm_provider to app/core/provider_credentials.py
+    so the failover manager shares it; this assertion was re-pointed (not
+    weakened): the map is defined once in the authority and zero times in the
+    consumers.
+    """
+    authority_src = (BACKEND_DIR / "app/core/provider_credentials.py").read_text(
+        encoding="utf-8"
+    )
+    assert authority_src.count("OPENROUTER_API_KEY") == 1
+
+    for consumer in (
+        "app/core/llm_provider.py",
+        "app/routing/failover.py",
+    ):
+        src = (BACKEND_DIR / consumer).read_text(encoding="utf-8")
+        assert src.count("OPENROUTER_API_KEY") == 0, consumer
 
 
 class _FakeByok:

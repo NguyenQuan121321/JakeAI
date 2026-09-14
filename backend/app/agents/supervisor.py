@@ -8,6 +8,7 @@ from app.agent.registry.capability_patterns import (
     BANKING_PATTERN,
     FINANCIAL_PATTERN,
 )
+from app.agent.utils.structured_output import extract_json_dict
 from app.agents.state import AgentState
 from app.rag.context_selector import get_context_selector
 from app.rag.retriever import get_hybrid_retriever
@@ -102,21 +103,21 @@ async def decide_supervisor_route(
         )
         resp = await backend.generate(req)
         if resp.content:
-            import json
-
-            cleaned = resp.content.strip()
-            if "```json" in cleaned:
-                cleaned = cleaned.split("```json")[1].split("```")[0].strip()
-            elif "```" in cleaned:
-                cleaned = cleaned.split("```")[1].split("```")[0].strip()
-            data = json.loads(cleaned)
-            target = data.get("target_agent")
-            if target in ("financial_specialist", "finnapigo_tool", "synthesizer"):
-                return SupervisorDecision(
-                    target_agent=target,
-                    reasoning=data.get("reasoning", "Model-driven routing decision"),
-                    confidence=0.95,
-                )
+            # Canonical JSON extraction (R-ARCH-03): replaces the local
+            # fence-strip + bare json.loads copy whose failures were swallowed
+            # by the broad handler below; extraction failure now falls back to
+            # the heuristic classifier explicitly.
+            data = extract_json_dict(resp.content)
+            if data is not None:
+                target = data.get("target_agent")
+                if target in ("financial_specialist", "finnapigo_tool", "synthesizer"):
+                    return SupervisorDecision(
+                        target_agent=target,
+                        reasoning=data.get(
+                            "reasoning", "Model-driven routing decision"
+                        ),
+                        confidence=0.95,
+                    )
     except Exception as exc:
         logger.debug("Model supervisor routing fallback to heuristic: %s", exc)
 

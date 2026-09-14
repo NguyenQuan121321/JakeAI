@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.agent.utils.structured_output import extract_json_dict
 from app.evals.rubric_evaluator import RubricDimension, RubricEvaluator
 
 
@@ -169,7 +170,6 @@ class LLMJudge:
         Falls back cleanly to heuristic rubric evaluation with explicit labeling
         if the upstream model is unreachable or unconfigured.
         """
-        import json
 
         from app.core.llm_provider import call_upstream_llm_detailed
 
@@ -225,17 +225,13 @@ Respond strictly in valid JSON with this exact schema:
             if not resp or not resp.text:
                 raise ValueError("Empty response from judge model")
 
-            cleaned_text = resp.text.strip()
-            if "```json" in cleaned_text:
-                cleaned_text = (
-                    cleaned_text.split("```json", 1)[1].split("```", 1)[0].strip()
-                )
-            elif "```" in cleaned_text:
-                cleaned_text = (
-                    cleaned_text.split("```", 1)[1].split("```", 1)[0].strip()
-                )
-
-            parsed = json.loads(cleaned_text)
+            # Canonical JSON extraction (R-ARCH-03): replaces the local
+            # fence-strip + bare json.loads copy; malformed judge output now
+            # raises the same recoverable ValueError instead of leaking
+            # JSONDecodeError/KeyError from ad-hoc parsing.
+            parsed = extract_json_dict(resp.text)
+            if parsed is None:
+                raise ValueError("Malformed judge response: no JSON object found")
             a_scores: dict[str, float] = {
                 k: float(v) / 5.0 for k, v in parsed["candidate_a_scores"].items()
             }

@@ -7,7 +7,6 @@ model routing, Tier 5 prompt caching, context optimization, and FinOps.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -22,6 +21,7 @@ from app.agent.backends.base import (
     BackendResponse,
     BackendStreamChunk,
 )
+from app.agent.utils.structured_output import extract_json_dict
 from app.core.llm_provider import call_upstream_llm_detailed
 from app.providers.base import ChatMessage
 
@@ -263,33 +263,17 @@ class JakeAIBackend(AgentBackendInterface):
         if not text:
             return tool_calls
 
-        cleaned = text.strip()
-        if "```json" in cleaned:
-            cleaned = cleaned.split("```json")[1].split("```")[0].strip()
-        elif "```" in cleaned:
-            cleaned = cleaned.split("```")[1].split("```")[0].strip()
-
-        if cleaned.startswith("{") and cleaned.endswith("}"):
-            try:
-                data = json.loads(cleaned)
-                if isinstance(data, dict):
-                    tool_name = (
-                        data.get("tool_name") or data.get("tool") or data.get("name")
+        # Canonical JSON extraction (R-ARCH-03): fence stripping, embedded-object
+        # discovery and error handling are owned by the structured-output utility.
+        data = extract_json_dict(text)
+        if isinstance(data, dict):
+            tool_name = data.get("tool_name") or data.get("tool") or data.get("name")
+            if tool_name and (data.get("action") == "tool_call" or "arguments" in data):
+                tool_calls.append(
+                    AgentToolCall(
+                        call_id=f"call_{int(time.time() * 1000)}",
+                        tool_name=str(tool_name),
+                        arguments=data.get("arguments") or {},
                     )
-                    if tool_name and (
-                        data.get("action") == "tool_call" or "arguments" in data
-                    ):
-                        tool_calls.append(
-                            AgentToolCall(
-                                call_id=f"call_{int(time.time() * 1000)}",
-                                tool_name=str(tool_name),
-                                arguments=data.get("arguments") or {},
-                            )
-                        )
-            except (json.JSONDecodeError, ValueError) as exc:
-                logger.debug(
-                    "Failed to parse tool call JSON block from model output: %s", exc
                 )
-            except (KeyError, TypeError) as exc:
-                logger.warning("Malformed tool call structure in model output: %s", exc)
         return tool_calls

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import uuid
@@ -959,20 +958,9 @@ class BoundedPlanner:
         """Attempt to parse action JSON block from model text."""
         if not text:
             return None
-        if text.startswith("{") and text.endswith("}"):
-            try:
-                data = json.loads(text)
-                if isinstance(data, dict) and "action" in data:
-                    return data
-            except (json.JSONDecodeError, ValueError) as exc:
-                logger.debug("Failed direct JSON parsing for action: %s", exc)
-
-        if "```json" in text:
-            try:
-                sub = text.split("```json")[1].split("```")[0].strip()
-                data = json.loads(sub)
-                if isinstance(data, dict) and "action" in data:
-                    return data
-            except (json.JSONDecodeError, ValueError, IndexError) as exc:
-                logger.debug("Failed codeblock JSON parsing for action: %s", exc)
+        # Canonical JSON extraction (R-ARCH-03): fence stripping, embedded-object
+        # discovery and error handling are owned by the structured-output utility.
+        data = extract_json_dict(text)
+        if isinstance(data, dict) and "action" in data:
+            return data
         return None
