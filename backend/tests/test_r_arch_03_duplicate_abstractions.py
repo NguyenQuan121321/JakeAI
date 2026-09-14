@@ -21,6 +21,7 @@ F-6  SSE frame building and streaming response headers are defined once
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,7 @@ APP_DIR = BACKEND_DIR / "app"
 def _app_sources() -> dict[str, str]:
     """Return relative-path -> source text for every Python file under app/."""
     sources: dict[str, str] = {}
-    for dirpath, dirnames, filenames in APP_DIR.walk():
+    for dirpath, dirnames, filenames in os.walk(APP_DIR):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         for fn in sorted(filenames):
             if fn.endswith(".py"):
