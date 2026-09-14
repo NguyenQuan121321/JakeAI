@@ -161,6 +161,37 @@ class RAGPipeline:
         """Step 1-10: Execute end-to-end RAG pipeline from retrieval through synthesis, claim verification, and citation mapping (OPS-04)."""
         start_time = time.time()
 
+        # Step 0: Perimeter Input Guardrail Check (OPS-12)
+        from app.guardrails import GuardrailsEngine
+
+        guard_decision = GuardrailsEngine.inspect_input(query)
+        if not guard_decision.allowed:
+            elapsed = round((time.time() - start_time) * 1000, 2)
+            empty_context = ContextSelectionResult(
+                selected_chunks=[],
+                formatted_context="",
+                raw_tokens=0,
+                selected_tokens=0,
+                tokens_saved=0,
+                reduction_ratio=0.0,
+                pruned_chunks_count=0,
+                citations_preserved=[],
+            )
+            return RAGGenerationResult(
+                query=query,
+                tenant_id=tenant_id,
+                answer=(
+                    f"I cannot process this request because it violates safety policies "
+                    f"({guard_decision.violation_type or 'SECURITY_VIOLATION'})."
+                ),
+                citations=[],
+                context_selection=empty_context,
+                latency_ms=elapsed,
+                status="ABSTAINED",
+                abstention_reason=AbstentionReason.GUARDRAIL_VIOLATION,
+                correlation_id=correlation_id,
+            )
+
         # Step 5-8: Retrieve and select minimal sufficient context
         _retrieval_res, context_res = await self.retrieve_and_select_context(
             query=query,
@@ -214,12 +245,20 @@ class RAGPipeline:
                 correlation_id=correlation_id,
             )
 
-        # Assemble grounded prompt
+        # Assemble grounded prompt with neutralized delimiters to resist prompt injection in documents
         sys_prompt = system_instruction or DEFAULT_RAG_SYSTEM_PROMPT
+        safe_context = (
+            context_res.formatted_context.replace("<|im_start|>", "&lt;|im_start|&gt;")
+            .replace("<|im_end|>", "&lt;|im_end|&gt;")
+            .replace("[SYSTEM OVERRIDE]", "[DOCUMENT EXCERPT]")
+            .replace("[DEVELOPER MODE]", "[DOCUMENT EXCERPT]")
+        )
         prompt = (
             f"{sys_prompt}\n\n"
             f"### Verified Sources & Context:\n"
-            f"{context_res.formatted_context}\n\n"
+            f"<context_documents>\n"
+            f"{safe_context}\n"
+            f"</context_documents>\n\n"
             f"### User Question:\n{query}\n\n"
             f"### Answer:"
         )
@@ -331,6 +370,7 @@ class RAGPipeline:
             elapsed = round((time.time() - start_time) * 1000, 2)
             has_contradiction = any(
                 c.entailment == ClaimEntailment.CONTRADICTED
+                or "contradicts" in c.reasoning.lower()
                 for c in verification.claims
             )
             reason = (
@@ -367,12 +407,25 @@ class RAGPipeline:
             c for c in citations if c.tenant_id == tenant_id
         ]
 
+        # Step 9c: Output Sanitization & Leakage Scrubbing Guardrail (OPS-03)
+        sanitized_answer, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
+            annotated_answer, tenant_id=tenant_id
+        )
+        if leak_detected:
+            from app.telemetry.metrics import metrics
+
+            metrics.record_security_incident("OUTPUT_DATA_LEAKAGE", tenant_id)
+            logger.warning(
+                "Output data leakage detected and sanitized for tenant '%s'",
+                tenant_id,
+            )
+
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
 
         return RAGGenerationResult(
             query=query,
             tenant_id=tenant_id,
-            answer=annotated_answer,
+            answer=sanitized_answer,
             citations=valid_citations,
             context_selection=context_res,
             latency_ms=elapsed_ms,

@@ -7,6 +7,20 @@ LEAK_PATTERNS = [
         re.compile(r"(?i)you\s+are\s+a\s+senior\s+principal\s+software\s+engineer"),
         "SYSTEM_PROMPT_LEAK",
     ),
+    (
+        re.compile(r"(?i)you\s+are\s+jakeai(?:'s)?(?:\s+verified\s+enterprise)?"),
+        "SYSTEM_PROMPT_LEAK",
+    ),
+    (
+        re.compile(
+            r"(?i)verified\s+enterprise\s+financial\s+and\s+technical\s+knowledge\s+specialist"
+        ),
+        "SYSTEM_PROMPT_LEAK",
+    ),
+    (
+        re.compile(r"(?i)universal\s+ai\s+engineering\s+and\s+financial\s+assistant"),
+        "SYSTEM_PROMPT_LEAK",
+    ),
     (re.compile(r"(?i)system\s+prompt\s*:"), "SYSTEM_PROMPT_LEAK"),
     (re.compile(r"(?i)bearer\s+[a-zA-Z0-9_\-\.]{25,}"), "JWT_TOKEN_LEAK"),
     (
@@ -14,6 +28,22 @@ LEAK_PATTERNS = [
             r"(?i)(?:api[_-]?key|secret[_-]?key)\s*[:=]\s*['\"][a-zA-Z0-9_\-]{16,}"
         ),
         "API_KEY_LEAK",
+    ),
+    (
+        re.compile(
+            r"(?i)\b(?:dan|developer)\s+mode\s+(?:is\s+)?(?:enabled|active|on)\b"
+        ),
+        "JAILBREAK_AFFIRMATION",
+    ),
+    (
+        re.compile(r"(?i)\b(?:act|acting)\s+as\s+an?\s+unfiltered\s+ai\b"),
+        "JAILBREAK_AFFIRMATION",
+    ),
+    (
+        re.compile(
+            r"(?i)\b(?:i\s+am|you\s+are)\s+(?:now\s+)?(?:unfiltered|unrestricted|jailbroken)\b"
+        ),
+        "JAILBREAK_AFFIRMATION",
     ),
 ]
 

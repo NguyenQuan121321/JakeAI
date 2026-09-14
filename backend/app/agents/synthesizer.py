@@ -159,6 +159,18 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
         )
         final_response = "\n".join(markdown_parts)
 
+    from app.guardrails import GuardrailsEngine
+
+    sanitized_response, leak_detected = GuardrailsEngine.inspect_and_sanitize_output(
+        final_response, tenant_id=tenant_id
+    )
+    if leak_detected:
+        logger.warning(
+            "Synthesizer output leakage detected and sanitized for tenant '%s'",
+            tenant_id,
+        )
+    final_response = sanitized_response
+
     return {
         "current_agent": "synthesizer",
         "workflow_phase": "completed",

@@ -52,11 +52,12 @@ INJECTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"(?i)you\s+are\s+now\s+(?:unrestricted|in\s+developer\s+mode|jailbroken)"
+            r"(?i)you\s+are\s+now\s+(?:unrestricted|unfiltered|in\s+developer\s+mode|jailbroken)"
         ),
         "JAILBREAK",
     ),
-    (re.compile(r"(?i)act\s+as\s+an\s+unfiltered\s+ai"), "JAILBREAK"),
+    (re.compile(r"(?i)(?:act|behave)\s+as\s+an?\s+unfiltered\s+ai"), "JAILBREAK"),
+    (re.compile(r"(?i)\bunfiltered\s+ai\b"), "JAILBREAK"),
     (
         re.compile(r"(?i)<\|(?:im_start|im_end|system|user|assistant)\|>"),
         "DELIMITER_INJECTION",
