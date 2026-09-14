@@ -124,6 +124,10 @@ class RAGGenerateResponse(BaseModel):
     grounding: Any | None = Field(
         default=None, description="Claim-level grounding and verification breakdown"
     )
+    envelope_tokens: int | None = Field(
+        default=None,
+        description="Exact serialized token count of canonical 6-stage context envelope",
+    )
 
 
 @router.post(
@@ -278,4 +282,7 @@ async def generate_rag_answer(
         if gen_result.abstention_reason
         else None,
         grounding=gen_result.grounding,
+        envelope_tokens=getattr(gen_result.context_envelope, "total_tokens", None)
+        if getattr(gen_result, "context_envelope", None)
+        else gen_result.context_selection.selected_tokens,
     )

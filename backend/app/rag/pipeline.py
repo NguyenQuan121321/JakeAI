@@ -157,6 +157,9 @@ class RAGPipeline:
         model: str | None = None,
         system_instruction: str | None = None,
         correlation_id: str | None = None,
+        task_constraints: list[str] | str | None = None,
+        conversation_history: list[dict[str, Any]] | str | None = None,
+        verified_memory: list[str] | list[Any] | str | None = None,
     ) -> RAGGenerationResult:
         """Step 1-10: Execute end-to-end RAG pipeline from retrieval through synthesis, claim verification, and citation mapping (OPS-04)."""
         start_time = time.time()
@@ -245,7 +248,10 @@ class RAGPipeline:
                 correlation_id=correlation_id,
             )
 
-        # Assemble grounded prompt with neutralized delimiters to resist prompt injection in documents
+        # Assemble grounded prompt via canonical 6-stage ContextEnvelopeBuilder (R-AI-04)
+        from app.rag.context_envelope import get_context_envelope_builder
+
+        builder = get_context_envelope_builder()
         sys_prompt = system_instruction or DEFAULT_RAG_SYSTEM_PROMPT
         safe_context = (
             context_res.formatted_context.replace("<|im_start|>", "&lt;|im_start|&gt;")
@@ -253,15 +259,34 @@ class RAGPipeline:
             .replace("[SYSTEM OVERRIDE]", "[DOCUMENT EXCERPT]")
             .replace("[DEVELOPER MODE]", "[DOCUMENT EXCERPT]")
         )
-        prompt = (
-            f"{sys_prompt}\n\n"
-            f"### Verified Sources & Context:\n"
-            f"<context_documents>\n"
-            f"{safe_context}\n"
-            f"</context_documents>\n\n"
-            f"### User Question:\n{query}\n\n"
-            f"### Answer:"
+
+        default_constraints = [
+            "Financial Precision: Rely strictly on verified numbers and dates.",
+            "Anti-Hallucination: Do not fabricate facts not directly supported by the evidence.",
+            "Footnote Attribution: Reference sources using inline citations like [^1], [^2] where applicable.",
+        ]
+        if task_constraints:
+            if isinstance(task_constraints, list):
+                constraints_to_use = [
+                    *default_constraints,
+                    *(str(c) for c in task_constraints),
+                ]
+            else:
+                constraints_to_use = [*default_constraints, str(task_constraints)]
+        else:
+            constraints_to_use = default_constraints
+
+        envelope = builder.assemble(
+            system_instructions=sys_prompt,
+            task_constraints=constraints_to_use,
+            conversation_history=conversation_history or "",
+            verified_memory=verified_memory or "",
+            retrieved_evidence=safe_context,
+            user_query=query,
+            tenant_id=tenant_id,
+            max_tokens=max_context_tokens + 1500,
         )
+        prompt = envelope.serialized_prompt
 
         # Step 10: Call upstream LLM provider
         raw_answer: str | None = None
@@ -433,6 +458,7 @@ class RAGPipeline:
             abstention_reason=None,
             grounding=verification,
             correlation_id=correlation_id,
+            context_envelope=envelope,
         )
 
 
