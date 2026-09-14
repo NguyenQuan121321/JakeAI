@@ -20,9 +20,14 @@ class CalculatorTool(Tool):
             input_schema={
                 "type": "object",
                 "properties": {
-                    "expression": {"type": "string", "description": "e.g. 10 * 5 + 2"},
+                    "expression": {
+                        "type": "string",
+                        "description": "e.g. 10 * 5 + 2",
+                        "minLength": 1,
+                    },
                 },
                 "required": ["expression"],
+                "additionalProperties": False,
             },
             permissions=[],
             risk_level=ToolRiskLevel.READ_ONLY,
@@ -35,7 +40,15 @@ class CalculatorTool(Tool):
     ) -> ToolResult:
         _ = context
         start_ts = time.time()
-        expr = arguments.get("expression", "").strip()
+        expr = str(arguments.get("expression", "")).strip()
+
+        if "**" in expr or "^" in expr:
+            return ToolResult(
+                success=False,
+                error="Evaluation failed: Exponentiation operator is disabled for safety.",
+                risk_level=ToolRiskLevel.READ_ONLY,
+                execution_time_ms=(time.time() - start_ts) * 1000.0,
+            )
 
         # Sanitize arithmetic chars only
         allowed_chars = set("0123456789+-*/(). %")
@@ -73,7 +86,11 @@ class SystemTimeTool(Tool):
         return ToolMetadata(
             name="system_time",
             description="Returns current UTC ISO timestamp and epoch seconds.",
-            input_schema={"type": "object", "properties": {}},
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
             permissions=[],
             risk_level=ToolRiskLevel.READ_ONLY,
         )
@@ -108,11 +125,13 @@ class MockDangerousShellTool(Tool):
                     "command": {
                         "type": "string",
                         "description": "Shell command to execute",
+                        "minLength": 1,
                     },
                 },
                 "required": ["command"],
+                "additionalProperties": False,
             },
-            permissions=[],
+            permissions=["system:execute"],
             risk_level=ToolRiskLevel.DANGEROUS,
         )
 

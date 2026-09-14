@@ -42,6 +42,10 @@ TOOL_PERMISSIONS_MAP: dict[str, dict[str, list[str]]] = {
         "permissions": ["system:execute"],
         "roles": ["admin"],
     },
+    "terminal_exec": {
+        "permissions": ["system:execute"],
+        "roles": ["admin"],
+    },
     "finnapigo_balance": {
         "permissions": ["accounts:read"],
         "roles": ["admin", "tenant_admin", "financial_analyst"],
@@ -54,6 +58,23 @@ TOOL_PERMISSIONS_MAP: dict[str, dict[str, list[str]]] = {
         "permissions": ["tenant:read"],
         "roles": ["admin", "tenant_admin"],
     },
+}
+
+_PERMISSION_ALIASES: dict[str, set[str]] = {
+    "agent:read_files": {"files:read", "agent:read_files"},
+    "files:read": {"agent:read_files", "files:read"},
+    "agent:search": {"code:read", "agent:search"},
+    "code:read": {"agent:search", "code:read"},
+    "finnapigo:read": {
+        "accounts:read",
+        "transactions:read",
+        "tenant:read",
+        "finnapigo:read",
+    },
+    "accounts:read": {"finnapigo:read", "accounts:read"},
+    "transactions:read": {"finnapigo:read", "transactions:read"},
+    "tenant:read": {"finnapigo:read", "tenant:read"},
+    "system:execute": {"system:execute", "mock_dangerous_shell"},
 }
 
 
@@ -95,9 +116,13 @@ def check_tool_rbac_guardrail(
     if any(r in authorized_roles for r in roles):
         return GuardrailDecision(allowed=True)
 
-    # 5. Check if user holds required granular permissions
+    # 5. Check if user holds required granular permissions (with alias support)
     required_permissions = set(requirements.get("permissions", []))
-    if any(p in required_permissions for p in permissions):
+    effective_permissions = set(permissions)
+    for p in permissions:
+        effective_permissions.update(_PERMISSION_ALIASES.get(p, set()))
+
+    if any(p in required_permissions for p in effective_permissions):
         return GuardrailDecision(allowed=True)
 
     return GuardrailDecision(

@@ -95,9 +95,11 @@ class FinnApiGoTransactionsTool(Tool):
                         "type": "integer",
                         "description": "Maximum number of transactions to retrieve",
                         "default": 10,
+                        "minimum": 1,
                     }
                 },
                 "required": [],
+                "additionalProperties": False,
             },
             permissions=["finnapigo:read"],
             risk_level=ToolRiskLevel.READ_ONLY,

@@ -27,16 +27,19 @@ class ReadFileTool(Tool):
                     "path": {
                         "type": "string",
                         "description": "Relative file path to read",
+                        "minLength": 1,
                     },
                     "max_bytes": {
                         "type": "integer",
                         "description": "Max bytes to read",
                         "default": 10000,
+                        "minimum": 1,
                     },
                 },
                 "required": ["path"],
+                "additionalProperties": False,
             },
-            permissions=["agent:read_files"],
+            permissions=["agent:read_files", "files:read"],
             risk_level=ToolRiskLevel.READ_ONLY,
         )
 

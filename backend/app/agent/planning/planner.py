@@ -62,7 +62,13 @@ _MULTI_SOURCE_KW = re.compile(
     r"(?i)\b(?:two independent|combine|merge|multiple sources?|cross-reference|both|compare|versus|vs|cross-examine|correlate|two disparate|dual sources|reconcile|reconciliation)\b"
 )
 _APPROVAL_KW = re.compile(
-    r"(?i)\b(?:approval|dangerous|terminal|terminal_exec|shell|exec|cmd|bash|delete|push|maintenance)\b"
+    r"(?i)\b(?:approval|dangerous|terminal|terminal_exec|shell|exec|cmd|bash|delete|push|maintenance|host\s+command|privileged|purge|wipe|restart\s+daemon|diagnostic\s+script)\b"
+)
+_CODE_SEARCH_KW = re.compile(
+    r"(?i)\b(?:search|find|lookup|grep)\b.*?\b(?:symbols?|functions?|class|classes|methods?|definitions?|code)\b"
+)
+_FILE_READ_KW = re.compile(
+    r"(?i)\b(?:read|inspect|open|cat|view)\b.*?\b(?:file|configuration|config|document|source)\b|\b(?:read|inspect|open)\s+['\"]?[\w./\\-]+\.[a-zA-Z0-9]+"
 )
 
 
@@ -458,7 +464,59 @@ class BoundedPlanner:
             )
             steps = [step_1, step_2, step_3]
 
-        # 3. Tool requiring human approval
+        # 3. Pure banking operation task
+        elif BANKING_PATTERN.search(goal) and not has_negative_constraint(
+            "banking", goal
+        ):
+            analysis = "Direct FinnApiGo banking operation workflow."
+            g_lower = goal.lower()
+            if re.search(
+                r"(?i)\b(?:transactions?|history|payments?|disbursements?|wires?|transfers?|activity)\b",
+                g_lower,
+            ):
+                target_tool = "list_transactions"
+                tool_args = {"limit": 5}
+                step_desc = "Retrieve recent banking transaction records"
+            elif re.search(
+                r"(?i)\b(?:limits?|quotas?|rate\s*limits?|tiers?|plans?)\b", g_lower
+            ):
+                target_tool = "get_tenant_limits"
+                tool_args = {}
+                step_desc = "Fetch tenant banking API quotas and limits"
+            else:
+                target_tool = "get_account_balance"
+                tool_args = {}
+                step_desc = "Retrieve account balance and standing"
+
+            step_1 = PlanStep(
+                step_id="step_banking_operation",
+                description=step_desc,
+                objective=f"Execute {target_tool} via FinnApiGo banking specialist",
+                dependencies=[],
+                required_capabilities=[AgentCapability.BANKING_API.value],
+                candidate_agents=["finnapigo_specialist"],
+                required_tools=[target_tool],
+                tool_name=target_tool,
+                tool_args=tool_args,
+                model_requirements={
+                    "workload_class": "structured_json",
+                    "min_quality": 0.70,
+                },
+                status=PlanStepStatus.PENDING,
+            )
+            step_2 = PlanStep(
+                step_id="step_synthesize",
+                description="Format banking operation output",
+                objective="Synthesize structured banking response for user",
+                dependencies=["step_banking_operation"],
+                required_capabilities=[AgentCapability.SYNTHESIS.value],
+                candidate_agents=["synthesizer"],
+                model_requirements={"workload_class": "general", "min_quality": 0.70},
+                status=PlanStepStatus.PENDING,
+            )
+            steps = [step_1, step_2]
+
+        # 4. Tool requiring human approval
         elif _APPROVAL_KW.search(goal) and not has_negative_constraint(
             "terminal", goal
         ):
@@ -471,6 +529,8 @@ class BoundedPlanner:
                 required_capabilities=[AgentCapability.CODE_EXECUTION.value],
                 candidate_agents=["general_agent"],
                 required_tools=["terminal_exec"],
+                tool_name="terminal_exec",
+                tool_args={"command": "diagnostic_script.sh"},
                 model_requirements={"workload_class": "coding", "min_quality": 0.80},
                 status=PlanStepStatus.PENDING,
             )
@@ -489,7 +549,59 @@ class BoundedPlanner:
             )
             steps = [step_1, step_2]
 
-        # 4. Pure financial calculation task
+        # 5. Code symbol search and file inspection task
+        elif _FILE_READ_KW.search(goal) or _CODE_SEARCH_KW.search(goal):
+            analysis = "Codebase exploration and file inspection workflow."
+            if _FILE_READ_KW.search(goal):
+                tool_name = "read_file"
+                path_match = re.search(
+                    r"['\"]([^'\"]+\.[a-zA-Z0-9]+)['\"]|(?:\bfile\s+)([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)",
+                    goal,
+                )
+                target_path = (
+                    (path_match.group(1) or path_match.group(2))
+                    if path_match
+                    else "README.md"
+                )
+                step_tools = ["read_file"]
+                step_args = {"path": target_path}
+                step_desc = f"Read contents of file '{target_path}'"
+            else:
+                tool_name = "search_symbols"
+                query_match = re.search(
+                    r"(?:function|class|symbol|def)\s+['\"]?([a-zA-Z0-9_]+)['\"]?", goal
+                )
+                target_query = query_match.group(1) if query_match else "main"
+                step_tools = ["search_symbols"]
+                step_args = {"query": target_query}
+                step_desc = f"Search symbols matching '{target_query}'"
+
+            step_1 = PlanStep(
+                step_id="step_code_inspection",
+                description=step_desc,
+                objective=f"Execute {tool_name} to explore workspace",
+                dependencies=[],
+                required_capabilities=[AgentCapability.GENERAL_REASONING.value],
+                candidate_agents=["general_agent", "retrieval_specialist"],
+                required_tools=step_tools,
+                tool_name=tool_name,
+                tool_args=step_args,
+                model_requirements={"workload_class": "coding", "min_quality": 0.75},
+                status=PlanStepStatus.PENDING,
+            )
+            step_2 = PlanStep(
+                step_id="step_synthesize",
+                description="Synthesize codebase findings",
+                objective="Summarize inspected symbols or file contents for user",
+                dependencies=["step_code_inspection"],
+                required_capabilities=[AgentCapability.SYNTHESIS.value],
+                candidate_agents=["synthesizer"],
+                model_requirements={"workload_class": "general", "min_quality": 0.70},
+                status=PlanStepStatus.PENDING,
+            )
+            steps = [step_1, step_2]
+
+        # 6. Pure financial calculation task
         elif FINANCIAL_PATTERN.search(goal) and not has_negative_constraint(
             "financial", goal
         ):
