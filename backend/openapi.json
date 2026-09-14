@@ -1941,9 +1941,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Get Agent Metrics Api V1 Agent Metrics Get"
+                  "$ref": "#/components/schemas/AgentMetricsSnapshot"
                 }
               }
             }
@@ -2196,6 +2194,87 @@
   },
   "components": {
     "schemas": {
+      "AgentMetricsSnapshot": {
+        "properties": {
+          "tasks_created": {
+            "type": "integer",
+            "title": "Tasks Created",
+            "default": 0
+          },
+          "runs_started": {
+            "type": "integer",
+            "title": "Runs Started",
+            "default": 0
+          },
+          "runs_completed": {
+            "type": "integer",
+            "title": "Runs Completed",
+            "default": 0
+          },
+          "runs_failed": {
+            "type": "integer",
+            "title": "Runs Failed",
+            "default": 0
+          },
+          "runs_cancelled": {
+            "type": "integer",
+            "title": "Runs Cancelled",
+            "default": 0
+          },
+          "approvals_requested": {
+            "type": "integer",
+            "title": "Approvals Requested",
+            "default": 0
+          },
+          "approvals_approved": {
+            "type": "integer",
+            "title": "Approvals Approved",
+            "default": 0
+          },
+          "approvals_rejected": {
+            "type": "integer",
+            "title": "Approvals Rejected",
+            "default": 0
+          },
+          "steps_executed": {
+            "type": "integer",
+            "title": "Steps Executed",
+            "default": 0
+          },
+          "tool_calls_total": {
+            "type": "integer",
+            "title": "Tool Calls Total",
+            "default": 0
+          },
+          "tokens_consumed": {
+            "type": "integer",
+            "title": "Tokens Consumed",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "number",
+            "title": "Total Cost Usd",
+            "default": 0.0
+          },
+          "tool_calls_by_tool": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Tool Calls By Tool"
+          },
+          "runs_by_backend": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Runs By Backend"
+          }
+        },
+        "type": "object",
+        "title": "AgentMetricsSnapshot",
+        "description": "Point-in-time metrics summary for the Agent subsystem."
+      },
       "AnalyticsDashboard": {
         "properties": {
           "tenant_id": {
@@ -3779,6 +3858,19 @@
               }
             ],
             "title": "Thread Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id",
+            "description": "Optional conversation identifier"
           }
         },
         "type": "object",
@@ -4523,8 +4615,7 @@
           "details": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Details",
-            "default": {}
+            "title": "Details"
           }
         },
         "type": "object",
@@ -5072,7 +5163,8 @@
           "user_id": {
             "type": "string",
             "title": "User Id",
-            "description": "User ownership identifier"
+            "description": "User ownership identifier",
+            "default": "anonymous"
           },
           "goal": {
             "type": "string",
@@ -5112,7 +5204,6 @@
         "required": [
           "task_id",
           "tenant_id",
-          "user_id",
           "goal"
         ],
         "title": "TaskState",

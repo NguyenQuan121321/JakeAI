@@ -157,7 +157,10 @@ class LocalModelAdapter(LLMProvider):
             payload["tool_choice"] = "auto"
 
         if request.response_format:
-            payload["response_format"] = request.response_format
+            if isinstance(request.response_format, str):
+                payload["response_format"] = {"type": request.response_format}
+            else:
+                payload["response_format"] = request.response_format
 
         headers = {
             "Content-Type": "application/json",

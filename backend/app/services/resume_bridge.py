@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.redis_client import (
     acquire_redis_client,
@@ -30,7 +30,7 @@ class CheckpointRecord(BaseModel):
     conversation_id: str | None = None
     thread_id: str | None = None
     tool_name: str | None = None
-    arguments: dict[str, Any] = {}
+    arguments: dict[str, Any] = Field(default_factory=dict)
     created_at: float
     status: str = "pending"
 
@@ -44,7 +44,7 @@ class ResumedExecutionResult(BaseModel):
     tenant_id: str
     message: str
     tool_acknowledged: bool
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResumeBridgeManager:

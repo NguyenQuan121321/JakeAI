@@ -791,14 +791,14 @@ class ExecutionEngine:
 
         if (
             step.required_tools
-            or getattr(step, "tool_name", None)
+            or step.tool_name
             or agent_sel.agent_id == "finnapigo_specialist"
         ):
             # Tool execution path
-            tool_name = getattr(step, "tool_name", None) or (
+            tool_name = step.tool_name or (
                 step.required_tools[0] if step.required_tools else "get_account_balance"
             )
-            arguments: dict[str, Any] = getattr(step, "tool_args", None) or {}
+            arguments: dict[str, Any] = step.tool_args or {}
             if not arguments:
                 # get_account_balance intentionally gets no account_id default
                 # here: the FinnApiGo tool owns the canonical tenant account

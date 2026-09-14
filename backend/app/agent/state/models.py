@@ -315,7 +315,7 @@ class TaskState(BaseModel):
 
     task_id: str = Field(..., description="Unique task identifier")
     tenant_id: str = Field(..., description="Tenant boundary identifier")
-    user_id: str = Field(..., description="User ownership identifier")
+    user_id: str = Field(default="anonymous", description="User ownership identifier")
     goal: str = Field(..., description="Target objective or problem statement")
     status: TaskStatus = Field(default=TaskStatus.PENDING)
     active_run_id: str | None = None
@@ -480,6 +480,8 @@ class RunState(BaseModel):
             "workflow_phase": self.status.value,
             "messages": self.messages,
             "tool_calls": self.tool_calls,
+            "tool_results": self.tool_results,
+            "steps": [s.model_dump() for s in self.steps],
             "financial_analysis": self.context.get("financial_analysis", {}),
             "retrieved_chunks": self.context.get("retrieved_chunks", []),
             "groundedness_score": self.context.get("groundedness_score", 1.0),
@@ -524,6 +526,11 @@ class RunState(BaseModel):
         elif verdict == "FAILED":
             status = RunStatus.FAILED
 
+        raw_steps = state.get("steps", [])
+        rehydrated_steps = [
+            StepExecutionRecord(**s) if isinstance(s, dict) else s for s in raw_steps
+        ]
+
         return cls(
             run_id=run_id,
             task_id=task_id,
@@ -535,6 +542,7 @@ class RunState(BaseModel):
             correlation_id=state.get("correlation_id"),
             current_iteration=state.get("revision_count", 0),
             current_step=state.get("current_agent", "supervisor"),
+            steps=rehydrated_steps,
             current_agent=state.get("current_agent"),
             next_agent=state.get("next_agent"),
             prompt=state.get("prompt"),
@@ -545,6 +553,7 @@ class RunState(BaseModel):
                 "groundedness_score": state.get("groundedness_score", 1.0),
             },
             tool_calls=state.get("tool_calls", []),
+            tool_results=state.get("tool_results", []),
             revision_count=state.get("revision_count", 0),
             verification_verdict=state.get("verification_verdict"),
             final_output=state.get("final_response"),

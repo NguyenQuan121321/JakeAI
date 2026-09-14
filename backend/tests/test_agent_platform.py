@@ -288,7 +288,10 @@ async def test_local_safe_sandbox_file_and_commands(tmp_path: Any) -> None:
         await sandbox.write_file("../../../bad.txt", "evil")
 
     # Command execution in sandbox
-    res = await sandbox.run_command(["python", "-c", "print('JakeAI Sandbox Test')"])
+    import shutil
+
+    py_bin = "python" if shutil.which("python") else "python3"
+    res = await sandbox.run_command([py_bin, "-c", "print('JakeAI Sandbox Test')"])
     assert res.returncode == 0
     assert "JakeAI Sandbox Test" in res.output
 

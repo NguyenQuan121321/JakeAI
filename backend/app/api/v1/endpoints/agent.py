@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.agent.approvals.models import ApprovalDecision, ApprovalRequest
 from app.agent.runtime.manager import get_agent_manager
 from app.agent.state.models import RunState, TaskState
+from app.agent.telemetry import AgentMetricsSnapshot, agent_telemetry
 from app.core.security import get_current_tenant
 
 if TYPE_CHECKING:
@@ -258,12 +259,10 @@ async def list_pending_approvals(
     return manager.approval_manager.get_pending_approvals(context.tenant_id)
 
 
-@router.get("/metrics")
+@router.get("/metrics", response_model=AgentMetricsSnapshot)
 async def get_agent_metrics(
     context: TenantContext = Depends(get_current_tenant),
-) -> dict[str, Any]:
+) -> AgentMetricsSnapshot:
     """Retrieve runtime telemetry snapshot for the agent platform."""
     _ = context
-    from app.agent.telemetry import agent_telemetry
-
-    return agent_telemetry.get_snapshot().model_dump()
+    return agent_telemetry.get_snapshot()
