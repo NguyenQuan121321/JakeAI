@@ -194,3 +194,7 @@ class RAGGenerationResult(BaseModel):
         default=None,
         description="Request correlation identifier (TASK OPS-04)",
     )
+    context_envelope: Any | None = Field(
+        default=None,
+        description="Canonical 6-stage context envelope bounding model input",
+    )

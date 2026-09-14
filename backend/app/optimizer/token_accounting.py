@@ -224,6 +224,7 @@ class TokenAccounting:
         dynamic_context: str | None = None,
         rag_context: str | None = None,
         model: str = "default",
+        envelope: Any | None = None,
     ) -> int:
         """Calculate canonical model-visible input envelope tokens using BPETokenizer.
 
@@ -236,6 +237,7 @@ class TokenAccounting:
         - tool definition schemas (functions)
         - retrieved RAG context passages
         - message framing and role delimiters
+        - canonical 6-stage ContextEnvelope objects (R-AI-04)
         """
         from app.optimizer.bpe_tokenizer import get_bpe_tokenizer
 
@@ -245,6 +247,14 @@ class TokenAccounting:
             if not text:
                 return 0
             return tokenizer.count_tokens(text, model=model)
+
+        if envelope is not None:
+            prompt_str = (
+                envelope.serialized_prompt
+                if hasattr(envelope, "serialized_prompt")
+                else str(envelope)
+            )
+            return _count(prompt_str)
 
         total = 0
         counted_contents: set[int] = set()
