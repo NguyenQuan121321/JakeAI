@@ -16,7 +16,7 @@ from app.agents.synthesizer import synthesizer_node
 from app.agents.verifier import verifier_node
 from app.core.config import get_settings
 from app.core.context import TenantContext
-from tests.test_gateway import create_test_jwt
+from tests.fixtures.auth import create_test_jwt
 
 if TYPE_CHECKING:
     from app.agents.state import AgentState

@@ -94,7 +94,7 @@ def oidc_server() -> Any:
 
 def test_missing_oidc_env_vars_fails_immediately() -> None:
     """Verify script fails immediately with diagnostic error if OIDC env vars are missing."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
     bash_bin = get_bash_executable()
 
     env = os.environ.copy()
@@ -124,7 +124,7 @@ def test_signing_with_controlled_failures_and_fresh_tokens(
     oidc_server: MockOidcServer,
 ) -> None:
     """Verify retry logic: attempts 1 and 2 fail, attempt 3 succeeds, requesting a fresh token every time."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
     bash_bin = get_bash_executable()
     port = oidc_server.server_port
     oidc_url = f"http://127.0.0.1:{port}/oidctoken?"
@@ -230,7 +230,7 @@ def test_exhausted_retries_aborts_and_fails_job(
     oidc_server: MockOidcServer,
 ) -> None:
     """Verify that when all 3 attempts fail, the script terminates with exit code 1 (fails the job)."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
     bash_bin = get_bash_executable()
     port = oidc_server.server_port
     oidc_url = f"http://127.0.0.1:{port}/oidctoken?"
@@ -285,7 +285,7 @@ def test_attestation_with_predicate_and_retries(
     oidc_server: MockOidcServer,
 ) -> None:
     """Verify attest subcommand passes predicate file, cyclonedx type, and fresh identity token."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
     bash_bin = get_bash_executable()
     port = oidc_server.server_port
     oidc_url = f"http://127.0.0.1:{port}/oidctoken?"

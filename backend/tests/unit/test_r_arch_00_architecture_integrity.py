@@ -55,14 +55,13 @@ from app.agent.verification.verifier import get_canonical_verifier
 from app.agents.verifier import verifier_node
 from app.core.config import get_settings
 from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
-from tests.test_agent_platform import generate_agent_jwt
-from tests.test_gateway import create_test_jwt
+from tests.fixtures.auth import create_test_jwt, generate_agent_jwt
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
     from pytest import MonkeyPatch
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 APP_DIR = BACKEND_DIR / "app"
 
 

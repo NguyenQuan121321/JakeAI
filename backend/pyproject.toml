@@ -56,6 +56,15 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
+markers = [
+    "unit: Unit tests (fast, in-memory, no external services)",
+    "integration: Integration tests (component and ASGI HTTP with local services)",
+    "contract: API contract and schema drift tests",
+    "security: Security, guardrails, BYOK, and tenant isolation tests",
+    "e2e: End-to-end multi-tier pipeline and platform workflow tests",
+    "evals: AI quality, evaluation benchmark, and canary tests",
+    "performance: Token and latency performance benchmarks",
+]
 
 [tool.coverage.run]
 source = ["app"]
