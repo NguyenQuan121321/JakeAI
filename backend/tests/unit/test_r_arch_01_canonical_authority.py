@@ -46,7 +46,7 @@ from app.agents.supervisor import classify_intent
 from app.core.config import get_settings
 from app.core.llm_provider import resolve_provider_credentials
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 APP_DIR = BACKEND_DIR / "app"
 
 PATTERN_MODULE = "app/agent/registry/capability_patterns.py"

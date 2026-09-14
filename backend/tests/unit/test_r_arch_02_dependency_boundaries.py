@@ -71,7 +71,7 @@ from app.agent.planning.planner import BoundedPlanner
 from app.agent.state.models import RunState
 from app.agents.financial_specialist import financial_specialist_node
 from app.core.config import get_settings
-from tests.test_gateway import create_test_jwt
+from tests.fixtures.auth import create_test_jwt
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -79,7 +79,7 @@ if TYPE_CHECKING:
     from httpx import AsyncClient
     from pytest import MonkeyPatch
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 APP_DIR = BACKEND_DIR / "app"
 
 

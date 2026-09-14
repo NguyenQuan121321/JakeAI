@@ -235,7 +235,7 @@ jobs:
       - name: Token Optimization Benchmark Gate (Phase 4 Empirical Validation >= 40%)
         run: |
           cd backend
-          pytest tests/evals/test_token_benchmark.py -v -s
+          pytest tests/performance/test_token_benchmark.py -v -s
 
       - name: Phase 00 AI Evaluation Benchmark Gate (Multi-Workload Portfolio >= 40%)
         run: |
