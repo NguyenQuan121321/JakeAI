@@ -20,6 +20,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.agent.utils.structured_output import extract_json_dict
+
 
 class RubricDimension(StrEnum):
     """The seven standard evaluation dimensions defined in Phase 06."""
@@ -385,25 +387,19 @@ class RubricEvaluator:
             errors.append("Unclosed markdown code fence")
 
         if expected_json_keys:
-            try:
-                clean_cand = candidate.strip()
-                if "```json" in clean_cand:
-                    match = re.search(r"```json\s*([\s\S]*?)\s*```", clean_cand)
-                    if match:
-                        clean_cand = match.group(1)
-                elif "{" in clean_cand:
-                    match = re.search(r"\{[\s\S]*\}", clean_cand)
-                    if match:
-                        clean_cand = match.group(0)
-                data = json.loads(clean_cand)
+            # Canonical JSON extraction (R-ARCH-03): fence stripping and
+            # embedded-object discovery are owned by the structured-output
+            # utility instead of two ad-hoc regex idioms.
+            data = extract_json_dict(candidate)
+            if data is None:
+                errors.append("JSON syntax invalid: no JSON object found")
+            else:
                 dict_str = json.dumps(data).lower()
                 missing_keys = [
                     k for k in expected_json_keys if k.lower() not in dict_str
                 ]
                 if missing_keys:
                     errors.append(f"Missing JSON schema keys: {missing_keys}")
-            except Exception as exc:
-                errors.append(f"JSON syntax invalid: {exc}")
 
         score = 1.0 if not errors else 0.5 if len(errors) == 1 else 0.0
         passed = len(errors) == 0

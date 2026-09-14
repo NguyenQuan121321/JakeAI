@@ -21,6 +21,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.core.config import get_settings
+from app.core.redis_client import acquire_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -179,22 +180,12 @@ class BYOKManager:
             return self.redis_client
         if not self._redis_available:
             return None
-        try:
-            from redis import asyncio as aioredis
-
-            settings = get_settings()
-            client = aioredis.from_url(
-                settings.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
-            )
-            await client.ping()
-            self.redis_client = client
-            return self.redis_client
-        except Exception:
+        client = await acquire_redis_client()
+        if client is None:
             self._redis_available = False
             return None
+        self.redis_client = client
+        return client
 
     async def _get_raw_val(self, tenant_id: str, provider: str) -> str | None:
         """Retrieve raw stored ciphertext record from Redis or fallback in-memory store."""

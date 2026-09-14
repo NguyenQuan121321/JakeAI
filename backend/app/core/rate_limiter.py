@@ -6,7 +6,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import HTTPException, Request, status
 
-from app.core.config import get_settings
+from app.core.redis_client import acquire_redis_client
 
 # Atomic Redis Lua script to eliminate TOCTOU race conditions under high concurrency
 _RATELIMIT_LUA_SCRIPT = """  # nosec B105
@@ -67,19 +67,10 @@ class TokenBucketRateLimiter:
         if self._redis_client is None:
             if now < self._redis_retry_after:
                 return None
-            settings = get_settings()
-            try:
-                client = aioredis.from_url(
-                    settings.REDIS_URL,
-                    encoding="utf-8",
-                    decode_responses=True,
-                    socket_connect_timeout=0.2,
-                    socket_timeout=0.2,
-                )
-                await client.ping()
+            client = await acquire_redis_client()
+            if client is not None:
                 self._redis_client = client
-            except Exception:
-                self._redis_client = None
+            else:
                 self._redis_retry_after = now + 30.0  # Back off 30s before retrying
         return self._redis_client
 

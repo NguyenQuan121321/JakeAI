@@ -8,7 +8,11 @@ import time
 from typing import Any
 
 from app.agent.state.models import RunState, RunStatus
-from app.core.config import get_settings
+from app.core.redis_client import (
+    acquire_redis_client,
+    is_client_bound_to_current_loop,
+    is_mock_redis_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,46 +44,20 @@ class CheckpointManager:
             return None
 
         if self.redis_client is not None:
-            if type(self.redis_client).__name__.startswith(
-                ("Mock", "AsyncMock")
-            ) or hasattr(self.redis_client, "_mock_return_value"):
+            if is_mock_redis_client(self.redis_client):
                 return self.redis_client
 
-            try:
-                import asyncio
-
-                current_loop = asyncio.get_running_loop()
-                pool = getattr(self.redis_client, "connection_pool", None)
-                client_loop = (
-                    getattr(pool, "_loop", None)
-                    if pool is not None
-                    else getattr(self.redis_client, "_loop", None)
-                )
-                if isinstance(client_loop, asyncio.AbstractEventLoop) and (
-                    client_loop is not current_loop or client_loop.is_closed()
-                ):
-                    self.redis_client = None
-                else:
-                    return self.redis_client
-            except Exception:
+            if not is_client_bound_to_current_loop(self.redis_client):
                 self.redis_client = None
+            else:
+                return self.redis_client
 
-        try:
-            from redis import asyncio as aioredis
-
-            settings = get_settings()
-            client = aioredis.from_url(
-                settings.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
-            )
-            await client.ping()
-            self.redis_client = client
-            return self.redis_client
-        except Exception:
+        client = await acquire_redis_client()
+        if client is None:
             self._redis_available = False
             return None
+        self.redis_client = client
+        return client
 
     @staticmethod
     def _sanitize_record_dict(dump: dict[str, Any]) -> dict[str, Any]:

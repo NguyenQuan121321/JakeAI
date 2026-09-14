@@ -1,7 +1,6 @@
 """Chat and Server-Sent Events (SSE) streaming endpoints with LangGraph integration."""
 
 import asyncio
-import json
 import logging
 import time
 import uuid
@@ -17,6 +16,7 @@ from app.core.config import get_settings
 from app.core.context import TenantContext
 from app.core.rate_limiter import enforce_rate_limit
 from app.core.security import get_current_tenant
+from app.core.sse import format_sse_event, streaming_sse_headers
 from app.finops.budget import QuotaReservation, get_budget_manager
 from app.finops.pricing import calculate_baseline_cost
 from app.finops.service import get_finops_service
@@ -78,8 +78,7 @@ class ChatStreamRequest(BaseModel):
 
 def _format_sse_event(event: str, data: dict[str, Any]) -> str:
     """Format structured payload into W3C Server-Sent Event frame."""
-    json_data = json.dumps(data)
-    return f"event: {event}\ndata: {json_data}\n\n"
+    return format_sse_event(event, data)
 
 
 async def _settle_stream_finops(
@@ -788,11 +787,5 @@ async def chat_stream_endpoint(
             reservation=reservation,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "X-Tenant-ID": context.tenant_id,
-            "X-Correlation-ID": context.correlation_id,
-        },
+        headers=streaming_sse_headers(context),
     )

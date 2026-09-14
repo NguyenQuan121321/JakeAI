@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.config import get_settings
+from app.core.redis_client import acquire_redis_client
 from app.finops.models import TenantBudget
 
 logger = logging.getLogger(__name__)
@@ -110,22 +110,12 @@ class FinOpsBudgetManager:
             return self.redis_client
         if not self._redis_available:
             return None
-        try:
-            from redis import asyncio as aioredis
-
-            settings = get_settings()
-            client = aioredis.from_url(
-                settings.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
-            )
-            await client.ping()
-            self.redis_client = client
-            return self.redis_client
-        except Exception:
+        client = await acquire_redis_client()
+        if client is None:
             self._redis_available = False
             return None
+        self.redis_client = client
+        return client
 
     def _get_period_key(self) -> str:
         """Current monthly billing period: YYYY-MM."""

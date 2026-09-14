@@ -28,6 +28,7 @@ from app.core.llm_provider import (
     call_upstream_llm,
     call_upstream_llm_detailed,
 )
+from app.core.redis_client import acquire_redis_client
 from app.finops.budget import FinOpsBudgetManager, QuotaReservation, get_budget_manager
 from app.finops.pricing import calculate_baseline_cost
 from app.finops.service import get_finops_service
@@ -104,6 +105,11 @@ class QuotaManager:
         self._memory_usage: dict[str, int] = {}
         self._redis_available = True
         self._redis_retry_after: float = 0.0
+        # Own binary-mode client. Deliberately NOT stored via the redis_client
+        # property: that property writes through to the shared text-mode
+        # FinOpsBudgetManager, and injecting a bytes-returning client there
+        # breaks the budget manager's str-typed reads (R-ARCH-03 fix).
+        self._redis_client: Any | None = None
 
     def _get_manager(self) -> FinOpsBudgetManager:
         if self._budget_manager is not None:
@@ -124,32 +130,25 @@ class QuotaManager:
 
     async def _get_redis(self) -> Any | None:
         """Lazily initialize Redis connection with fast ping check and cooldown."""
+        if self._redis_client is not None:
+            return self._redis_client
         if self.redis_client is not None:
+            # Reuse the shared budget manager's already-connected text-mode client.
             return self.redis_client
         now = time.time()
         if not self._redis_available and now < self._redis_retry_after:
             return None
-        try:
-            from redis import asyncio as aioredis
-
-            from app.core.config import get_settings
-
-            settings = get_settings()
-            client = aioredis.from_url(
-                settings.REDIS_URL,
-                decode_responses=False,
-                socket_timeout=1.0,
-                socket_connect_timeout=1.0,
-            )
-            await client.ping()
-            self.redis_client = client
-            self._redis_available = True
-            return client
-        except Exception as exc:
-            logger.debug("QuotaManager Redis unavailable (%s)", exc)
+        client = await acquire_redis_client(
+            decode_responses=False, connect_timeout=1.0, socket_timeout=1.0
+        )
+        if client is None:
+            logger.debug("QuotaManager Redis unavailable")
             self._redis_available = False
             self._redis_retry_after = now + 30.0
             return None
+        self._redis_available = True
+        self._redis_client = client
+        return client
 
     async def get_quota_limit(self, tenant_id: str) -> int:
         """Retrieve quota limit for a tenant."""

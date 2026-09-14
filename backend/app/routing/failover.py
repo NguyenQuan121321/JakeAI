@@ -80,27 +80,21 @@ class FailoverManager:
     async def _default_resolve_credentials(
         self, tenant_id: str, provider_name: str
     ) -> str | None:
-        """Resolve credentials specifically for candidate provider from BYOK or platform settings."""
+        """Resolve credentials specifically for candidate provider from BYOK or platform settings.
+
+        Delegates to the canonical credential authority
+        (``app.core.provider_credentials.resolve_provider_credentials``) so
+        failover-time resolution can never drift from dispatch-time resolution
+        (R-ARCH-03).
+        """
         try:
             from app.core.byok import get_byok_manager
             from app.core.config import get_settings
+            from app.core.provider_credentials import resolve_provider_credentials
 
-            byok_mgr = get_byok_manager()
-            key = await byok_mgr.get_decrypted_key(tenant_id, provider_name)
-            if key:
-                return key
-            settings = get_settings()
-            provider_settings_keys = {
-                "anthropic": "ANTHROPIC_API_KEY",
-                "openai": "OPENAI_API_KEY",
-                "groq": "GROQ_API_KEY",
-                "deepseek": "DEEPSEEK_API_KEY",
-                "openrouter": "OPENROUTER_API_KEY",
-                "gemini": "GEMINI_API_KEY",
-            }
-            s_key = provider_settings_keys.get(provider_name)
-            if s_key:
-                return getattr(settings, s_key, None)
+            return await resolve_provider_credentials(
+                get_settings(), get_byok_manager(), tenant_id, provider_name
+            )
         except Exception as exc:
             logger.debug(
                 "Default credential resolution failed for %s: %s", provider_name, exc

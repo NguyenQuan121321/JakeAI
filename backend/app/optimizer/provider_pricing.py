@@ -138,6 +138,14 @@ PRICING_CATALOG: dict[str, ModelPricing] = {
         cache_write_per_million=3.50,
         output_per_million=10.50,
     ),
+    "gemini-2.0-flash": ModelPricing(
+        model_id="gemini-2.0-flash",
+        provider="gemini",
+        input_per_million=0.10,
+        cache_read_per_million=0.025,  # 75% discount
+        cache_write_per_million=0.10,
+        output_per_million=0.40,
+    ),
     # DeepSeek
     "deepseek-chat": ModelPricing(
         model_id="deepseek-chat",
@@ -146,6 +154,32 @@ PRICING_CATALOG: dict[str, ModelPricing] = {
         cache_read_per_million=0.014,  # 90% discount
         cache_write_per_million=0.14,
         output_per_million=0.28,
+    ),
+    "deepseek-reasoner": ModelPricing(
+        model_id="deepseek-reasoner",
+        provider="deepseek",
+        input_per_million=0.55,
+        cache_read_per_million=0.14,
+        cache_write_per_million=0.55,
+        output_per_million=2.19,
+    ),
+    # OpenRouter
+    "openrouter/auto": ModelPricing(
+        model_id="openrouter/auto",
+        provider="openrouter",
+        input_per_million=2.00,
+        cache_read_per_million=2.00,
+        cache_write_per_million=2.00,
+        output_per_million=8.00,
+    ),
+    # Local / Self-Hosted Inference (COST-12)
+    "local-model": ModelPricing(
+        model_id="local-model",
+        provider="local",
+        input_per_million=0.10,
+        cache_read_per_million=0.10,
+        cache_write_per_million=0.10,
+        output_per_million=0.20,
     ),
     # Groq
     "llama-3.3-70b-versatile": ModelPricing(

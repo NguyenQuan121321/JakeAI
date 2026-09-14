@@ -56,13 +56,9 @@ from app.agent.state.models import (
 )
 from app.agent.tools.base import ToolRiskLevel
 from app.agent.tools.registry import get_tool_registry
-from app.agent.workflows.engine import WorkflowEngine
-from app.agent.workflows.models import (
-    StepType,
-    WorkflowDefinition,
-    WorkflowExecutionStatus,
-    WorkflowStepDefinition,
-)
+
+# R-ARCH-03: app.agent.workflows (test-only WorkflowEngine duplicate) removed.
+# See tests/test_r_arch_03_duplicate_abstractions.py.
 from app.core.config import get_settings
 
 # ---------------------------------------------------------------------------
@@ -544,34 +540,8 @@ async def test_bounded_planner_limits() -> None:
     assert action.error is not None and "Maximum allowed iterations" in action.error
 
 
-@pytest.mark.asyncio
-async def test_workflow_engine_execution() -> None:
-    registry = get_tool_registry()
-    engine = WorkflowEngine(tool_registry=registry)
-
-    wf = WorkflowDefinition(
-        workflow_id="wf_01",
-        name="System Inspection Workflow",
-        steps=[
-            WorkflowStepDefinition(
-                step_id="s1",
-                name="Get System Time",
-                step_type=StepType.TOOL_CALL,
-                tool_name="system_time",
-                arguments={},
-            ),
-        ],
-    )
-
-    execution = engine.create_execution(wf, tenant_id="tenant-alpha")
-    finished = await engine.run(wf, execution)
-    assert finished.status == WorkflowExecutionStatus.COMPLETED
-    assert "s1" in finished.step_results
-    assert "timestamp" in finished.step_results["s1"]
-
-
 # ===========================================================================
-# 7. Autonomous Execution Loop Tests
+# 6b. Autonomous Execution Loop Tests
 # ===========================================================================
 
 
