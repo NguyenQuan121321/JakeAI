@@ -182,6 +182,11 @@ class BoundedRecoveryEngine:
             # Approval gates are human decisions, never retryable
             "approval gate",
             "requires human approval",
+            # Tool existence / configuration invalidity (never retryable)
+            "unknown tool",
+            "not registered",
+            "tool not found",
+            "unregistered tool",
         )
         if any(marker in err_lower for marker in non_retryable_markers):
             return RecoveryDecision(
