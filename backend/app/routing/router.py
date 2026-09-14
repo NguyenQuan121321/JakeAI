@@ -241,7 +241,9 @@ class ModelRouter:
 
         all_catalog_models = ModelCapabilityCatalog.list_all()
         requested_cap = ModelCapabilityCatalog.get(model, provider=provider_name)
-        if all(c.model != requested_cap.model for c in all_catalog_models):
+        if model not in ("default", "") and all(
+            c.model != requested_cap.model for c in all_catalog_models
+        ):
             all_catalog_models.append(requested_cap)
 
         # Determine effective quality requirement
@@ -331,9 +333,16 @@ class ModelRouter:
             reasons.append(
                 "Warning: Strict criteria eliminated all candidates; falling back to requested model."
             )
-            selected_cap = requested_cap
-            selected_model = model
-            selected_provider = provider_name
+            if model in ("default", ""):
+                selected_cap = ModelCapabilityCatalog.get(
+                    "gemini-1.5-flash", provider="gemini"
+                )
+                selected_model = "gemini-1.5-flash"
+                selected_provider = "gemini"
+            else:
+                selected_cap = requested_cap
+                selected_model = model
+                selected_provider = provider_name
         else:
             # 3. Model Selection
             # Case A: Budget exceeded on requested model
@@ -447,7 +456,9 @@ class ModelRouter:
                     )
 
             # Case D: Specific requested model requested and survived hard filters
-            elif any(c[0].model == model for c in compatible_candidates):
+            elif model not in ("default", "") and any(
+                c[0].model == model for c in compatible_candidates
+            ):
                 match = next(c for c in compatible_candidates if c[0].model == model)
                 selected_cap = match[0]
                 selected_model = selected_cap.model

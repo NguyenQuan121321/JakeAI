@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.agent.registry.capability_patterns import (
     BANKING_PATTERN,
     FINANCIAL_PATTERN,
+    has_negative_constraint,
 )
 from app.agent.utils.structured_output import extract_json_dict
 from app.agents.state import AgentState
@@ -35,26 +36,74 @@ TOOL_VERBS_PATTERN = re.compile(
 
 def classify_intent(prompt: str) -> str:
     """Classify prompt into target agent destination (deterministic heuristic)."""
-    if re.search(r"(?i)\bfinnapi\b", prompt):
+    if not has_negative_constraint("banking", prompt) and re.search(
+        r"(?i)\bfinnapi\b", prompt
+    ):
         return "finnapigo_tool"
 
-    if FINANCIAL_PATTERN.search(prompt):
+    if not has_negative_constraint("financial", prompt) and FINANCIAL_PATTERN.search(
+        prompt
+    ):
         return "financial_specialist"
 
-    if BANKING_PATTERN.search(prompt):
+    if not has_negative_constraint("banking", prompt) and BANKING_PATTERN.search(
+        prompt
+    ):
         return "finnapigo_tool"
 
-    if TOOL_VERBS_PATTERN.search(prompt):
+    if not has_negative_constraint("banking", prompt) and TOOL_VERBS_PATTERN.search(
+        prompt
+    ):
         return "finnapigo_tool"
 
     return "synthesizer"
 
 
 async def decide_supervisor_route(
-    prompt: str, tenant_id: str = "default"
+    prompt: str, tenant_id: str = "default", backend: Any = None
 ) -> SupervisorDecision:
-    """Produce a structured routing decision using canonical AgentSelector, model reasoning, and fallback."""
-    # 1. Canonical AgentSelector Check
+    """Produce a structured routing decision using model reasoning, canonical AgentSelector, and fallback."""
+    # 1. Model-driven reasoning (primary intelligence)
+    try:
+        from app.agent.backends.base import AgentMessage, BackendRequest
+        from app.agent.backends.jakeai import JakeAIBackend
+
+        model_backend = backend or JakeAIBackend()
+        system_instruction = (
+            "You are the Supervisor Agent in JakeAI. You must analyze the user query and route it "
+            "to exactly one specialized downstream agent: 'financial_specialist', 'finnapigo_tool', or 'synthesizer'.\n"
+            "- 'financial_specialist': Quantitative calculations, EBITDA, margins, revenues, expenses, profit/loss.\n"
+            "- 'finnapigo_tool': FinnApiGo banking integrations, account balance lookup, transactions list, tenant limits.\n"
+            "- 'synthesizer': General conversation, greetings, overview questions, questions not requiring financial analysis or banking tools.\n"
+            "Respond strictly with a JSON object format:\n"
+            '{"target_agent": "<agent>", "reasoning": "<short rationale>"}'
+        )
+        req = BackendRequest(
+            messages=[
+                AgentMessage(role="system", content=system_instruction),
+                AgentMessage(role="user", content=prompt),
+            ],
+            temperature=0.0,
+            max_tokens=150,
+            tenant_id=tenant_id,
+        )
+        resp = await model_backend.generate(req)
+        if resp.content:
+            data = extract_json_dict(resp.content)
+            if data is not None:
+                target = data.get("target_agent")
+                if target in ("financial_specialist", "finnapigo_tool", "synthesizer"):
+                    return SupervisorDecision(
+                        target_agent=target,
+                        reasoning=data.get(
+                            "reasoning", "Model-driven routing decision"
+                        ),
+                        confidence=0.95,
+                    )
+    except Exception as exc:
+        logger.debug("Model supervisor routing fallback to AgentSelector: %s", exc)
+
+    # 2. Canonical AgentSelector Check (dynamic heuristic fallback)
     try:
         from app.agent.domain.contracts import TaskSpec
         from app.agent.registry.agent_selector import get_agent_selector
@@ -77,50 +126,7 @@ async def decide_supervisor_route(
     except Exception as exc:
         logger.debug("Canonical AgentSelector in supervisor fallback: %s", exc)
 
-    # 2. Model-driven reasoning
-    try:
-        from app.agent.backends.base import AgentMessage, BackendRequest
-        from app.agent.backends.jakeai import JakeAIBackend
-
-        backend = JakeAIBackend()
-        system_instruction = (
-            "You are the Supervisor Agent in JakeAI. You must analyze the user query and route it "
-            "to exactly one specialized downstream agent: 'financial_specialist', 'finnapigo_tool', or 'synthesizer'.\n"
-            "- 'financial_specialist': Quantitative calculations, EBITDA, margins, revenues, expenses, profit/loss.\n"
-            "- 'finnapigo_tool': FinnApiGo banking integrations, account balance lookup, transactions list, tenant limits.\n"
-            "- 'synthesizer': General conversation, greetings, overview questions, questions not requiring financial analysis or banking tools.\n"
-            "Respond strictly with a JSON object format:\n"
-            '{"target_agent": "<agent>", "reasoning": "<short rationale>"}'
-        )
-        req = BackendRequest(
-            messages=[
-                AgentMessage(role="system", content=system_instruction),
-                AgentMessage(role="user", content=prompt),
-            ],
-            temperature=0.0,
-            max_tokens=150,
-            tenant_id=tenant_id,
-        )
-        resp = await backend.generate(req)
-        if resp.content:
-            # Canonical JSON extraction (R-ARCH-03): replaces the local
-            # fence-strip + bare json.loads copy whose failures were swallowed
-            # by the broad handler below; extraction failure now falls back to
-            # the heuristic classifier explicitly.
-            data = extract_json_dict(resp.content)
-            if data is not None:
-                target = data.get("target_agent")
-                if target in ("financial_specialist", "finnapigo_tool", "synthesizer"):
-                    return SupervisorDecision(
-                        target_agent=target,
-                        reasoning=data.get(
-                            "reasoning", "Model-driven routing decision"
-                        ),
-                        confidence=0.95,
-                    )
-    except Exception as exc:
-        logger.debug("Model supervisor routing fallback to heuristic: %s", exc)
-
+    # 3. Deterministic intent classifier fallback
     fallback_target = classify_intent(prompt)
     return SupervisorDecision(
         target_agent=fallback_target,  # type: ignore[arg-type]

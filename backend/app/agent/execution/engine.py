@@ -1020,14 +1020,29 @@ class ExecutionEngine:
             # Quantitative computation via the canonical financial capability
             # (R-ARCH-02); ledger coupling below is engine-specific input
             # derivation and presentation rounding stays engine-local.
-            rev = DEFAULT_REVENUE
-            exp = DEFAULT_OPERATING_EXPENSES
-            # Inspect previous banking outputs if present
-            for prev_out in accumulated_outputs.values():
-                if isinstance(prev_out, dict) and "ledger_balance" in prev_out:
-                    rev = float(prev_out["ledger_balance"]) * 5.0
-                    exp = rev * 0.60
-                    break
+            from app.agent.capabilities.financial_analysis import (
+                extract_financial_figures,
+            )
+
+            user_figs = extract_financial_figures(step.description)
+            if not user_figs:
+                user_figs = extract_financial_figures(task_spec.goal)
+
+            if len(user_figs) >= 2:
+                rev = user_figs[0]
+                exp = user_figs[1]
+            elif len(user_figs) == 1:
+                rev = user_figs[0]
+                exp = DEFAULT_OPERATING_EXPENSES
+            else:
+                rev = DEFAULT_REVENUE
+                exp = DEFAULT_OPERATING_EXPENSES
+                # Inspect previous banking outputs if present
+                for prev_out in accumulated_outputs.values():
+                    if isinstance(prev_out, dict) and "ledger_balance" in prev_out:
+                        rev = float(prev_out["ledger_balance"]) * 5.0
+                        exp = rev * 0.60
+                        break
 
             operating_income = round(compute_operating_income(rev, exp), 2)
             margin = compute_operating_margin_pct(operating_income, rev)
@@ -1075,22 +1090,85 @@ class ExecutionEngine:
 
         if agent_sel.agent_id == "synthesizer":
             # Report consolidation
-            fin_info = ""
-            for out in accumulated_outputs.values():
-                if isinstance(out, dict) and "revenue" in out:
-                    fin_info = (
-                        f"\n\n#### Financial Overview\n"
-                        f"- Revenue: ${out.get('revenue', 0):,.2f}\n"
-                        f"- Operating Expenses: ${out.get('operating_expenses', 0):,.2f}\n"
-                        f"- Operating Income: ${out.get('operating_income', 0):,.2f} ({out.get('operating_margin_pct', 0)}% margin)\n"
-                        f"- EBITDA: ${out.get('ebitda', 0):,.2f}\n"
+            synthesized_text = None
+            if self.backend:
+                try:
+                    context_lines = [
+                        f"- Step '{sid}': {out}"
+                        for sid, out in accumulated_outputs.items()
+                    ]
+                    synth_prompt = (
+                        f"Synthesize execution outputs for goal: '{task_spec.goal}'.\n\n"
+                        f"Accumulated step outputs:\n"
+                        + ("\n".join(context_lines) if context_lines else "None")
+                        + "\n\nProduce an executive intelligence summary report."
                     )
-            final_markdown = (
-                f"### Executive Intelligence Report\n"
-                f"**Tenant**: `{task_spec.tenant_id}` | **Status**: Verified by JakeAI Orchestration\n\n"
-                f"Completed objective: '{task_spec.goal}'.\n"
-                f"{fin_info}"
-            )
+                    synth_backend_req = BackendRequest(
+                        messages=[
+                            AgentMessage(
+                                role="system",
+                                content=(
+                                    "You are the JakeAI Synthesizer Agent. Consolidate upstream multi-agent step "
+                                    "results into a coherent, professional, executive intelligence summary."
+                                ),
+                            ),
+                            AgentMessage(role="user", content=synth_prompt),
+                        ],
+                        temperature=0.2,
+                        max_tokens=600,
+                        tenant_id=task_spec.tenant_id,
+                    )
+                    backend_resp = await self.backend.generate(synth_backend_req)
+                    if backend_resp.content and backend_resp.content.strip():
+                        synthesized_text = backend_resp.content.strip()
+                except Exception as exc:
+                    logger.debug("Synthesizer backend LLM generation fallback: %s", exc)
+
+            if synthesized_text:
+                if "Executive Intelligence Report" not in synthesized_text:
+                    final_markdown = (
+                        f"### Executive Intelligence Report\n"
+                        f"**Tenant**: `{task_spec.tenant_id}` | **Status**: Verified by JakeAI Orchestration\n\n"
+                        f"{synthesized_text}"
+                    )
+                else:
+                    final_markdown = synthesized_text
+            else:
+                sections = []
+                for sid, out in accumulated_outputs.items():
+                    if isinstance(out, dict) and "revenue" in out:
+                        sections.append(
+                            f"#### Financial Overview\n"
+                            f"- Revenue: ${out.get('revenue', 0):,.2f}\n"
+                            f"- Operating Expenses: ${out.get('operating_expenses', 0):,.2f}\n"
+                            f"- Operating Income: ${out.get('operating_income', 0):,.2f} ({out.get('operating_margin_pct', 0)}% margin)\n"
+                            f"- EBITDA: ${out.get('ebitda', 0):,.2f}"
+                        )
+                    elif isinstance(out, dict) and "retrieved_chunks" in out:
+                        chunks = out["retrieved_chunks"]
+                        sections.append(
+                            f"#### Knowledge Retrieval ({len(chunks)} sources)\n"
+                            + "\n".join(
+                                f"- {c.get('content', '')[:120]}" for c in chunks[:3]
+                            )
+                        )
+                    elif isinstance(out, (dict, list)):
+                        import json
+
+                        sections.append(
+                            f"#### Step '{sid}' Output\n```json\n{json.dumps(out, indent=2)}\n```"
+                        )
+                    elif out:
+                        sections.append(f"#### Step '{sid}' Output\n{out}")
+
+                body = ("\n\n".join(sections) + "\n") if sections else ""
+                final_markdown = (
+                    f"### Executive Intelligence Report\n"
+                    f"**Tenant**: `{task_spec.tenant_id}` | **Status**: Verified by JakeAI Orchestration\n\n"
+                    f"Completed objective: '{task_spec.goal}'.\n\n"
+                    f"{body}"
+                ).rstrip()
+
             res = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.COMPLETED,

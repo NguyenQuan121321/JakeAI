@@ -40,6 +40,7 @@ from app.agent.planning.models import (
 from app.agent.registry.capability_patterns import (
     BANKING_PATTERN,
     FINANCIAL_PATTERN,
+    has_negative_constraint,
 )
 from app.agent.utils.structured_output import extract_json_dict
 from app.routing.router import ModelRouter, RoutingPolicy
@@ -58,7 +59,7 @@ _DEGRADED_CALC_EXPRESSION = f"{DEFAULT_REVENUE:.0f} - {DEFAULT_OPERATING_EXPENSE
 # Planner-local plan-shaping heuristics (capability classification itself comes
 # from the canonical app.agent.registry.capability_patterns authority).
 _MULTI_SOURCE_KW = re.compile(
-    r"(?i)\b(?:two independent|combine|merge|multiple sources?|cross-reference|both|compare|versus|vs)\b"
+    r"(?i)\b(?:two independent|combine|merge|multiple sources?|cross-reference|both|compare|versus|vs|cross-examine|correlate|two disparate|dual sources|reconcile|reconciliation)\b"
 )
 _APPROVAL_KW = re.compile(
     r"(?i)\b(?:approval|dangerous|terminal|terminal_exec|shell|exec|cmd|bash|delete|push|maintenance)\b"
@@ -127,7 +128,11 @@ class BoundedPlanner:
             "1. Steps must form an acyclic DAG. Independent steps must have empty dependencies.\n"
             "2. Step IDs must be unique strings.\n"
             "3. Dependencies must only reference earlier step IDs in the plan.\n"
-            "4. Output strictly valid JSON without explanation text outside the JSON."
+            "4. Valid capabilities: 'financial_analysis', 'banking_api', 'rag_retrieval', 'synthesis', 'verification', 'general_reasoning', 'code_execution'.\n"
+            "5. Valid candidate agents: 'financial_specialist', 'finnapigo_specialist', 'retrieval_specialist', 'verifier', 'synthesizer', 'general_agent'.\n"
+            "6. Safety & Negative Constraints: If the user explicitly forbids specific tools or actions (e.g. 'do not use terminal', 'no banking calls'), do NOT include forbidden tools or actions in required_tools.\n"
+            "7. Contradictory/Impossible Requests: If the goal contains contradictory or impossible constraints, describe the conflict in analysis and plan a safe, explanatory resolution step.\n"
+            "8. Output strictly valid JSON without explanation text outside the JSON."
         )
 
         user_content = f"Task Goal: '{goal}'\nTenant ID: '{tenant_id}'"
@@ -407,7 +412,12 @@ class BoundedPlanner:
             steps = [step_1a, step_1b, step_2, step_3]
 
         # 2. Tool-required banking & financial analysis task
-        elif BANKING_PATTERN.search(goal) and FINANCIAL_PATTERN.search(goal):
+        elif (
+            BANKING_PATTERN.search(goal)
+            and not has_negative_constraint("banking", goal)
+            and FINANCIAL_PATTERN.search(goal)
+            and not has_negative_constraint("financial", goal)
+        ):
             analysis = "Integrated banking retrieval and quantitative financial analysis workflow."
             step_1 = PlanStep(
                 step_id="step_fetch_banking",
@@ -449,7 +459,9 @@ class BoundedPlanner:
             steps = [step_1, step_2, step_3]
 
         # 3. Tool requiring human approval
-        elif _APPROVAL_KW.search(goal):
+        elif _APPROVAL_KW.search(goal) and not has_negative_constraint(
+            "terminal", goal
+        ):
             analysis = "Sensitive administrative operation requiring human-in-the-loop approval."
             step_1 = PlanStep(
                 step_id="step_dangerous_action",
@@ -478,7 +490,9 @@ class BoundedPlanner:
             steps = [step_1, step_2]
 
         # 4. Pure financial calculation task
-        elif FINANCIAL_PATTERN.search(goal):
+        elif FINANCIAL_PATTERN.search(goal) and not has_negative_constraint(
+            "financial", goal
+        ):
             analysis = "Quantitative financial modeling and reasoning workflow."
             step_1 = PlanStep(
                 step_id="step_financial_analysis",
@@ -513,8 +527,8 @@ class BoundedPlanner:
                 description=f"Formulate comprehensive response for: {goal}",
                 objective="Answer user query directly using optimal cost-effective model",
                 dependencies=[],
-                required_capabilities=[AgentCapability.SYNTHESIS.value],
-                candidate_agents=["synthesizer", "general_agent"],
+                required_capabilities=[AgentCapability.GENERAL_REASONING.value],
+                candidate_agents=["general_agent", "synthesizer"],
                 model_requirements={
                     "workload_class": "simple_chat",
                     "min_quality": 0.60,
@@ -862,7 +876,11 @@ class BoundedPlanner:
                 )
 
         # A. Privileged / approval task requiring dangerous tool execution
-        if _APPROVAL_KW.search(goal) and not has_tool_observation:
+        if (
+            _APPROVAL_KW.search(goal)
+            and not has_negative_constraint("terminal", goal)
+            and not has_tool_observation
+        ):
             return NextAction(
                 action_type=NextActionType.TOOL_CALL,
                 tool_name="terminal_exec",
@@ -872,17 +890,29 @@ class BoundedPlanner:
             )
 
         # B. Financial modeling / calculations
-        if FINANCIAL_PATTERN.search(goal) and not has_tool_observation:
+        if (
+            FINANCIAL_PATTERN.search(goal)
+            and not has_negative_constraint("financial", goal)
+            and not has_tool_observation
+        ):
             calc_available = any(t.name == "calculator" for t in available_tools)
             if calc_available:
+                from app.agent.capabilities.financial_analysis import (
+                    extract_financial_figures,
+                )
+
+                figs = extract_financial_figures(goal)
+                rev_num = figs[0] if len(figs) > 0 else DEFAULT_REVENUE
+                exp_num = figs[1] if len(figs) > 1 else DEFAULT_OPERATING_EXPENSES
+                calc_expr = f"{rev_num:.0f} - {exp_num:.0f}"
                 return NextAction(
                     action_type=NextActionType.TOOL_CALL,
                     tool_name="calculator",
-                    tool_args={"expression": _DEGRADED_CALC_EXPRESSION},
+                    tool_args={"expression": calc_expr},
                     thought=(
                         "Calculating operating income from revenue "
-                        f"(${DEFAULT_REVENUE:,.0f}) and operating expenses "
-                        f"(${DEFAULT_OPERATING_EXPENSES:,.0f})."
+                        f"(${rev_num:,.0f}) and operating expenses "
+                        f"(${exp_num:,.0f})."
                     ),
                     selected_model="degraded_fallback",
                 )
@@ -894,15 +924,19 @@ class BoundedPlanner:
                 last_tool_output = msg.content
                 break
 
-        if FINANCIAL_PATTERN.search(goal):
-            # Default report figures derive from the canonical financial
-            # capability authority (R-ARCH-02), not local literals.
-            default_income = compute_operating_income(
-                DEFAULT_REVENUE, DEFAULT_OPERATING_EXPENSES
+        if FINANCIAL_PATTERN.search(goal) and not has_negative_constraint(
+            "financial", goal
+        ):
+            from app.agent.capabilities.financial_analysis import (
+                extract_financial_figures,
             )
-            default_margin = compute_operating_margin_pct(
-                default_income, DEFAULT_REVENUE
-            )
+
+            figs = extract_financial_figures(goal)
+            rev_num = figs[0] if len(figs) > 0 else DEFAULT_REVENUE
+            exp_num = figs[1] if len(figs) > 1 else DEFAULT_OPERATING_EXPENSES
+
+            default_income = compute_operating_income(rev_num, exp_num)
+            default_margin = compute_operating_margin_pct(default_income, rev_num)
             default_ebitda = compute_ebitda(default_income)
 
             calc_val = f"{default_income:,.2f}"
@@ -923,8 +957,8 @@ class BoundedPlanner:
 
             fin_summary = (
                 "### Financial Analysis Report\n"
-                f"- **Revenue**: ${DEFAULT_REVENUE:,.2f}\n"
-                f"- **Operating Expenses**: ${DEFAULT_OPERATING_EXPENSES:,.2f}\n"
+                f"- **Revenue**: ${rev_num:,.2f}\n"
+                f"- **Operating Expenses**: ${exp_num:,.2f}\n"
                 f"- **Operating Income**: ${calc_val}\n"
                 f"- **Operating Margin**: {default_margin}%\n"
                 f"- **EBITDA**: ${default_ebitda:,.2f}\n\n"
@@ -937,7 +971,7 @@ class BoundedPlanner:
                 selected_model="degraded_fallback",
             )
 
-        if _APPROVAL_KW.search(goal):
+        if _APPROVAL_KW.search(goal) and not has_negative_constraint("terminal", goal):
             return NextAction(
                 action_type=NextActionType.FINISH,
                 final_output=f"Privileged operation completed successfully. Observation: {last_tool_output or 'Operation authorized and executed.'}",

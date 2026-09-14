@@ -23,6 +23,7 @@ from app.agent.registry.capability_patterns import (
     BANKING_PATTERN,
     FINANCIAL_PATTERN,
     RETRIEVAL_PATTERN,
+    has_negative_constraint,
 )
 from app.agent.utils.structured_output import extract_json_dict
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Selector-local heuristics (no counterpart in other layers)
 _VERIFICATION_PATTERNS = re.compile(
-    r"(?i)\b(?:verify|audit|check consistency|critique|groundedness|validate math)\b"
+    r"(?i)\b(?:verify|audit|check consistency|verification critique|critique calculation|groundedness|validate math)\b"
 )
 _SYNTHESIS_PATTERNS = re.compile(
     r"(?i)\b(?:summarize|synthesize|report|markdown table|compile summary)\b"
@@ -222,12 +223,14 @@ class AgentSelector:
                 )
                 if (
                     FINANCIAL_PATTERN.search(text_to_eval)
+                    and not has_negative_constraint("financial", text_to_eval)
                     and AgentCapability.FINANCIAL_ANALYSIS.value in agent.capabilities
                 ):
                     score += 3.0
                     matched_caps.append(AgentCapability.FINANCIAL_ANALYSIS.value)
                 if (
                     BANKING_PATTERN.search(text_to_eval)
+                    and not has_negative_constraint("banking", text_to_eval)
                     and AgentCapability.BANKING_API.value in agent.capabilities
                 ):
                     score += 3.0
@@ -262,19 +265,20 @@ class AgentSelector:
             # Sort descending by score
             ranked_candidates.sort(key=lambda x: x[0], reverse=True)
             top_score, best_agent, matched = ranked_candidates[0]
-            confidence = min(0.99, max(0.60, top_score / 5.0))
-            return AgentSelection(
-                agent_id=best_agent.agent_id,
-                reasoning=(
-                    f"Selected '{best_agent.name}' (score: {top_score:.1f}) matching "
-                    f"capabilities: {matched or ['general']}."
-                ),
-                confidence=confidence,
-                matched_capabilities=matched,
-                risk_level=best_agent.risk_level,
-                fallback_used=False,
-                selection_mode="deterministic_fallback",
-            )
+            if top_score > 1.0:
+                confidence = min(0.99, max(0.60, top_score / 5.0))
+                return AgentSelection(
+                    agent_id=best_agent.agent_id,
+                    reasoning=(
+                        f"Selected '{best_agent.name}' (score: {top_score:.1f}) matching "
+                        f"capabilities: {matched or ['general']}."
+                    ),
+                    confidence=confidence,
+                    matched_capabilities=matched,
+                    risk_level=best_agent.risk_level,
+                    fallback_used=False,
+                    selection_mode="deterministic_fallback",
+                )
 
         # 6. Explicit Degraded Mode Fallback
         fallback_agent_id, fallback_reason = self._degraded_heuristic_fallback(
@@ -300,9 +304,13 @@ class AgentSelector:
         """Explicit deterministic fallback rule when capability matching yields zero candidates."""
         content = f"{task_spec.goal} {plan_step.description if plan_step else ''}"
 
-        if BANKING_PATTERN.search(content):
+        if BANKING_PATTERN.search(content) and not has_negative_constraint(
+            "banking", content
+        ):
             return "finnapigo_specialist", "Matched banking/FinnApiGo keywords"
-        if FINANCIAL_PATTERN.search(content):
+        if FINANCIAL_PATTERN.search(content) and not has_negative_constraint(
+            "financial", content
+        ):
             return "financial_specialist", "Matched quantitative financial keywords"
         if RETRIEVAL_PATTERN.search(content):
             return "retrieval_specialist", "Matched search/retrieval keywords"
