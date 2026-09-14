@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import re
 
-from app.rag.grounding import METRIC_REGEX, STOPWORDS
+from app.rag.grounding import (
+    ANTONYM_PAIRS,
+    METRIC_REGEX,
+    STOPWORDS,
+    extract_canonical_metrics,
+    get_entities,
+)
 from app.rag.models import Citation, DocumentChunk
 
 
@@ -49,6 +55,8 @@ class CitationGenerator:
                 if w.lower() not in STOPWORDS and not w.isdigit()
             }
             sentence_numbers = set(METRIC_REGEX.findall(sentence))
+            sentence_metrics = extract_canonical_metrics(sentence)
+            sentence_entities = get_entities(sentence)
 
             matched_chunk: DocumentChunk | None = None
             best_match_score = 0.0
@@ -61,31 +69,45 @@ class CitationGenerator:
                     if w.lower() not in STOPWORDS and not w.isdigit()
                 }
                 chunk_numbers = set(METRIC_REGEX.findall(chunk_content))
+                chunk_metrics = extract_canonical_metrics(chunk_content)
+                chunk_entities = get_entities(chunk_content)
 
-                num_overlap = sentence_numbers.intersection(chunk_numbers)
                 word_overlap = sentence_words.intersection(chunk_words)
+                word_ratio = len(word_overlap) / max(1, len(sentence_words))
 
-                # Entailment-based scoring: numbers have high weight, words have semantic weight
-                if sentence_numbers:
-                    if num_overlap and num_overlap == sentence_numbers:
-                        # Full number match
-                        word_ratio = len(word_overlap) / max(1, len(sentence_words))
-                        # Prevent citation mismatch: require minimum lexical overlap when words exist
+                # Antonym check
+                has_antonym = any(
+                    chunk_words.intersection(ANTONYM_PAIRS.get(w, set()))
+                    for w in sentence_words
+                )
+                if has_antonym:
+                    continue
+
+                if sentence_metrics or sentence_numbers:
+                    full_metric_match = (
+                        sentence_metrics.issubset(chunk_metrics)
+                        if sentence_metrics
+                        else sentence_numbers.issubset(chunk_numbers)
+                    )
+                    if full_metric_match:
                         if sentence_words and word_ratio < 0.15:
                             score = 0.0  # Spurious metric collision without substantive topic match
                         else:
-                            score = 0.8 + (word_ratio * 0.2)
-                    elif num_overlap:
-                        score = (
-                            0.5
-                            if (not sentence_words or len(word_overlap) >= 1)
-                            else 0.0
-                        )
+                            score = 0.80 + (word_ratio * 0.20)
                     else:
-                        score = 0.0
+                        score = 0.0  # Mismatched/conflicting numbers: NEVER cite
                 else:
-                    word_ratio = len(word_overlap) / max(1, len(sentence_words))
-                    score = word_ratio if word_ratio >= 0.35 else 0.0
+                    # Qualitative sentence
+                    if sentence_entities:
+                        if (
+                            sentence_entities.issubset(chunk_entities)
+                            and word_ratio >= 0.40
+                        ):
+                            score = 0.70 + (word_ratio * 0.30)
+                        else:
+                            score = 0.0
+                    else:
+                        score = word_ratio if word_ratio >= 0.60 else 0.0
 
                 if score > best_match_score and score >= 0.50:
                     best_match_score = score
@@ -93,12 +115,15 @@ class CitationGenerator:
 
             if matched_chunk:
                 cid = matched_chunk.chunk_id
+                is_unverified = "[unverified]" in sentence
                 if cid not in cited_chunks:
                     cited_chunks[cid] = citation_index
                     snip = matched_chunk.content[:130]
                     if len(matched_chunk.content) > 130:
                         snip += "..."
-                    confidence = round(min(1.0, best_match_score), 2)
+                    confidence = (
+                        0.50 if is_unverified else round(min(1.0, best_match_score), 2)
+                    )
                     citations.append(
                         Citation(
                             index=citation_index,
@@ -112,7 +137,11 @@ class CitationGenerator:
                     citation_index += 1
 
                 idx = cited_chunks[cid]
-                annotated_sentences.append(f"{sentence} [^{idx}]")
+                if is_unverified:
+                    base_s = sentence.replace("[unverified]", "").strip()
+                    annotated_sentences.append(f"{base_s} [^{idx}] [unverified]")
+                else:
+                    annotated_sentences.append(f"{sentence} [^{idx}]")
             else:
                 annotated_sentences.append(sentence)
 

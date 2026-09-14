@@ -65,6 +65,131 @@ STOPWORDS = {
     "reports",
 }
 
+CURRENCY_SYMBOLS: dict[str, str] = {
+    "$": "USD",
+    "usd": "USD",
+    "€": "EUR",
+    "eur": "EUR",
+    "£": "GBP",
+    "gbp": "GBP",
+    "¥": "JPY",
+    "jpy": "JPY",
+    "₫": "VND",
+    "vnd": "VND",
+    "vnđ": "VND",
+    "%": "%",
+    "percent": "%",
+    "seats": "seats",
+}
+
+MULTIPLIER_SUFFIXES: list[tuple[str, float]] = [
+    ("trillion", 1e12),
+    ("billion", 1e9),
+    ("million", 1e6),
+    ("triệu", 1e6),
+    ("thousand", 1e3),
+    ("tỷ", 1e9),
+    ("b", 1e9),
+    ("m", 1e6),
+    ("k", 1e3),
+]
+
+ANTONYM_PAIRS: dict[str, set[str]] = {
+    "approved": {"rejected", "denied", "disapproved", "vetoed"},
+    "rejected": {"approved", "accepted", "passed", "ratified"},
+    "denied": {"approved", "accepted", "granted", "confirmed"},
+    "launched": {"cancelled", "terminated", "aborted", "scrapped", "postponed"},
+    "cancelled": {"launched", "initiated", "continued", "completed"},
+    "active": {"inactive", "terminated", "suspended", "closed", "defunct"},
+    "inactive": {"active", "operating"},
+    "completed": {"cancelled", "abandoned", "aborted", "failed", "incomplete"},
+    "success": {"failure", "fiasco", "collapse", "bankrupt", "bankruptcy"},
+    "successful": {"failed", "unsuccessful", "bankrupt"},
+    "successfully": {"unsuccessfully"},
+    "profit": {"loss", "deficit"},
+    "profitable": {"unprofitable", "loss-making"},
+    "growth": {"decline", "contraction", "decrease"},
+    "increase": {"decrease", "decline", "reduction", "drop"},
+    "increased": {"decreased", "declined", "reduced", "dropped"},
+    "passed": {"failed"},
+    "failed": {"passed", "succeeded"},
+    "hired": {"fired", "dismissed", "terminated"},
+    "true": {"false"},
+    "false": {"true"},
+    "yes": {"no"},
+    "no": {"yes"},
+}
+for _k, _vs in list(ANTONYM_PAIRS.items()):
+    for _v in _vs:
+        ANTONYM_PAIRS.setdefault(_v, set()).add(_k)
+
+ABSTENTION_PATTERNS = [
+    re.compile(
+        r"\b(?:no|insufficient|not enough)\s+(?:information|evidence|data|documents|records|details)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:cannot|unable to|could not)\s+(?:answer|determine|verify|find|state)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:not|never)\s+(?:mentioned|found|stated|disclosed|provided)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bdocuments?\s+(?:do not|does not)\s+(?:mention|contain|state|provide)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bno\s+verified\s+documents\b", re.IGNORECASE),
+]
+
+
+def is_epistemic_abstention(text: str) -> bool:
+    """Check if statement expresses epistemic boundary or explicit evidence absence."""
+    return any(p.search(text) for p in ABSTENTION_PATTERNS)
+
+
+def normalize_metric(raw_token: str) -> tuple[str, float] | None:
+    """Normalize a raw metric/numeric string into a canonical (unit, value) tuple."""
+    token = raw_token.strip().lower()
+    if not token:
+        return None
+
+    unit = ""
+    for symbol, canonical_unit in CURRENCY_SYMBOLS.items():
+        if symbol in token:
+            unit = canonical_unit
+            break
+
+    cleaned = token.replace(",", "")
+    match = re.search(r"\d+(?:\.\d+)?", cleaned)
+    if not match:
+        return None
+
+    multiplier = 1.0
+    for suffix, mult in MULTIPLIER_SUFFIXES:
+        pattern = r"(?<=\d|\s)" + re.escape(suffix) + r"(?=\b|\s|$)"
+        if re.search(pattern, cleaned):
+            multiplier = mult
+            break
+
+    try:
+        val = float(match.group(0)) * multiplier
+        return (unit, round(val, 4))
+    except (ValueError, OverflowError):
+        return None
+
+
+def extract_canonical_metrics(text: str) -> set[tuple[str, float]]:
+    """Extract set of canonicalized (unit, value) metrics from text."""
+    raw_matches = METRIC_REGEX.findall(text)
+    metrics: set[tuple[str, float]] = set()
+    for m in raw_matches:
+        norm = normalize_metric(m)
+        if norm is not None:
+            metrics.add(norm)
+    return metrics
+
 
 class GroundingVerificationResult(BaseModel):
     """Consolidated result of claim-level grounding verification."""
@@ -82,6 +207,16 @@ class GroundingVerificationResult(BaseModel):
     verified_answer: str = Field(
         description="Answer with ungrounded claims filtered or qualified"
     )
+
+
+def get_entities(text: str) -> set[str]:
+    """Extract named entities or capitalized terms from text."""
+    words = re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", text)
+    entities = set()
+    for i, w in enumerate(words):
+        if w[0].isupper() and (i > 0 or len(words) == 1) and w.lower() not in STOPWORDS:
+            entities.add(w.lower())
+    return entities
 
 
 class GroundingVerifier:
@@ -113,6 +248,10 @@ class GroundingVerifier:
             s_clean = re.sub(r"\[\^\d+\]", "", s).strip()
             if not s_clean:
                 continue
+            # Retain epistemic abstentions
+            if is_epistemic_abstention(s_clean):
+                claims.append(s_clean)
+                continue
             # Filter out non-substantive conversational hedges
             words = [
                 w for w in re.findall(r"\b\w+\b", s_clean.lower()) if w not in STOPWORDS
@@ -133,6 +272,15 @@ class GroundingVerifier:
         if tenant_id is not None:
             passages = [p for p in passages if p.tenant_id == tenant_id]
 
+        if is_epistemic_abstention(claim):
+            return GroundingClaim(
+                claim_text=claim,
+                entailment=ClaimEntailment.SUPPORTED,
+                confidence=1.0,
+                supporting_chunk_ids=[],
+                reasoning="Epistemic boundary statement or explicit evidence absence.",
+            )
+
         if not passages:
             return GroundingClaim(
                 claim_text=claim,
@@ -142,62 +290,96 @@ class GroundingVerifier:
                 reasoning="No context passages available for verification.",
             )
 
-        claim_numbers = set(METRIC_REGEX.findall(claim))
+        claim_metrics = extract_canonical_metrics(claim)
+        claim_raw_numbers = set(METRIC_REGEX.findall(claim))
         claim_terms = {
             w.lower()
             for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", claim)
             if w.lower() not in STOPWORDS and not w.isdigit()
         }
+        claim_entities = get_entities(claim)
 
         best_support_chunks: list[str] = []
+        contradicting_chunks: list[str] = []
         max_overlap_ratio = 0.0
         number_mismatch_detected = False
+        antonym_contradiction_detected = False
+        qualitative_conflict_detected = False
 
         for chunk in passages:
             chunk_content = chunk.content
-            chunk_numbers = set(METRIC_REGEX.findall(chunk_content))
+            chunk_metrics = extract_canonical_metrics(chunk_content)
+            chunk_raw_numbers = set(METRIC_REGEX.findall(chunk_content))
             chunk_terms = {
                 w.lower()
                 for w in re.findall(r"\b[a-zA-Z0-9_\-\$]{3,}\b", chunk_content)
                 if w.lower() not in STOPWORDS and not w.isdigit()
             }
+            chunk_entities = get_entities(chunk_content)
 
-            # If claim asserts numbers, check if they exist in the chunk
-            if claim_numbers:
-                if claim_numbers.issubset(chunk_numbers):
-                    # Numbers are attested
-                    overlap = len(claim_terms.intersection(chunk_terms))
-                    ratio = overlap / max(1, len(claim_terms))
+            overlap = len(claim_terms.intersection(chunk_terms))
+            ratio = overlap / max(1, len(claim_terms))
+
+            # Check antonym contradiction
+            has_antonym = any(
+                chunk_terms.intersection(ANTONYM_PAIRS.get(w, set()))
+                for w in claim_terms
+            )
+            if has_antonym and ratio >= 0.25:
+                antonym_contradiction_detected = True
+                contradicting_chunks.append(chunk.chunk_id)
+                continue
+
+            # If claim asserts numbers or metrics
+            if claim_metrics or claim_raw_numbers:
+                metrics_match = (
+                    claim_metrics.issubset(chunk_metrics)
+                    if claim_metrics
+                    else claim_raw_numbers.issubset(chunk_raw_numbers)
+                )
+
+                if metrics_match:
                     if ratio >= 0.25:
                         best_support_chunks.append(chunk.chunk_id)
                         max_overlap_ratio = max(max_overlap_ratio, ratio)
                 else:
-                    # Check if topic terms overlap but numbers differ/contradict
-                    overlap = len(claim_terms.intersection(chunk_terms))
-                    ratio = overlap / max(1, len(claim_terms))
-                    if ratio >= 0.25 and chunk_numbers:
+                    if ratio >= 0.25 and (chunk_metrics or chunk_raw_numbers):
                         number_mismatch_detected = True
+                        contradicting_chunks.append(chunk.chunk_id)
             else:
                 # Qualitative claim verification
-                overlap = len(claim_terms.intersection(chunk_terms))
-                ratio = overlap / max(1, len(claim_terms))
-                # Record the best ratio even below the support threshold so the
-                # weak-overlap UNCERTAIN band (0.20 <= ratio < 0.40) is
-                # reachable instead of collapsing into UNSUPPORTED.
                 max_overlap_ratio = max(max_overlap_ratio, ratio)
-                if ratio >= 0.40:
-                    best_support_chunks.append(chunk.chunk_id)
+                if claim_entities:
+                    if claim_entities.issubset(chunk_entities):
+                        if ratio >= 0.40:
+                            best_support_chunks.append(chunk.chunk_id)
+                    else:
+                        if ratio >= 0.35 and chunk_entities:
+                            qualitative_conflict_detected = True
+                            contradicting_chunks.append(chunk.chunk_id)
+                else:
+                    if ratio >= 0.65:
+                        best_support_chunks.append(chunk.chunk_id)
+                    elif ratio >= 0.35 and best_support_chunks:
+                        qualitative_conflict_detected = True
+                        contradicting_chunks.append(chunk.chunk_id)
 
         # Classify entailment
         if best_support_chunks:
-            if number_mismatch_detected:
-                # Conflicting evidence: one passage matches but another contradicts the metrics
+            if (
+                number_mismatch_detected
+                or qualitative_conflict_detected
+                or antonym_contradiction_detected
+            ):
                 return GroundingClaim(
                     claim_text=claim,
                     entailment=ClaimEntailment.UNCERTAIN,
                     confidence=0.50,
                     supporting_chunk_ids=best_support_chunks,
-                    reasoning=f"Conflicting evidence detected in context passages: supported by {', '.join(best_support_chunks)} but contradicted by other records.",
+                    reasoning=(
+                        f"Conflicting evidence detected in context passages: supported by "
+                        f"{', '.join(best_support_chunks)} but contradicted by other records."
+                    ),
                 )
             confidence = round(min(1.0, 0.70 + (max_overlap_ratio * 0.30)), 2)
             return GroundingClaim(
@@ -208,9 +390,21 @@ class GroundingVerifier:
                 reasoning=f"Attested in chunks: {', '.join(best_support_chunks)}",
             )
 
-        if number_mismatch_detected or (
-            claim_numbers and self.strict_metric_entailment
+        if antonym_contradiction_detected or (
+            (claim_metrics or claim_raw_numbers) and number_mismatch_detected
         ):
+            return GroundingClaim(
+                claim_text=claim,
+                entailment=ClaimEntailment.UNSUPPORTED,
+                confidence=0.0,
+                supporting_chunk_ids=[],
+                reasoning=(
+                    "Claim directly contradicts context passages: "
+                    f"contradicted by {', '.join(contradicting_chunks or ['evidence records'])}."
+                ),
+            )
+
+        if (claim_metrics or claim_raw_numbers) and self.strict_metric_entailment:
             return GroundingClaim(
                 claim_text=claim,
                 entailment=ClaimEntailment.UNSUPPORTED,
@@ -219,7 +413,6 @@ class GroundingVerifier:
                 reasoning="Claim contains numbers or metrics absent from or contradicting evidence passages.",
             )
 
-        # Qualitative claim with modest overlap
         if max_overlap_ratio >= 0.20:
             return GroundingClaim(
                 claim_text=claim,
@@ -249,7 +442,6 @@ class GroundingVerifier:
 
         claims = self.extract_claims(text)
         if not claims:
-            # If no substantive claims (e.g. empty or boilerplate), check if passages exist
             is_grounded = bool(passages)
             return GroundingVerificationResult(
                 is_grounded=is_grounded,
@@ -269,7 +461,10 @@ class GroundingVerifier:
             c for c in verified_claims if c.entailment == ClaimEntailment.SUPPORTED
         ]
         unsupported = [
-            c for c in verified_claims if c.entailment == ClaimEntailment.UNSUPPORTED
+            c
+            for c in verified_claims
+            if c.entailment
+            in (ClaimEntailment.UNSUPPORTED, ClaimEntailment.CONTRADICTED)
         ]
         uncertain = [
             c for c in verified_claims if c.entailment == ClaimEntailment.UNCERTAIN
@@ -284,9 +479,11 @@ class GroundingVerifier:
             if claim_obj.entailment == ClaimEntailment.SUPPORTED:
                 verified_sentences.append(claim_obj.claim_text)
             elif claim_obj.entailment == ClaimEntailment.UNCERTAIN:
-                # Include uncertain claims with an explicit caveat so that
-                # unverified content is never presented as verified fact.
-                verified_sentences.append(f"{claim_obj.claim_text} [unverified]")
+                c_text = claim_obj.claim_text.strip()
+                if c_text.endswith((".", "!", "?")):
+                    verified_sentences.append(f"{c_text[:-1]} [unverified]{c_text[-1]}")
+                else:
+                    verified_sentences.append(f"{c_text} [unverified]")
             else:
                 logger.warning(
                     "Dropping unsupported claim from user answer: '%s' (Reason: %s)",

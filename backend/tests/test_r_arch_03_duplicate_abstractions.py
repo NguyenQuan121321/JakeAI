@@ -38,7 +38,9 @@ def _app_sources() -> dict[str, str]:
         for fn in sorted(filenames):
             if fn.endswith(".py"):
                 p = Path(dirpath) / fn
-                sources[str(p.relative_to(APP_DIR))] = p.read_text(encoding="utf-8")
+                sources[p.relative_to(APP_DIR).as_posix()] = p.read_text(
+                    encoding="utf-8"
+                )
     return sources
 
 

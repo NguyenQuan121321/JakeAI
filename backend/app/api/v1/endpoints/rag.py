@@ -1,4 +1,4 @@
-"""RAG document ingestion and retrieval endpoints with asynchronous bounded task queue."""
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -120,6 +120,9 @@ class RAGGenerateResponse(BaseModel):
     )
     abstention_reason: str | None = Field(
         default=None, description="Abstention reason code if applicable"
+    )
+    grounding: Any | None = Field(
+        default=None, description="Claim-level grounding and verification breakdown"
     )
 
 
@@ -274,4 +277,5 @@ async def generate_rag_answer(
         abstention_reason=str(gen_result.abstention_reason)
         if gen_result.abstention_reason
         else None,
+        grounding=gen_result.grounding,
     )

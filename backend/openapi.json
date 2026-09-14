@@ -4385,6 +4385,16 @@
             ],
             "title": "Abstention Reason",
             "description": "Abstention reason code if applicable"
+          },
+          "grounding": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grounding",
+            "description": "Claim-level grounding and verification breakdown"
           }
         },
         "type": "object",
