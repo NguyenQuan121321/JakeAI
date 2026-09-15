@@ -535,4 +535,24 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
 | **Internal Mutual Auth Gate**| `pytest tests/contract/test_internal_mutual_auth.py` | 4/4 passed | **PASSED** |
 | **RAG Regression Gate** | `pytest tests/evals/test_rag_regression.py` | 7/7 passed | **PASSED** |
 | **Canary & LLMOps Gate** | `pytest tests/evals/test_canary_leakage.py ...` | 17/17 passed | **PASSED** |
-| **Full Pytest Suite** | `pytest --cov=app --cov-branch tests/` | 1,099 passed, 2 skipped, 0 failed | **PASSED** |
+| **Full Pytest Suite** | `pytest --cov=app --cov-branch tests/` | 1,099 passed, 2 skipped, 0 failed | **PASSED** |
+
+---
+
+## 18. Phase TEST-03 — Integration Test Completeness & CI Regression Resolution
+
+- **Phase**: `TEST-03` (Integration Test Completeness)
+- **Branch**: `chore/test-03-integration-completeness`
+- **Scope**: Implemented 9 authoritative integration test suites across core dependencies (Redis, Qdrant, Persistence, Agent Runtime, Routing & Providers, RAG Pipeline, Async Ingestion Worker, FinOps Governance, and Telemetry & Context).
+- **CI Regressions Identified & Resolved**:
+  1. `test_failure_case_1_unavailable_redis` (`test_async_worker_integration.py`): Ensured pure in-memory fallback via patch.object on `_get_redis` to prevent live Redis reconnection.
+  2. `test_failure_case_4_connection_failure` (`test_async_worker_integration.py`): Extended connection reset mock across both `_save_task` and `get_task` to verify in-memory task state preservation.
+  3. `test_rag_task_manager_redis_queue` (`test_redis_integration.py`): Added `await mgr.clear()` queue isolation before and after test execution to prevent cross-test contamination.
+  4. `test_hybrid_retriever_dense_sparse_fusion` (`test_qdrant_integration.py`): Aligned fake embedding dimension with `get_settings().EMBEDDING_DIMENSION` (384) and provisioned isolated unique collection names.
+- **Verification Summary**:
+  - Full Integration Suites: 32/32 tests passed across modified files.
+  - Complete Backend Test Suite: 1,546 passed, 2 skipped, 0 failed.
+  - Branch Coverage: 88.37% (Threshold >= 85.0%).
+  - Line Coverage: 90.71% (Threshold >= 85.0%).
+  - PR Patch Coverage: 100.0%.
+

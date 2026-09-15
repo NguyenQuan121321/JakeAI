@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.core.config import get_settings
 from app.optimizer.semantic_cache import SemanticCacheManager
 from app.rag.bm25 import BM25Retriever
 from app.rag.embedding import TestOnlyFakeEmbeddingProvider
@@ -49,7 +50,7 @@ QDRANT_AVAILABLE = _check_qdrant_reachable()
 
 @pytest.fixture
 def fake_embedding_provider() -> TestOnlyFakeEmbeddingProvider:
-    return TestOnlyFakeEmbeddingProvider(dimension=64)
+    return TestOnlyFakeEmbeddingProvider(dimension=get_settings().EMBEDDING_DIMENSION)
 
 
 @pytest.mark.asyncio
@@ -118,7 +119,9 @@ class TestQdrantIntegrationAuthorities:
         fake_embedding_provider: TestOnlyFakeEmbeddingProvider,
     ) -> None:
         """Authority 2: SemanticCacheManager vector semantic caching in Qdrant."""
+        col_name = f"test_col_sc_{uuid.uuid4().hex[:8]}"
         cache = SemanticCacheManager(
+            collection_name=col_name,
             similarity_threshold=0.85,
             default_ttl=120,
             embedding_provider=fake_embedding_provider,
@@ -159,7 +162,11 @@ class TestQdrantIntegrationAuthorities:
         fake_embedding_provider: TestOnlyFakeEmbeddingProvider,
     ) -> None:
         """Authority 3: HybridRetriever dense Qdrant + sparse BM25 fusion."""
-        store = QdrantVectorStore(embedding_provider=fake_embedding_provider)
+        col_name = f"test_col_hr_{uuid.uuid4().hex[:8]}"
+        store = QdrantVectorStore(
+            collection_name=col_name,
+            embedding_provider=fake_embedding_provider,
+        )
         bm25 = BM25Retriever()
         retriever = HybridRetriever(vector_store=store, bm25=bm25)
 
@@ -262,16 +269,18 @@ class TestQdrantMandatoryFailureCases:
         fake_embedding_provider: TestOnlyFakeEmbeddingProvider,
     ) -> None:
         """Failure Case 3: Incompatible collection dimension raises DimensionMismatchError."""
+        dim = fake_embedding_provider.dimension
+        mismatched_dim = dim + 100
         store = QdrantVectorStore(
-            dimension=64,
+            dimension=dim,
             embedding_provider=fake_embedding_provider,
         )
         mock_client = AsyncMock()
         mock_client.collection_exists.return_value = True
 
-        # Existing collection has dimension 384, but store expects 64
+        # Existing collection has mismatched dimension
         class MockColParams:
-            vectors = type("V", (), {"size": 384})()
+            vectors = type("V", (), {"size": mismatched_dim})()
 
         class MockColInfo:
             config = type("C", (), {"params": MockColParams()})()
@@ -281,7 +290,7 @@ class TestQdrantMandatoryFailureCases:
         with patch("qdrant_client.AsyncQdrantClient", return_value=mock_client):
             with pytest.raises(DimensionMismatchError) as exc_info:
                 await store._get_client()
-            assert "dimension 384" in str(exc_info.value)
+            assert f"dimension {mismatched_dim}" in str(exc_info.value)
             assert "does not match" in str(exc_info.value)
 
     async def test_failure_case_4_connection_failure(

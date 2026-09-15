@@ -19,8 +19,11 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -37,11 +40,14 @@ from app.worker import IngestionWorker
 
 
 @pytest_asyncio.fixture
-async def task_manager() -> IngestionTaskManager:
+async def task_manager() -> AsyncGenerator[IngestionTaskManager, None]:
     """Isolated task manager instance with clean queue."""
     mgr = IngestionTaskManager(max_concurrency=2)
     await mgr.clear()
-    return mgr
+    try:
+        yield mgr
+    finally:
+        await mgr.clear()
 
 
 @pytest.mark.asyncio
@@ -153,16 +159,22 @@ class TestAsyncWorkerMandatoryFailureCases:
     async def test_failure_case_1_unavailable_redis(self) -> None:
         """Failure Case 1: Redis unavailable transparently falls back to in-memory queue."""
         mgr = IngestionTaskManager(max_concurrency=2)
-        mgr._redis_available = False  # Simulate Redis down
+        with patch.object(mgr, "_get_redis", return_value=None):
+            req = DocumentIngestRequest(content="Offline content", source="Offline.txt")
+            res = await mgr.enqueue(req, tenant_id="ten-offline")
+            assert res.status == IngestionTaskStatus.QUEUED
 
-        req = DocumentIngestRequest(content="Offline content", source="Offline.txt")
-        res = await mgr.enqueue(req, tenant_id="ten-offline")
-        assert res.status == IngestionTaskStatus.QUEUED
+            # Task remains retrievable in-memory
+            in_mem = await mgr.get_task(res.task_id, tenant_id="ten-offline")
+            assert in_mem is not None
+            assert in_mem.task_id == res.task_id
+            assert in_mem.content == "Offline content"
+            assert in_mem.tenant_id == "ten-offline"
 
-        claimed = await mgr.claim_next_task()
-        assert claimed is not None
-        assert claimed.task_id == res.task_id
-        assert claimed.status == IngestionTaskStatus.PROCESSING
+            claimed = await mgr.claim_next_task()
+            assert claimed is not None
+            assert claimed.task_id == res.task_id
+            assert claimed.status == IngestionTaskStatus.PROCESSING
 
     async def test_failure_case_2_timeout(
         self, task_manager: IngestionTaskManager
@@ -216,7 +228,7 @@ class TestAsyncWorkerMandatoryFailureCases:
         req = DocumentIngestRequest(content="Connection drop test", source="Conn.txt")
         enqueued = await task_manager.enqueue(req, tenant_id="ten-conn")
 
-        # Simulate Redis connection drop on _save_task
+        # Simulate Redis connection drop on _save_task and get_task
         task = await task_manager.get_task(enqueued.task_id)
         assert task is not None
         task.status = IngestionTaskStatus.PROCESSING
@@ -224,14 +236,16 @@ class TestAsyncWorkerMandatoryFailureCases:
         # _save_task suppresses Redis exceptions and updates memory cache
         mock_redis = AsyncMock()
         mock_redis.set.side_effect = ConnectionResetError("Redis dropped during save")
+        mock_redis.get.side_effect = ConnectionResetError("Redis dropped during get")
         with patch.object(task_manager, "_get_redis", return_value=mock_redis):
             # Should not raise
             await task_manager._save_task(task)
 
-        # Verify task is still preserved in memory
-        saved = await task_manager.get_task(enqueued.task_id)
-        assert saved is not None
-        assert saved.status == IngestionTaskStatus.PROCESSING
+            # Verify task is still preserved in memory despite Redis failure
+            saved = await task_manager.get_task(enqueued.task_id)
+            assert saved is not None
+            assert saved.task_id == enqueued.task_id
+            assert saved.status == IngestionTaskStatus.PROCESSING
 
     async def test_failure_case_5_partial_failure_pipeline(
         self, task_manager: IngestionTaskManager

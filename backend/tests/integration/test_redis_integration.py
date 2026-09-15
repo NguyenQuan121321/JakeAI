@@ -272,22 +272,24 @@ class TestRedisIntegrationAuthorities:
     async def test_rag_task_manager_redis_queue(self) -> None:
         """Authority 7: IngestionTaskManager enqueue and claim via Redis."""
         mgr = IngestionTaskManager(max_concurrency=2)
-        tenant_id = f"tenant-rag-{uuid.uuid4().hex[:8]}"
+        await mgr.clear()
+        try:
+            tenant_id = f"tenant-rag-{uuid.uuid4().hex[:8]}"
 
-        req = DocumentIngestRequest(
-            content="Sample document text for ingestion.", source="report.pdf"
-        )
-        resp = await mgr.enqueue(request=req, tenant_id=tenant_id)
-        task_id = resp.task_id
-        assert task_id is not None
+            req = DocumentIngestRequest(
+                content="Sample document text for ingestion.", source="report.pdf"
+            )
+            resp = await mgr.enqueue(request=req, tenant_id=tenant_id)
+            task_id = resp.task_id
+            assert task_id is not None
 
-        task = await mgr.get_task(task_id, tenant_id=tenant_id)
-        assert task is not None
-        assert task.status == IngestionTaskStatus.QUEUED
+            task = await mgr.get_task(task_id, tenant_id=tenant_id)
+            assert task is not None
+            assert task.status == IngestionTaskStatus.QUEUED
 
-        # Claim
-        claimed = await mgr.claim_next_task()
-        if claimed:
+            # Claim
+            claimed = await mgr.claim_next_task()
+            assert claimed is not None
             assert claimed.task_id == task_id
             await mgr.complete_task(
                 task_id=task_id,
@@ -302,6 +304,8 @@ class TestRedisIntegrationAuthorities:
             completed_task = await mgr.get_task(task_id, tenant_id=tenant_id)
             assert completed_task is not None
             assert completed_task.status == IngestionTaskStatus.COMPLETED
+        finally:
+            await mgr.clear()
 
     async def test_token_denylist_revocation(self) -> None:
         """Authority 8: check_token_denylist JTI check."""
