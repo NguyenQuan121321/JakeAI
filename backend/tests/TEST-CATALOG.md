@@ -5,18 +5,18 @@
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 115 tracked in catalog (113 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 113
-- **Total Test Functions / Methods**: 1,171 (collected by Pytest as 1,645 test items)
+- **Total Tracked Test Files**: 120 tracked in catalog (118 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 118
+- **Total Test Functions / Methods**: 1,276 (collected by Pytest as 1,750 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 20 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04: `CAT-114` and `CAT-115`)
+  - `CREATED`: 25 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05: `CAT-116` through `CAT-120`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
-  - `SEC-*`: 5 files (`SEC-001` through `SEC-005`, 36 tests)
+  - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
   - `PERF-*`: 2 files (`PERF-001` through `PERF-002`, 4 tests)
   - `E2E-*`: 2 files (`E2E-001` through `E2E-002`, 30 tests)
   - `AI-*`: 11 files (`AI-001` through `AI-011`, 68 tests)
@@ -153,6 +153,11 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `INT-025` | `CAT-113` | [`tests/integration/test_telemetry_and_context_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_telemetry_and_context_integration.py) | 13 functions (`TestTelemetryAndContextIntegration::test_w3c_traceparent_parsing_generation_and_inheritance` ...) | Observability & Telemetry | Integration | Telemetry and context pipeline integration suite verifying W3C distributed tracing contextvars propagation, correlation ID cross-layer flow, 6-stage ContextEnvelope compilation, PII redaction, cardinality normalization, and 6 mandatory failure modes. | HTTP / ASGI | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | R-AI-04 / R-ARCH-01 | Bruno/00 — Setup & Environment (01-Health Smoke) | **`CREATED`** | New TEST-03 integration test suite for W3C distributed tracing, correlation propagation, context envelope assembly, and telemetry PII masking. |
 | `CONTRACT-006` | `CAT-114` | [`tests/contract/test_api_negative_contracts.py`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py) | 27 functions (32 items: `test_negative_400_bad_request_unsupported_byok_provider` ...) | Contract & Schema | Contract | Comprehensive ASGI HTTP boundary negative contracts verifying all 10 legitimate HTTP status codes (400, 401, 403, 404, 409, 413, 422, 429, 500, 503). | HTTP / ASGI, Mocks / Monkeypatch | API Breaking Change & Schema Drift Gate | PR / Push (main) | `UNIQUE` | R-ARCH-04 / R-FUNC-00 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-04 contract test suite for comprehensive negative HTTP boundary status codes. |
 | `CONTRACT-007` | `CAT-115` | [`tests/contract/test_api_http_workflows.py`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py) | 5 functions (`test_workflow_1_agent_task_lifecycle_and_streaming` ...) | Contract & Schema | Contract | End-to-end ASGI HTTP representative workflows verifying Agent, RAG, BYOK, AI Gateway & FinOps, and Human-in-the-Loop resume bridge. | Redis, Qdrant, HTTP / ASGI, Mocks / Monkeypatch | API Breaking Change & Schema Drift Gate | PR / Push (main) | `UNIQUE` | R-FUNC-00 / R-ARCH-04 | Bruno Collections (01-08) | **`CREATED`** | New TEST-04 contract test suite for 5 critical representative end-to-end ASGI HTTP workflows. |
+| `SEC-006` | `CAT-116` | [`tests/security/test_security_authentication.py`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py) | 30 functions (`test_auth_missing_bearer_token` ...) | Security & Governance | Security | Runtime security regression test suite for JWT authentication, expiration, algorithms, JTI revocation, perimeter secrets, and HMAC. | HTTP / ASGI | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-LOGIC-02 / R-ARCH-04 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated runtime authentication security regression suite. |
+| `SEC-007` | `CAT-117` | [`tests/security/test_security_authorization.py`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py) | 11 functions (`test_authorization_insufficient_permission_for_tool` ...) | Security & Governance | Security | Runtime security regression test suite for RBAC permissions, role isolation, approval hijack/replay/TOCTOU resistance, and unmapped tools. | HTTP / ASGI | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-LOGIC-02 / R-AI-03 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated runtime authorization security regression suite. |
+| `SEC-008` | `CAT-118` | [`tests/security/test_security_tenant_isolation.py`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py) | 10 functions (`test_tenant_isolation_agent_tasks_and_runs` ...) | Security & Governance | Security | Multi-tenant boundary regression suite across Agent tasks/runs, LangGraph threads, exact/semantic caches, RAG indexes, BYOK keys, and uniform 404s. | Redis, Qdrant, HTTP / ASGI | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-AI-04 / R-LOGIC-02 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated runtime tenant isolation regression suite. |
+| `SEC-009` | `CAT-119` | [`tests/security/test_security_llm_tool_safety.py`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py) | 12 functions (40 items: `test_direct_prompt_injection_detection` ...) | Security & Governance | Security | LLM & tool security suite for direct/indirect prompt injection, tool output contamination, dangerous shell blocking, path traversal, schema bounds, secret scrubbing, and error sanitization. | None (Pure In-Memory) | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-AI-02 / R-AI-03 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated runtime LLM & tool security regression suite. |
+| `SEC-010` | `CAT-120` | [`tests/security/test_security_fail_closed.py`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py) | 14 functions (`test_fail_closed_verifier_rejects_mathematical_variance` ...) | Security & Governance | Security | Fail-closed invariants suite for verifier variance, foreign tenant breaches, unapproved tools, missing BYOK credentials, budget overflow, and empty auth headers. | HTTP / ASGI | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-LOGIC-00 / R-LOGIC-02 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated fail-closed invariants regression suite. |
 
 ---
 
@@ -2426,7 +2431,7 @@ Detailed inventory and test function manifest for each subsystem.
 - **Discovered Test Functions (1)**:
   - [`test_rag_quality_gate`](file:///e:/JakeAI/backend/tests/evals/test_rag_regression.py#L1): Run RAG evaluation gate against golden test cases. (7 assertions)
 
-### 3.12 Subsystem: Security & Governance (3 Files)
+### 3.12 Subsystem: Security & Governance (8 Files)
 #### `CAT-010`: [`test_cosign_oidc_signing.py`](file:///e:/JakeAI/backend/tests/test_cosign_oidc_signing.py)
 - **Test File Path**: `backend/tests/test_cosign_oidc_signing.py` (350 lines)
 - **Subsystem**: `Security & Governance`
@@ -2485,6 +2490,131 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_perimeter_auth_accepts_valid_static_secret`](file:///e:/JakeAI/backend/tests/contract/test_internal_mutual_auth.py#L1): Perimeter guard accepts X-Forwarded-By + matching X-Internal-Secret. (1 assertions)
   - [`test_perimeter_auth_hmac_replay_and_drift_window`](file:///e:/JakeAI/backend/tests/contract/test_internal_mutual_auth.py#L1): Perimeter guard enforces +/- 60s window and cryptographic verification. (4 assertions)
   - [`test_internal_resume_perimeter_http_contract`](file:///e:/JakeAI/backend/tests/contract/test_internal_mutual_auth.py#L1): HTTP Contract: /internal/v1/coding/resume enforces perimeter auth, idempotency, and error mapping. (14 assertions)
+
+#### `CAT-116`: [`test_security_authentication.py`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py)
+- **Test File Path**: `backend/tests/security/test_security_authentication.py` (320 lines)
+- **Subsystem**: `Security & Governance`
+- **Test Level**: `Security`
+- **Purpose**: Dedicated runtime security regression test suite for JWT authentication, expiration, algorithm restrictions, wrong issuer/audience, JTI revocation, perimeter secrets, and billing HMAC.
+- **Dependencies / Fixtures**: HTTP / ASGI, Mocks / Monkeypatch
+- **CI Job Execution**: `Dedicated Runtime Security Regression Suite (TEST-05)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-LOGIC-02 / R-ARCH-04`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/security/`)
+- **Disposition Rationale & Evidence**: New TEST-05 dedicated runtime authentication security regression suite.
+- **Discovered Test Functions (30)**:
+  - [`test_auth_missing_bearer_token`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Missing bearer token returns 401.
+  - [`test_auth_malformed_tokens`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Malformed token formats return 401.
+  - [`test_auth_expired_token`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Expired token returns 401.
+  - [`test_auth_wrong_issuer`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Token from foreign issuer returns 401.
+  - [`test_auth_wrong_audience`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Token intended for other audience returns 401.
+  - [`test_auth_invalid_signature`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Token signed by attacker key returns 401.
+  - [`test_auth_algorithm_none_rejected`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Algorithm none tokens are rejected fail-closed.
+  - [`test_auth_revoked_jti_rejected`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Revoked JTI token cannot access endpoints.
+  - [`test_auth_perimeter_secret_enforcement`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): Perimeter internal header requirements enforced.
+  - [`test_auth_payos_billing_webhook_hmac`](file:///e:/JakeAI/backend/tests/security/test_security_authentication.py#L1): PayOS billing webhooks require valid HMAC signatures.
+
+#### `CAT-117`: [`test_security_authorization.py`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py)
+- **Test File Path**: `backend/tests/security/test_security_authorization.py` (300 lines)
+- **Subsystem**: `Security & Governance`
+- **Test Level**: `Security`
+- **Purpose**: Dedicated runtime security regression test suite for RBAC permissions, role isolation, approval hijack/replay/TOCTOU resistance, and unmapped tools.
+- **Dependencies / Fixtures**: HTTP / ASGI, Mocks / Monkeypatch
+- **CI Job Execution**: `Dedicated Runtime Security Regression Suite (TEST-05)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-LOGIC-02 / R-AI-03`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/security/`)
+- **Disposition Rationale & Evidence**: New TEST-05 dedicated runtime authorization security regression suite.
+- **Discovered Test Functions (11)**:
+  - [`test_authorization_insufficient_permission_for_tool`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py#L1): Caller lacking tool permission is rejected with 403.
+  - [`test_authorization_role_mismatch`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py#L1): Caller with mismatched role cannot invoke restricted operations.
+  - [`test_authorization_unmapped_tool_fails_closed`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py#L1): Unmapped tool invocations fail closed.
+  - [`test_authorization_approval_cross_run_hijack`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py#L1): Approvals bound to Run A cannot be applied to Run B.
+  - [`test_authorization_approval_replay_attack`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py#L1): Resolved approvals cannot be replayed.
+  - [`test_authorization_approval_toctou_tampering`](file:///e:/JakeAI/backend/tests/security/test_security_authorization.py#L1): Argument tampering between approval and execution is rejected.
+
+#### `CAT-118`: [`test_security_tenant_isolation.py`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py)
+- **Test File Path**: `backend/tests/security/test_security_tenant_isolation.py` (460 lines)
+- **Subsystem**: `Security & Governance`
+- **Test Level**: `Security`
+- **Purpose**: Multi-tenant boundary regression suite across Agent tasks/runs, LangGraph threads, exact/semantic caches, RAG indexes, BYOK keys, and uniform 404s.
+- **Dependencies / Fixtures**: Redis, Qdrant, HTTP / ASGI, Mocks / Monkeypatch
+- **CI Job Execution**: `Dedicated Runtime Security Regression Suite (TEST-05)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-AI-04 / R-LOGIC-02`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/security/`)
+- **Disposition Rationale & Evidence**: New TEST-05 dedicated runtime tenant isolation regression suite.
+- **Discovered Test Functions (10)**:
+  - [`test_tenant_isolation_agent_tasks_and_runs`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): Foreign tenant cannot read, run, or cancel tasks.
+  - [`test_tenant_isolation_langgraph_namespaced_threads`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): Workflow thread checkpoints strictly partitioned by tenant ID.
+  - [`test_tenant_isolation_exact_and_semantic_cache`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): Tenant A cache responses never returned to Tenant B.
+  - [`test_tenant_isolation_bm25_sparse_search`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): BM25 inverted index partitioned strictly per tenant.
+  - [`test_tenant_isolation_context_envelope_builder`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): ContextEnvelopeBuilder drops foreign chunks and memory facts.
+  - [`test_tenant_isolation_byok_keys_crud_and_masking`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): Foreign tenant cannot read, list, rotate, or delete BYOK keys.
+  - [`test_tenant_isolation_resume_bridge_fails_closed`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): ResumeBridgeManager rejects cross-tenant resume calls with PermissionError.
+  - [`test_tenant_isolation_uniform_404_timing_and_enumeration`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py#L1): Uniform 404 envelopes prevent resource existence enumeration.
+
+#### `CAT-119`: [`test_security_llm_tool_safety.py`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py)
+- **Test File Path**: `backend/tests/security/test_security_llm_tool_safety.py` (520 lines)
+- **Subsystem**: `Security & Governance`
+- **Test Level**: `Security`
+- **Purpose**: LLM & tool security suite for direct/indirect prompt injection, tool output contamination, dangerous shell blocking, path traversal, schema bounds, secret scrubbing, and error sanitization.
+- **Dependencies / Fixtures**: None (Pure In-Memory)
+- **CI Job Execution**: `Dedicated Runtime Security Regression Suite (TEST-05)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-AI-02 / R-AI-03`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/security/`)
+- **Disposition Rationale & Evidence**: New TEST-05 dedicated runtime LLM & tool security regression suite.
+- **Discovered Test Functions (12 / 40 items)**:
+  - [`test_direct_prompt_injection_detection`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Direct prompt injections and jailbreaks intercepted.
+  - [`test_obfuscated_base64_prompt_injection`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Base64 encoded payload inspection and rejection.
+  - [`test_cross_lingual_vietnamese_prompt_injection`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Multi-lingual prompt injection vectors intercepted.
+  - [`test_indirect_prompt_injection_in_grounding_claim`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Document-embedded injection claims marked UNSUPPORTED.
+  - [`test_tool_output_injection_isolation`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): CanonicalVerifier isolates contaminated tool outputs from context.
+  - [`test_tool_policy_blocks_dangerous_commands`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): ToolPolicyEngine blocks destructive/dangerous shell commands.
+  - [`test_tool_policy_blocks_path_traversal_and_sensitive_files`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Directory traversal and sensitive file access blocked.
+  - [`test_tool_policy_blocks_null_byte_injection`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Null-byte injection payloads rejected fail-closed.
+  - [`test_tool_registry_schema_bounds_validation`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Parameter types, required fields, and bounds enforced.
+  - [`test_output_scrubber_redacts_credentials_and_system_prompts`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Output scrubber redacts system prompts, JWTs, and API keys.
+  - [`test_normalize_provider_error_categories`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Provider error normalization into typed hierarchies.
+  - [`test_provider_error_handler_zero_credential_leakage`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py#L1): Global exception handler outputs safe errors with zero credential leak.
+
+#### `CAT-120`: [`test_security_fail_closed.py`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py)
+- **Test File Path**: `backend/tests/security/test_security_fail_closed.py` (430 lines)
+- **Subsystem**: `Security & Governance`
+- **Test Level**: `Security`
+- **Purpose**: Fail-closed invariants suite for verifier variance, foreign tenant breaches, unapproved tools, missing BYOK credentials, budget overflow, and empty auth headers.
+- **Dependencies / Fixtures**: HTTP / ASGI, Mocks / Monkeypatch
+- **CI Job Execution**: `Dedicated Runtime Security Regression Suite (TEST-05)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-LOGIC-00 / R-LOGIC-02`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/security/`)
+- **Disposition Rationale & Evidence**: New TEST-05 dedicated fail-closed invariants regression suite.
+- **Discovered Test Functions (14)**:
+  - [`test_fail_closed_verifier_rejects_mathematical_variance`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Verifier rejects execution result on financial calculation variance.
+  - [`test_fail_closed_verifier_rejects_foreign_tenant_breach`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Verifier terminates on cross-tenant tool call or chunk breach.
+  - [`test_fail_closed_verifier_rejects_hallucination_without_evidence`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Verifier rejects claims when grounding evidence is absent.
+  - [`test_fail_closed_context_envelope_drops_foreign_tenant_data`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Context envelope purges all foreign tenant data.
+  - [`test_fail_closed_resume_bridge_rejects_cross_tenant_state`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Cross-tenant resume rejected with PermissionError.
+  - [`test_fail_closed_agent_task_manager_rejects_cross_tenant`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Task inspection across tenant boundaries rejected.
+  - [`test_fail_closed_unmapped_permission_rejects_execution`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Unmapped permissions fail closed.
+  - [`test_fail_closed_empty_context_rejects_privileged_tool`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Empty context rejected for privileged tools.
+  - [`test_fail_closed_dangerous_tool_demands_human_approval`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Dangerous tools require explicit human approval.
+  - [`test_fail_closed_missing_byok_blocks_inference_without_mocking`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Missing BYOK keys block inference without mocking.
+  - [`test_fail_closed_context_envelope_raises_budget_exceeded`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Context envelope budget overflow raises error fail-closed.
+  - [`test_fail_closed_bpe_tokenizer_enforce_budget_raises`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Tokenizer budget exceed raises error fail-closed.
+  - [`test_fail_closed_tool_registry_rejects_unknown_tool`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Unregistered tool invocations fail closed.
+  - [`test_fail_closed_http_endpoints_reject_empty_authorization`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py#L1): Endpoints reject empty or corrupt auth headers.
 
 ### 3.13 Subsystem: Token Optimization & Caching (5 Files)
 #### `CAT-067`: [`test_semantic_cache.py`](file:///e:/JakeAI/backend/tests/test_semantic_cache.py)
