@@ -140,3 +140,35 @@ tests/evals/test_rag_regression.py .......                               [100%]
 
 ======================= 131 passed, 1 warning in 12.86s =======================
 ```
+
+---
+
+## 7. Canonical Metric Normalization Regression Resolution
+
+### 7.1 Overview
+- **TEST**: `test_scenario_03_metric_format_normalization` (`backend/tests/unit/test_r_ai_01_rag_grounding.py`)
+- **EXPECTED**: `("USD", 100000000.0)` in extracted canonical metrics for `$100,000,000`
+- **ACTUAL BEFORE**: `("", 100000000.0)` — missing currency code `"USD"`
+
+### 7.2 Root Cause
+In `backend/app/rag/grounding.py`, `METRIC_REGEX` previously made the magnitude suffix (`billion|million|trillion|thousand|tỷ|triệu|k|m|b`) mandatory when the leading currency symbol was made optional. As a result, fully-expanded monetary figures without magnitude suffixes (such as `$100,000,000` or `€50,000`) failed to match Branch 1 and fell through to Branch 3 (`\b\d+(?:,\d{3})*(?:\.\d+)?\b`). Because Branch 3 starts at the word boundary `\b`, the leading currency symbol (`$`, `€`, etc.) was stripped from the match. When `normalize_metric("100,000,000")` was called without the currency symbol, it returned `("", 100000000.0)`, losing the `"USD"` currency identity.
+
+### 7.3 Code Fix
+In `backend/app/rag/grounding.py`, updated `METRIC_REGEX` to structure branches cleanly:
+1. **Branch 1 (Prefix Currency)**: `[\$€£¥₫]\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))?\b` — requires currency symbol prefix, magnitude suffix is optional.
+2. **Branch 2 (Trailing Currency/Unit)**: `\b\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%|percent)` — captures numbers with optional magnitude and trailing unit.
+3. **Branch 3 (Magnitude Only)**: `\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b)\b` — captures non-monetary numbers with magnitude (`42.5 million`, `42.5M`).
+4. **Branch 4 (Plain Numbers)**: `\b\d+(?:,\d{3})*(?:\.\d+)?\b` — captures raw numbers without currency (`2026`).
+
+### 7.4 Regression Test & Results
+- Enhanced `test_eval_hallucination_07_deterministic_metric_canonicalization` in [`tests/evals/test_eval_hallucination_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py) to explicitly assert currency retention for `$100M`, `$100 million`, `$100,000,000` (`("USD", 100000000.0)`), and distinguish non-monetary metrics (`("", 42500000.0)`, `("", 2026.0)`).
+- **Test Results**:
+  - `tests/unit/test_r_ai_01_rag_grounding.py`: **12 passed**.
+  - `tests/evals/test_eval_hallucination_automation.py`: **14 passed**.
+  - TEST-06 Dedicated Suite (63 tests): **63 passed in 0.12s**.
+  - Full Evals Suite: **131 passed**.
+  - Full Security Suite: **141 passed**.
+  - MyPy (`mypy --config-file mypy.ini app/`): **Success: no issues found in 171 source files**.
+  - Ruff (`ruff check app/ tests/`): **All checks passed**.
+  - Bandit (`bandit -c pyproject.toml -r app/`): **No issues identified**.
+

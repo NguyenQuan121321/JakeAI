@@ -24,6 +24,7 @@ from app.evals.hallucination_evaluator import (
 )
 from app.rag.grounding import (
     ANTONYM_PAIRS,
+    extract_canonical_metrics,
     normalize_metric,
 )
 
@@ -198,24 +199,40 @@ def test_eval_hallucination_07_deterministic_metric_canonicalization() -> None:
     b4 = normalize_metric("14.2B USD")
 
     assert b1 is not None and b2 is not None and b3 is not None and b4 is not None
-    assert b1[1] == 14200000000.0
-    assert b2[1] == 14200000000.0
-    assert b3[1] == 14200000000.0
-    assert b4[1] == 14200000000.0
+    assert b1 == ("USD", 14200000000.0)
+    assert b2 == ("USD", 14200000000.0)
+    assert b3 == ("USD", 14200000000.0)
+    assert b4 == ("USD", 14200000000.0)
 
     # Test million representations
     m1 = normalize_metric("42.5 million")
     m2 = normalize_metric("42.5M")
     assert m1 is not None and m2 is not None
-    assert m1[1] == 42500000.0
-    assert m2[1] == 42500000.0
+    assert m1 == ("", 42500000.0)
+    assert m2 == ("", 42500000.0)
 
     # Test percentages
     p1 = normalize_metric("6.2%")
     p2 = normalize_metric("6.2 percent")
     assert p1 is not None and p2 is not None
-    assert p1[1] == 6.2
-    assert p2[1] == 6.2
+    assert p1 == ("%", 6.2)
+    assert p2 == ("%", 6.2)
+
+    # Test extract_canonical_metrics retains currency and distinguishes non-monetary metrics
+    c1 = extract_canonical_metrics("Revenue was $100M in 2026.")
+    c2 = extract_canonical_metrics("Revenue was $100 million in 2026.")
+    c3 = extract_canonical_metrics("Revenue was $100,000,000 in 2026.")
+    assert ("USD", 100000000.0) in c1
+    assert ("USD", 100000000.0) in c2
+    assert ("USD", 100000000.0) in c3
+    assert ("", 2026.0) in c1
+    assert c1 == c2 == c3
+
+    # Non-monetary metric preserves empty unit
+    c_plain = extract_canonical_metrics("In 2025, volume reached 42.5M units.")
+    assert ("", 42500000.0) in c_plain
+    assert ("", 2025.0) in c_plain
+    assert not any(unit == "USD" for unit, _ in c_plain)
 
 
 # =========================================================================

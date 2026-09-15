@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 # Numerical, currency, percentage, and metric tokens
 METRIC_REGEX = re.compile(
-    r"[\$€£¥₫]?\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))\b"
-    r"|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%)"
+    r"[\$€£¥₫]\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))?\b"
+    r"|\b\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%|percent)"
+    r"|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b)\b"
     r"|\b\d+(?:,\d{3})*(?:\.\d+)?\b",
     re.IGNORECASE,
 )
