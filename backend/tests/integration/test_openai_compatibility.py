@@ -1,6 +1,7 @@
 """Tests for OpenAI-compatible API routes (/v1/models and /v1/chat/completions)."""
 
 import time
+import uuid
 from typing import Any
 
 import jwt
@@ -78,7 +79,14 @@ def test_chat_completions_exact_caching(monkeypatch) -> None:
     """Repeated prompt to /v1/chat/completions hits Tier 1 cache with 0 prompt tokens."""
     from unittest.mock import AsyncMock
 
+    from app.core.circuit_breaker import CircuitState
     from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
+    from app.services.ai_gateway import get_gateway_proxy
+
+    # Ensure circuit breaker is closed and healthy despite prior test failures
+    proxy = get_gateway_proxy()
+    proxy.breaker.state = CircuitState.CLOSED
+    proxy.breaker.failure_count = 0
 
     # R-LOGIC-04: outage fallbacks are no longer cached; inject a genuine
     # upstream response so the cache population/hit lifecycle is exercised.
@@ -95,8 +103,9 @@ def test_chat_completions_exact_caching(monkeypatch) -> None:
         AsyncMock(side_effect=genuine_upstream),
     )
 
-    headers = get_auth_headers(tenant_id="tenant-root-cache")
-    unique_prompt = f"What is our EBIT ratio for FY-{int(time.time())}?"
+    tenant_id = f"tenant-root-cache-{uuid.uuid4().hex[:6]}"
+    headers = get_auth_headers(tenant_id=tenant_id)
+    unique_prompt = f"What is our EBIT ratio for FY-{uuid.uuid4().hex}?"
     payload = {
         "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": unique_prompt}],
