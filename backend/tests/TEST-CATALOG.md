@@ -5,17 +5,17 @@
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 113 tracked in catalog (111 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 111
-- **Total Test Functions / Methods**: 1,128 (collected by Pytest as 1,548 test items)
+- **Total Tracked Test Files**: 115 tracked in catalog (113 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 113
+- **Total Test Functions / Methods**: 1,171 (collected by Pytest as 1,645 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 18 files (9 unit test suites under `tests/unit/` in TEST-02 + 9 integration test suites under `tests/integration/` in TEST-03)
+  - `CREATED`: 20 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04: `CAT-114` and `CAT-115`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
-  - `CONTRACT-*`: 5 files (`CONTRACT-001` through `CONTRACT-005`, 67 tests)
+  - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 5 files (`SEC-001` through `SEC-005`, 36 tests)
   - `PERF-*`: 2 files (`PERF-001` through `PERF-002`, 4 tests)
   - `E2E-*`: 2 files (`E2E-001` through `E2E-002`, 30 tests)
@@ -24,10 +24,10 @@
   - `UNIT-*`: 61 files (`UNIT-001` through `UNIT-061`, 1,011 tests)
 - **Duplicate / Overlap Status Breakdown**:
   - `COMPLEMENTARY`: 75 files
-  - `UNIQUE`: 27 files
+  - `UNIQUE`: 29 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,546 passed, 2 skipped in offline mode, 0 failed)
+- **Test Suite Pass Rate**: **100%** (1,643 passed, 2 skipped in offline mode, 0 failed)
 - **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
@@ -111,7 +111,7 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `UNIT-036` | `CAT-071` | [`tests/unit/test_unified_quota_authority.py`](file:///e:/JakeAI/backend/tests/unit/test_unified_quota_authority.py) | 3 functions (`test_quota_manager_delegates_to_finops_budget_manager` ...) | FinOps & Billing | Unit | Unit tests for TASK COST-05: Unified Quota & Budget Authority. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `PARTIAL OVERLAP` | NONE | NONE | **`MOVED`** | Moved to unit/. QuotaManager delegation to FinOpsBudgetManager. |
 | `UNIT-037` | `CAT-072` | [`tests/unit/test_verifier_invariants.py`](file:///e:/JakeAI/backend/tests/unit/test_verifier_invariants.py) | 5 functions (`test_verifier_tenant_mismatch_at_revision_0` ...) | RAG Pipeline | Unit | Regression tests for Verifier invariant guarantees (TASK ORC-01). | Mocks / Monkeypatch | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `PARTIAL OVERLAP` | R-ARCH-00 / R-LOGIC-00 | NONE | **`MOVED`** | Moved to unit/. Verifier_node revision limits and tenant rejection invariants. |
 | `UNIT-038` | `CAT-073` | [`tests/unit/test_workload_classification_routing.py`](file:///e:/JakeAI/backend/tests/unit/test_workload_classification_routing.py) | 12 functions (`test_workload_classifier_simple_chat` ...) | Core / Platform | Unit | Comprehensive test suite for COST-09 (Workload Classification), COST-10 (Intelligent Model Routing), and COST-13 (Optimization Telemetry). | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | NONE | NONE | **`MOVED`** | Moved to unit/. Workload classification and intelligent model routing unit tests. |
-| `CONTRACT-001` | `CAT-074` | [`tests/contract/test_api_contract.py`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py) | 6 functions (`test_openapi_schema_metadata` ...) | Contract & Schema | Contract | API Schema Drift and Contract Test Suite. | None (Pure In-Memory) | API Breaking Change & Schema Drift Gate | PR / Push (main) | `UNIQUE` | R-ARCH-04 | NONE | **`PRESERVED`** | Preserved in contract/. OpenAPI schema drift and route metadata contract gate. |
+| `CONTRACT-001` | `CAT-074` | [`tests/contract/test_api_contract.py`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py) | 16 functions (66 items: `test_exact_51_public_operations_accounted`, `test_zero_schema_drift_runtime_vs_committed` ...) | Contract & Schema | Contract | Authoritative API Contract and Zero Schema Drift verification suite auditing all 51 operations across 47 paths against OpenAPI 3.1.0 specification. | None (Pure In-Memory) | API Breaking Change & Schema Drift Gate | PR / Push (main) | `UNIQUE` | R-ARCH-04 / R-FUNC-00 | Bruno Collections (00-08) | **`EXPANDED`** | Expanded in contract/. Exhaustive 51-operation contract, bidirectional zero-drift diff, request body, parameter, auth, and breaking change prevention. |
 | `CONTRACT-002` | `CAT-075` | [`tests/contract/test_internal_mutual_auth.py`](file:///e:/JakeAI/backend/tests/contract/test_internal_mutual_auth.py) | 4 functions (`test_perimeter_auth_rejects_missing_or_spoofed_headers` ...) | Security & Governance | Contract | Internal Mutual Auth Contract Test Suite (Invariant 4). | None (Pure In-Memory) | Internal Mutual Auth Contract Gate | PR / Push (main) | `UNIQUE` | R-ARCH-04 | Bruno/08 — Security & Negative (01-11) | **`PRESERVED`** | Preserved in contract/. Perimeter auth and internal mutual auth gate. |
 | `AI-001` | `CAT-076` | [`tests/evals/test_baseline_and_regression_gate.py`](file:///e:/JakeAI/backend/tests/evals/test_baseline_and_regression_gate.py) | 4 functions (`test_baseline_store_load_and_save` ...) | AI Evaluation & Benchmarking | AI Eval / Benchmark | Unit tests for Baseline Store and Live Benchmark Regression Gate (TASK OPS-15 & OPS-16). | None (Pure In-Memory) | LLMOps Safety & Canary Data Leakage Gate | PR / Push (main) | `UNIQUE` | NONE | NONE | **`PRESERVED`** | Preserved in evals/. Baseline store and regression gate tests. |
 | `AI-002` | `CAT-077` | [`tests/evals/test_canary_leakage.py`](file:///e:/JakeAI/backend/tests/evals/test_canary_leakage.py) | 5 functions (`test_rag_tenant_isolation_canary_leakage` ...) | RAG Pipeline | AI Eval / Benchmark | Comprehensive Canary Data Leakage and Secret Sanitization Tests (TASK OPS-13 & OPS-14). | None (Pure In-Memory) | LLMOps Safety & Canary Data Leakage Gate | PR / Push (main) | `UNIQUE` | NONE | NONE | **`PRESERVED`** | Preserved in evals/. Canary data leakage and secret sanitization tests. |
@@ -151,6 +151,8 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `INT-023` | `CAT-111` | [`tests/integration/test_async_worker_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_async_worker_integration.py) | 9 functions (`TestAsyncWorkerIntegration::test_document_ingestion_task_enqueue_and_execution` ...) | RAG Pipeline | Integration | Asynchronous worker integration suite verifying IngestionTaskManager task queuing, bounded worker pool execution, priority scheduling, progress tracking, and 6 mandatory failure modes. | Redis | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | R-FUNC-02 / R-LOGIC-00 | NONE | **`CREATED`** | New TEST-03 integration test suite for async ingestion worker, priority scheduling, and worker fault tolerance. |
 | `INT-024` | `CAT-112` | [`tests/integration/test_finops_governance_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_finops_governance_integration.py) | 10 functions (`TestFinOpsGovernanceIntegration::test_dual_budget_governance_preflight_and_reservation` ...) | FinOps & Billing | Integration | FinOps cost truth and budget governance suite verifying pre-flight reservation, soft warning (80%) and hard cap (100%) enforcement, PayOS VietQR webhook verification, ledger sanitization, billing reconciliation, and 6 mandatory failure modes. | Redis | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | R-LOGIC-03 | Bruno/07 — FinOps & Billing (01-06) | **`CREATED`** | New TEST-03 integration test suite for FinOps quota reservation, PayOS HMAC billing, ledger sanitization, and reconciliation. |
 | `INT-025` | `CAT-113` | [`tests/integration/test_telemetry_and_context_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_telemetry_and_context_integration.py) | 13 functions (`TestTelemetryAndContextIntegration::test_w3c_traceparent_parsing_generation_and_inheritance` ...) | Observability & Telemetry | Integration | Telemetry and context pipeline integration suite verifying W3C distributed tracing contextvars propagation, correlation ID cross-layer flow, 6-stage ContextEnvelope compilation, PII redaction, cardinality normalization, and 6 mandatory failure modes. | HTTP / ASGI | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | R-AI-04 / R-ARCH-01 | Bruno/00 — Setup & Environment (01-Health Smoke) | **`CREATED`** | New TEST-03 integration test suite for W3C distributed tracing, correlation propagation, context envelope assembly, and telemetry PII masking. |
+| `CONTRACT-006` | `CAT-114` | [`tests/contract/test_api_negative_contracts.py`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py) | 27 functions (32 items: `test_negative_400_bad_request_unsupported_byok_provider` ...) | Contract & Schema | Contract | Comprehensive ASGI HTTP boundary negative contracts verifying all 10 legitimate HTTP status codes (400, 401, 403, 404, 409, 413, 422, 429, 500, 503). | HTTP / ASGI, Mocks / Monkeypatch | API Breaking Change & Schema Drift Gate | PR / Push (main) | `UNIQUE` | R-ARCH-04 / R-FUNC-00 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-04 contract test suite for comprehensive negative HTTP boundary status codes. |
+| `CONTRACT-007` | `CAT-115` | [`tests/contract/test_api_http_workflows.py`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py) | 5 functions (`test_workflow_1_agent_task_lifecycle_and_streaming` ...) | Contract & Schema | Contract | End-to-end ASGI HTTP representative workflows verifying Agent, RAG, BYOK, AI Gateway & FinOps, and Human-in-the-Loop resume bridge. | Redis, Qdrant, HTTP / ASGI, Mocks / Monkeypatch | API Breaking Change & Schema Drift Gate | PR / Push (main) | `UNIQUE` | R-FUNC-00 / R-ARCH-04 | Bruno Collections (01-08) | **`CREATED`** | New TEST-04 contract test suite for 5 critical representative end-to-end ASGI HTTP workflows. |
 
 ---
 
@@ -599,25 +601,97 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_tool_selection_default_risk_level`](file:///e:/JakeAI/backend/tests/test_r_arch_04_contract_consistency.py#L1): ToolSelection.risk_level must default to 'read_only' within ToolRiskLevel. (2 assertions)
 
 #### `CAT-074`: [`test_api_contract.py`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py)
-- **Test File Path**: `backend/tests/contract/test_api_contract.py` (199 lines)
+- **Test File Path**: `backend/tests/contract/test_api_contract.py` (320 lines)
 - **Subsystem**: `Contract & Schema`
 - **Test Level**: `Contract`
-- **Purpose**: API Schema Drift and Contract Test Suite.
+- **Purpose**: Authoritative API Contract and Zero Schema Drift verification suite auditing all 51 public operations across 47 paths against OpenAPI 3.1.0 specification.
 - **Dependencies / Fixtures**: None (Pure In-Memory)
 - **CI Job Execution**: `API Breaking Change & Schema Drift Gate`
 - **Recommended Run Frequency**: `PR / Push (main)`
 - **Duplicate / Overlap Classification**: `UNIQUE`
-- **RIGHT Test Suite Coverage**: `R-ARCH-04`
-- **Bruno Collection Coverage**: `NONE`
-- **Architectural Disposition**: **`MOVE`** (Target Destination: `backend/tests/contract/`)
-- **Disposition Rationale & Evidence**: API/Internal contract test. Move to contract/.
-- **Discovered Test Functions (6)**:
+- **RIGHT Test Suite Coverage**: `R-ARCH-04 / R-FUNC-00`
+- **Bruno Collection Coverage**: `Bruno Collections (00-08)`
+- **Architectural Disposition**: **`EXPANDED`** (Target Destination: `backend/tests/contract/`)
+- **Disposition Rationale & Evidence**: Authoritative API contract gate expanded to systematically verify all 51 operations, parameters, request bodies, response models, auth rules, streaming headers, and breaking changes.
+- **Discovered Test Functions (16)**:
   - [`test_openapi_schema_metadata`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Validate OpenAPI document structure and info metadata. (4 assertions)
-  - [`test_critical_endpoints_exist`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Ensure all core architectural endpoints are registered and exposed. (2 assertions)
+  - [`test_zero_schema_drift_runtime_vs_committed`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Strict bidirectional zero-drift equality check between app.openapi() and openapi.json. (2 assertions)
+  - [`test_security_schemes_registered`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify FinnApiGoAuth Bearer security scheme registration in components. (2 assertions)
+  - [`test_exact_51_public_operations_accounted`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify total public operations count matches exactly 51 across all registered route paths. (2 assertions)
+  - [`test_individual_operation_contract`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Parameterized verification of method, path, status codes, and operationId for all 51 operations. (51 parameterized tests)
+  - [`test_operation_path_parameter_bindings`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify all path template placeholders ({run_id}, {task_id}, {provider}) match documented parameters. (3 assertions)
+  - [`test_operation_authentication_contracts`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify strict partition between protected (41 ops) and public/perimeter/webhook endpoints (10 ops). (3 assertions)
+  - [`test_operation_request_body_contracts`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify JSON and multipart/form-data request bodies, required fields, and schema bindings. (3 assertions)
+  - [`test_operation_response_schema_contracts`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify 200/201/202 responses define valid schema $ref or content representations. (2 assertions)
+  - [`test_backward_compatibility_no_deleted_endpoints`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Detect breaking changes: no previously published endpoint path may be deleted. (2 assertions)
+  - [`test_backward_compatibility_no_removed_success_responses`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Detect breaking changes: no success HTTP status code may be removed from any operation. (2 assertions)
+  - [`test_backward_compatibility_no_new_required_request_fields`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Detect breaking changes: existing request schemas cannot introduce new required fields without deprecation. (2 assertions)
   - [`test_chat_sse_contract`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify Server-Sent Events contract for /api/v1/chat/stream. (5 assertions)
+  - [`test_agent_run_events_sse_contract`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify Server-Sent Events contract for /api/v1/agent/runs/{run_id}/events. (5 assertions)
   - [`test_rag_ingest_contract`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify document ingestion contract for /api/v1/rag/ingest. (2 assertions)
-  - [`test_backward_compatibility_no_deleted_endpoints`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Detect breaking changes: no previously published endpoint may be deleted. (2 assertions)
   - [`test_metrics_snapshot_contract`](file:///e:/JakeAI/backend/tests/contract/test_api_contract.py#L1): Verify telemetry metrics endpoint contract and MetricsSnapshot schema (COST-13). (13 assertions)
+
+#### `CAT-114`: [`test_api_negative_contracts.py`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py)
+- **Test File Path**: `backend/tests/contract/test_api_negative_contracts.py` (310 lines)
+- **Subsystem**: `Contract & Schema`
+- **Test Level**: `Contract`
+- **Purpose**: Negative contracts automation for 10 legitimate HTTP status codes (400, 401, 403, 404, 409, 413, 422, 429, 500, 503) at the ASGI application boundary.
+- **Dependencies / Fixtures**: HTTP / ASGI, Mocks / Monkeypatch
+- **CI Job Execution**: `API Breaking Change & Schema Drift Gate`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-ARCH-04 / R-FUNC-00`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/contract/`)
+- **Disposition Rationale & Evidence**: Canonical negative contract test suite. Verifies all 10 supported error status codes at the ASGI boundary with exact error schemas without invented codes.
+- **Discovered Test Functions (27)**:
+  - [`test_negative_400_bad_request_unsupported_byok_provider`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 400 Bad Request on invalid BYOK provider. (3 assertions)
+  - [`test_negative_400_bad_request_billing_webhook_invalid_hmac`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 400 Bad Request on billing webhook invalid HMAC signature. (3 assertions)
+  - [`test_negative_400_bad_request_provider_context_limit_mapping`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 400 Bad Request when provider context limit is exceeded. (3 assertions)
+  - [`test_negative_401_unauthorized_missing_bearer_token`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 401 Unauthorized when Bearer token is missing. (3 assertions)
+  - [`test_negative_401_unauthorized_malformed_token`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 401 Unauthorized on garbage token strings. (2 assertions)
+  - [`test_negative_401_unauthorized_expired_token`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 401 Unauthorized on expired JWT tokens. (2 assertions)
+  - [`test_negative_401_unauthorized_invalid_signature`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 401 Unauthorized on forged JWT signatures. (2 assertions)
+  - [`test_negative_401_unauthorized_wrong_token_type`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 401 Unauthorized on non-access token types. (2 assertions)
+  - [`test_negative_401_unauthorized_provider_auth_error_mapping`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 401 Unauthorized on upstream provider authentication failures. (2 assertions)
+  - [`test_negative_403_forbidden_missing_internal_perimeter_secret`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 403 Forbidden when internal perimeter secret is missing. (2 assertions)
+  - [`test_negative_403_forbidden_invalid_internal_perimeter_secret`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 403 Forbidden when internal perimeter secret is invalid. (2 assertions)
+  - [`test_negative_403_forbidden_cross_tenant_tool_resumption`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 403 Forbidden on cross-tenant tool resumption attempts. (3 assertions)
+  - [`test_negative_403_forbidden_cross_tenant_agent_task_access`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 403 Forbidden on cross-tenant agent task inspection. (2 assertions)
+  - [`test_negative_404_not_found_nonexistent_agent_task`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 404 Not Found on nonexistent agent task ID. (2 assertions)
+  - [`test_negative_404_not_found_nonexistent_agent_run`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 404 Not Found on nonexistent agent run ID. (2 assertions)
+  - [`test_negative_404_not_found_nonexistent_rag_task`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 404 Not Found on nonexistent RAG ingestion task ID. (2 assertions)
+  - [`test_negative_404_not_found_nonexistent_byok_provider_key`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 404 Not Found on nonexistent BYOK provider key. (2 assertions)
+  - [`test_negative_409_conflict_duplicate_tool_result_submission`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 409 Conflict when submitting tool result for already resumed execution. (3 assertions)
+  - [`test_negative_409_conflict_agent_approval_already_resolved`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 409 Conflict when submitting decision for already finalized approval. (2 assertions)
+  - [`test_negative_413_payload_too_large_exceeding_body_limit`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 413 Payload Too Large when request body exceeds MAX_REQUEST_BODY_BYTES. (2 assertions)
+  - [`test_negative_422_missing_required_fields`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 422 Unprocessable Entity when required JSON schema fields are omitted. (3 assertions)
+  - [`test_negative_422_out_of_bounds_parameters`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 422 Unprocessable Entity when parameters violate validation constraints. (2 assertions)
+  - [`test_negative_422_query_parameter_type_mismatch`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 422 Unprocessable Entity when query parameter data type is invalid. (2 assertions)
+  - [`test_negative_429_too_many_requests_tenant_quota_exceeded`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 429 Too Many Requests when tenant token/dollar quota is exhausted. (3 assertions)
+  - [`test_negative_429_too_many_requests_provider_rate_limit_with_retry_after`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 429 Too Many Requests with Retry-After header propagation. (3 assertions)
+  - [`test_negative_500_internal_server_error_preserves_correlation_id`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 500 Internal Server Error returns standard envelope and preserves correlation ID without leaking stack trace. (4 assertions)
+  - [`test_negative_503_service_unavailable_provider_outage`](file:///e:/JakeAI/backend/tests/contract/test_api_negative_contracts.py#L1): 503 Service Unavailable when all upstream providers in fallback chain fail. (3 assertions)
+
+#### `CAT-115`: [`test_api_http_workflows.py`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py)
+- **Test File Path**: `backend/tests/contract/test_api_http_workflows.py` (475 lines)
+- **Subsystem**: `Contract & Schema`
+- **Test Level**: `Contract`
+- **Purpose**: Real ASGI HTTP boundary verification of 5 critical representative workflows across JakeAI capabilities.
+- **Dependencies / Fixtures**: Redis, Qdrant, HTTP / ASGI, Mocks / Monkeypatch
+- **CI Job Execution**: `API Breaking Change & Schema Drift Gate`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-FUNC-00 / R-ARCH-04`
+- **Bruno Collection Coverage**: `Bruno Collections (01-08)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/contract/`)
+- **Disposition Rationale & Evidence**: End-to-end multi-request HTTP workflow contracts exercising full ASGI request/response lifecycles, tenant isolation, and async streams.
+- **Discovered Test Functions (5)**:
+  - [`test_workflow_1_agent_task_lifecycle_and_streaming`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py#L1): Workflow 1: Create Task -> Inspect Task -> Trigger Execution Run -> Stream SSE Events -> Get Completed Run -> Retrieve Artifacts. (14 assertions)
+  - [`test_workflow_2_rag_ingestion_hybrid_retrieval_and_query`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py#L1): Workflow 2: Synchronous Document Ingest -> Asynchronous Document Ingest -> Task Status Polling -> RAG Search -> Grounded Query. (12 assertions)
+  - [`test_workflow_3_byok_credential_lifecycle`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py#L1): Workflow 3: Probe Candidate Key -> Store AES-256 Key -> List Configured Keys -> Rotate Key -> Revoke Key -> Delete Key. (18 assertions)
+  - [`test_workflow_4_gateway_inference_and_finops_accounting`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py#L1): Workflow 4: Model Discovery -> Query Quotas -> Synchronous Chat Completion -> Streaming Chat Completion -> Update Quota -> Set Budget -> FinOps Summary. (14 assertions)
+  - [`test_workflow_5_human_in_the_loop_and_tool_resume_bridge`](file:///e:/JakeAI/backend/tests/contract/test_api_http_workflows.py#L1): Workflow 5: Create Approval Request -> List Approvals -> Submit Decision -> Checkpoint Creation -> Tool Result Submission -> Internal Resume Bridge. (14 assertions)
 
 #### `CAT-095`: [`test_structured_conversation_contract.py`](file:///e:/JakeAI/backend/tests/unit/test_structured_conversation_contract.py)
 - **Test File Path**: `backend/tests/unit/test_structured_conversation_contract.py` (759 lines)
@@ -2540,3 +2614,59 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_cache_parameters_dict_normalization_tools_and_rf`](file:///e:/JakeAI/backend/tests/unit/test_cache_identity.py#L1): Passing tools and response_format inside parameters dict derives identical cache identity. (7 assertions)
   - [`test_legacy_compute_hash_still_works`](file:///e:/JakeAI/backend/tests/unit/test_cache_identity.py#L1): The legacy _compute_hash function still produces deterministic output. (3 assertions)
   - [`test_gateway_exact_cache_isolation_across_dimensions`](file:///e:/JakeAI/backend/tests/unit/test_cache_identity.py#L1): End-to-end gateway proxy test verifying exact-cache isolation across dimensions. (0 assertions)
+
+---
+
+## 4. Automated API Contract & Bruno Collection Architecture Relationship
+
+### 4.1 Design Philosophy: Layered Verification Strategy
+JakeAI implements a strict two-tier strategy for API verification, clearly partitioning server-side headless regression testing from client-side interactive/staging exploration.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        FastAPI Application (ASGI)                     │
+│           (Routes, OpenAPI 3.1.0 Spec, Pydantic Models, PEP)           │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+         ┌─────────────────────────┴─────────────────────────┐
+         ▼                                                   ▼
+┌───────────────────────────────────┐   ┌───────────────────────────────────┐
+│     Pytest API Contract Layer     │   │      Bruno Collection Suite       │
+│  (`tests/contract/`)              │   │  (`bruno/JakeAI-Platform/`)       │
+├───────────────────────────────────┤   ├───────────────────────────────────┤
+│ • Headless ASGI in-memory client  │   │ • Live HTTP client (external CLI) │
+│ • Runs in CI on every push / PR   │   │ • Manual & staging exploration    │
+│ • Deterministic & isolated        │   │ • Stateful operator walkthroughs  │
+│ • 0 external network dependencies │   │ • Environment presets (dev/stg)   │
+│ • Zero schema drift gate against  │   │ • Real external service latency   │
+│   committed `backend/openapi.json`│   │ • Multi-turn human debugging      │
+│ • 51 operations & 10 error codes  │   │                                   │
+└───────────────────────────────────┘   └───────────────────────────────────┘
+```
+
+### 4.2 Pytest Contract & HTTP Suite (`tests/contract/`)
+The Pytest contract suite (`test_api_contract.py`, `test_api_negative_contracts.py`, `test_api_http_workflows.py`) acts as the authoritative, automated server-side verification layer:
+- **Execution Environment**: In-process ASGI memory transport (`httpx.AsyncClient(transport=ASGITransport(app=app))`).
+- **Speed & Isolation**: All 164 contract tests execute in under 15 seconds without binding TCP ports, invoking live upstream LLMs, or requiring live Redis/Qdrant servers.
+- **Zero Schema Drift Invariant**: Automatically compares the live FastAPI schema (`app.openapi()`) against the version-controlled `backend/openapi.json`. Fails CI immediately if any field, type, status code, or schema diverges by even one byte.
+- **Comprehensive Exhaustive Audit**:
+  - Parameterized verification of all 51 operations across 47 paths.
+  - Path template parameters matching declared route signatures.
+  - Authentication boundary enforcement (41 Bearer JWT protected vs 10 public/perimeter/webhook endpoints).
+  - Negative contracts covering all 10 legitimate HTTP status codes (`400`, `401`, `403`, `404`, `409`, `413`, `422`, `429`, `500`, `503`) at the ASGI boundary with exact error envelope assertions.
+  - 5 representative end-to-end multi-request workflows verifying asynchronous SSE streams, RAG indexing, BYOK encryption, AI Gateway & FinOps, and Human-in-the-Loop resume bridges.
+
+### 4.3 Bruno Collection (`bruno/JakeAI-Platform/`)
+The Bruno collection serves as the developer-facing, client-oriented operational toolkit:
+- **Execution Environment**: External desktop app or Bruno CLI (`bru run`) making real network requests over TCP/HTTP to a running JakeAI instance (`http://localhost:8000`).
+- **Use Cases**:
+  - Ad-hoc manual verification during local development.
+  - Smoke testing deployed staging or production environments.
+  - Visual payload inspection, token substitution, and live debugging of streaming SSE responses in a GUI.
+- **Collection Layout**: 8 modular folders (00-Setup, 01-Health, 02-Chat & Gateway, 03-Agent, 04-RAG, 05-BYOK & Providers, 06-Cache, 07-FinOps & Billing, 08-Security & Negative).
+
+### 4.4 Rationale: Avoiding Request-for-Request Duplication
+JakeAI explicitly avoids replicating the Bruno collection request-for-request inside Pytest:
+1. **Separation of Concerns**: Pytest tests the application code and OpenAPI contracts in CI. Bruno tests external network reachability, TLS, and operator workflows.
+2. **Anti-Pattern Prevention**: Duplicating 60+ Bruno `.bru` files 1:1 in Pytest leads to test bloat, brittle fixtures, and maintenance overhead without adding coverage.
+3. **Complementary Synergy**: Pytest provides exhaustive static schema proofs, boundary parameter testing, and negative contract matrices; Bruno provides realistic external client scenarios and staging sanity checks.
