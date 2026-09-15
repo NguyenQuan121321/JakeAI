@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import enum
 import re
-from typing import Any
+from typing import Any, assert_never
 
 from pydantic import BaseModel, Field
 
@@ -219,7 +219,7 @@ def evaluate_hallucination_case(case: dict[str, Any]) -> HallucinationEvaluation
             detected_category == HallucinationCategory.INSUFFICIENT_EVIDENCE
         )
     else:
-        passed = False
+        assert_never(expected_category)
 
     return HallucinationEvaluationResult(
         case_id=case_id,
