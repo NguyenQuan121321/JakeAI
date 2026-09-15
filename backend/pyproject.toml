@@ -62,6 +62,8 @@ markers = [
     "contract: API contract and schema drift tests",
     "security: Security, guardrails, BYOK, and tenant isolation tests",
     "e2e: End-to-end multi-tier pipeline and platform workflow tests",
+    "critical_e2e: Critical end-to-end business workflow tests running in PR gate",
+    "live_external: Workflows requiring live external third-party API credentials",
     "evals: AI quality, evaluation benchmark, and canary tests",
     "performance: Token and latency performance benchmarks",
 ]

@@ -1,33 +1,33 @@
 # TEST-CATALOG — JakeAI Automated Test Suite Catalog
-**Audit Baseline**: `main` (`045adcc`) | **Status**: TEST-06 AI / AGENT / RAG EVALUATION AUTOMATION COMPLETED
+**Audit Baseline**: `main` (`07ddb5d`) | **Status**: TEST-07 E2E WORKFLOW AUTOMATION COMPLETED
 **Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/`
 
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 123 tracked in catalog (121 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 121
-- **Total Test Functions / Methods**: 1,339 (collected by Pytest as 1,813 test items)
+- **Total Tracked Test Files**: 124 tracked in catalog (122 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 122
+- **Total Test Functions / Methods**: 1,348 (collected by Pytest as 1,822 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 28 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06: `CAT-121` through `CAT-123`)
+  - `CREATED`: 29 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
   - `PERF-*`: 2 files (`PERF-001` through `PERF-002`, 4 tests)
-  - `E2E-*`: 2 files (`E2E-001` through `E2E-002`, 30 tests)
+  - `E2E-*`: 3 files (`E2E-001` through `E2E-003`, 39 tests)
   - `AI-*`: 14 files (`AI-001` through `AI-014`, 131 tests)
   - `INT-*`: 25 files (`INT-001` through `INT-025`, 332 tests)
   - `UNIT-*`: 61 files (`UNIT-001` through `UNIT-061`, 1,011 tests)
 - **Duplicate / Overlap Status Breakdown**:
   - `COMPLEMENTARY`: 75 files
-  - `UNIQUE`: 32 files
+  - `UNIQUE`: 33 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,706 passed, 2 skipped in offline mode, 0 failed)
+- **Test Suite Pass Rate**: **100%** (1,714 passed, 3 skipped in offline mode, 0 failed)
 - **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
@@ -161,6 +161,7 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `AI-012` | `CAT-121` | [`tests/evals/test_eval_agent_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py) | 15 functions (29 items: `test_eval_agent_01_goal_interpretation_and_constraint_extraction` ...) | Agent Orchestration | AI Eval / Benchmark | Comprehensive automated evaluation for 14 agent orchestration dimensions (goal interpretation, plan structure, agent selection, model selection, tool selection, tool execution, verification, recovery, retry bounds, approval flow, resume integrity, cancellation, terminal state, failure truthfulness) plus versioned regression fixtures. | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-FUNC-01 / R-AI-00 | Bruno/03 — Agent (01-10) | **`CREATED`** | New TEST-06 automated evaluation layer for 14 agent orchestration dimensions and versioned regression fixtures. |
 | `AI-013` | `CAT-122` | [`tests/evals/test_eval_rag_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py) | 11 functions (20 items: `test_eval_rag_01_retrieval_relevance_ranking` ...) | RAG Pipeline | AI Eval / Benchmark | Comprehensive automated evaluation for 10 RAG dimensions (MRR/NDCG retrieval relevance, multi-tenant isolation, 6-stage context construction, grounding entailment, citation integrity, unsupported claim detection, contradiction detection, epistemic abstention, prompt injection resistance, context budget load shedding) plus versioned regression fixtures. | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-FUNC-02 / R-AI-01 / R-AI-04 | Bruno/04 — RAG (01-07) | **`CREATED`** | New TEST-06 automated evaluation layer for 10 RAG pipeline dimensions, retrieval math, and versioned regression fixtures. |
 | `AI-014` | `CAT-123` | [`tests/evals/test_eval_hallucination_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py) | 9 functions (14 items: `test_eval_hallucination_01_supported_claims` ...) | AI Evaluation & Benchmarking | AI Eval / Benchmark | Controlled dataset evaluation covering 4 mandatory categories (SUPPORTED, UNSUPPORTED, CONTRADICTORY, INSUFFICIENT EVIDENCE) and edge cases via deterministic assertions (metric canonicalization, antonym polarity matrix, entity divergence, epistemic abstention). | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-AI-01 / R-AI-02 / R-AI-04 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-06 automated evaluation layer for deterministic hallucination categories, metric normalizer, and polarity matrix. |
+| `E2E-003` | `CAT-124` | [`tests/e2e/test_e2e_business_workflows.py`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py) | 9 functions (9 items: `test_e2e_workflow_01_auth_to_chat_lifecycle` ...) | Business Workflows | E2E | High-value full business workflow E2E test suite covering 7 mandatory business lifecycles: AUTH -> CHAT, AUTH -> AGENT, AGENT -> TOOL -> VERIFY, RAG, BYOK / PROVIDER, FAILURE / RECOVERY, and APPROVAL (with rejection and live-external hooks). | HTTP / ASGI, Redis, Qdrant, Mocks / Monkeypatch | Critical End-to-End Business Workflow Gate (TEST-07) | PR / Push (main) | `UNIQUE` | R-FUNC-00 / R-FUNC-01 / R-FUNC-02 / R-FUNC-04 | Bruno Collections (02, 03, 04, 05, 07, 08) | **`CREATED`** | New TEST-07 authoritative business workflow E2E test suite verifying state transitions, telemetry, tenant isolation, and failure recovery. |
 
 ---
 
@@ -2827,6 +2828,28 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_cache_parameters_dict_normalization_tools_and_rf`](file:///e:/JakeAI/backend/tests/unit/test_cache_identity.py#L1): Passing tools and response_format inside parameters dict derives identical cache identity. (7 assertions)
   - [`test_legacy_compute_hash_still_works`](file:///e:/JakeAI/backend/tests/unit/test_cache_identity.py#L1): The legacy _compute_hash function still produces deterministic output. (3 assertions)
   - [`test_gateway_exact_cache_isolation_across_dimensions`](file:///e:/JakeAI/backend/tests/unit/test_cache_identity.py#L1): End-to-end gateway proxy test verifying exact-cache isolation across dimensions. (0 assertions)
+
+### 3.14 Subsystem: End-to-End Business Workflows (CAT-124)
+
+#### `CAT-124`: [`test_e2e_business_workflows.py`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py)
+- **Logical ID**: `E2E-003`
+- **Legacy ID**: `CAT-124`
+- **Subsystem**: Business Workflows / Platform Integration
+- **Test Level**: E2E (Asynchronous ASGI In-Memory & Managed Pipeline)
+- **Purpose**: Authoritative end-to-end verification of 7 core JakeAI business workflows spanning multi-tier architecture, security PEP, agent DAG execution, RAG pipeline, BYOK vault, failover resilience, and human-in-the-loop approvals.
+- **Dependencies**: HTTP / ASGI, In-Memory Redis, Qdrant Mock/In-Memory, Upstream LLM Doubles
+- **CI Job**: `Critical End-to-End Business Workflow Gate (TEST-07 / E2E-003)`
+- **Run Frequency**: PR / Push (main)
+- **Test Functions / Methods (9 functions / 9 items)**:
+  - [`test_e2e_workflow_01_auth_to_chat_lifecycle`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L130): Workflow 1: Authentication -> authenticated request -> chat -> response schema -> telemetry/accounting & exact cache hit side effect.
+  - [`test_e2e_workflow_02_auth_to_agent_task_lifecycle`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L235): Workflow 2: Authentication -> create task -> cross-tenant isolation (403/404) -> execution -> terminal state.
+  - [`test_e2e_workflow_03_agent_tool_selection_execution_verification`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L305): Workflow 3: Task -> tool selection -> tool execution -> verifier pass -> result.
+  - [`test_e2e_workflow_04_rag_ingest_retrieval_grounding_abstention`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L394): Workflow 4: Ingest document -> hybrid retrieval -> context selection -> grounded generation -> citation & epistemic abstention.
+  - [`test_e2e_workflow_05_byok_provider_credential_accounting`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L509): Workflow 5: Credential configuration -> AES-256-GCM vault -> provider selection -> request dispatch -> FinOps accounting.
+  - [`test_e2e_workflow_06_failure_recovery_failover_truthfulness`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L609): Workflow 6: Request -> dependency failure -> failover recovery -> non-retryable truthful failure state.
+  - [`test_e2e_workflow_07_human_in_the_loop_approval_resume_terminal`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L683): Workflow 7: Task -> approval required -> approval decision -> resume -> terminal state.
+  - [`test_e2e_workflow_07b_human_in_the_loop_approval_rejection`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L767): Workflow 7b: Task -> approval required -> operator rejection -> terminal state REJECTED.
+  - [`test_e2e_workflow_live_external_provider_call`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py#L838): Optional Live External Integration Workflow (gated by LIVE_EXTERNAL_TESTS=1).
 
 ---
 

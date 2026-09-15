@@ -574,4 +574,27 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
   - Static Type Check (`mypy`): 0 errors across 171 source files.
   - Linter (`ruff check` & `ruff format`): 0 errors, 310 files formatted.
 
+---
+
+## 20. Phase TEST-07 — JakeAI Python End-to-End Workflow Automation
+
+- **Phase**: `TEST-07` (Python End-to-End Workflow Automation)
+- **Branch**: `chore/test-07-e2e-workflow-automation`
+- **Scope**: Implemented small, high-value set of full business workflow E2E tests (`E2E-003` / `CAT-124` in `tests/e2e/test_e2e_business_workflows.py`) validating all 7 mandatory workflows:
+  1. `AUTH -> CHAT`: Unauthenticated 401 rejection, authenticated 200 response, schema conformance, correlation ID propagation, FinOps ledger accounting, and Tier 1 exact cache hit side-effect.
+  2. `AUTH -> AGENT`: Task creation, cross-tenant isolation (403/404), execution, and terminal `completed` state.
+  3. `AGENT -> TOOL -> VERIFY`: Task orchestration, tool selection (`CalculatorTool`), tool execution, mathematical verification (`CanonicalVerifier`), and final answer production.
+  4. `RAG`: Document ingestion, hybrid retrieval, 6-stage context construction, grounded generation with citations, epistemic abstention on unevidenced query, and tenant isolation.
+  5. `BYOK / PROVIDER`: Key configuration, AES-256-GCM vault storage, key masking, memory decryption, provider resolution dispatch, FinOps ledger attribution, and key deletion.
+  6. `FAILURE / RECOVERY`: Primary provider failure transparent failover recovery, plus unrecoverable provider outage fail-closed honest terminal state (HTTP 500/503 with sanitized error details).
+  7. `APPROVAL`: Task requiring approval pausing in `PAUSED_APPROVAL`, operator approval, execution resume to terminal `COMPLETED`; plus sub-flow 7b for security rejection to `REJECTED`.
+- **Live External Workflow**:
+  - `test_e2e_workflow_live_external_provider_call`: Marked `@pytest.mark.live_external` and skipped cleanly in offline CI when `LIVE_EXTERNAL_TESTS` env var is absent.
+- **Verification Summary**:
+  - Critical End-to-End Business Workflow Gate (`E2E-003`): 8/8 passed, 1 deselected with `-m "not live_external"` (or 8 passed, 1 skipped) in 16.2s.
+  - Full E2E Suite (`tests/e2e/`): 38/38 passed, 1 skipped in 23.2s.
+  - Total Active Executable Test Files: 122 (124 tracked in catalog).
+  - Linter & Formatter (`ruff check` & `ruff format`): 0 errors, 100% clean.
+
+
 
