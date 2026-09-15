@@ -187,7 +187,7 @@ class TestSecretSanitization:
             "Failed connecting to postgresql://postgres:SuperSecret123@db.prod.internal:5432/main",
             "Error on mysql://root:admin_pass@localhost:3306/users",
             "redis://default:s3cr3tP@ss@10.0.1.5:6379/0 connection lost",
-            "mongodb+srv://admin:clusterKey99@cluster0.mongodb.net/app failed",
+            "mongodb+srv://admin:clusterKey99@cluster0.mongodb.internal/app failed",
             "amqp://guest:guest123@rabbitmq.internal:5672/vhost error",
         ]
         for uri in uris:
