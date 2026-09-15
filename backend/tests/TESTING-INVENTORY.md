@@ -555,4 +555,23 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
   - Branch Coverage: 88.37% (Threshold >= 85.0%).
   - Line Coverage: 90.71% (Threshold >= 85.0%).
   - PR Patch Coverage: 100.0%.
+
+---
+
+## 19. Phase TEST-06 — AI Behavior, Agent, RAG & Hallucination Evaluation Automation
+
+- **Phase**: `TEST-06` (AI / Agent / RAG Evaluation Automation)
+- **Branch**: `chore/test-06-ai-agent-rag-evaluation-automation`
+- **Scope**: Implemented non-brittle, programmatic evaluation layer across 14 Agent dimensions, 10 RAG dimensions, 4 mandatory Hallucination categories, and 3 versioned regression datasets (31 total cases).
+- **CI Regressions Identified & Resolved**:
+  1. **MyPy Unreachable Code in Hallucination Evaluator**: `HallucinationCategory` is a 4-member `StrEnum`. Replaced unreachable `else: passed = False` with `else: assert_never(expected_category)` to satisfy exhaustiveness while enforcing runtime fail-closed error handling.
+  2. **Canonical Metric Normalization Currency Loss**: `METRIC_REGEX` previously required magnitude suffixes when the currency symbol was optional, causing `$100,000,000` to be matched by the plain-number branch without the leading `$`. Fixed by restructuring `METRIC_REGEX` into 4 discrete branches: prefix currency (suffix optional), trailing currency/units, non-monetary magnitude suffixes, and plain numbers.
+- **Verification Summary**:
+  - Dedicated Evaluation Gate (TEST-06): 63/63 passed in 0.12s.
+  - Hallucination Suite (`AI-014`): 14/14 passed in 0.07s.
+  - Full Evaluation Suite (`tests/evals/`): 131/131 passed in 100% green.
+  - Full Security Suite (`tests/security/`): 141/141 passed.
+  - Static Type Check (`mypy`): 0 errors across 171 source files.
+  - Linter (`ruff check` & `ruff format`): 0 errors, 310 files formatted.
+
 

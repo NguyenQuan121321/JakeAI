@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 # Numerical, currency, percentage, and metric tokens
 METRIC_REGEX = re.compile(
-    r"[\$€£¥₫]\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|tỷ|triệu|k|m|b))?"
-    r"|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%)"
+    r"[\$€£¥₫]\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))?\b"
+    r"|\b\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b))?\s*(?:USD|EUR|GBP|VND|VNĐ|tỷ|triệu|seats|%|percent)"
+    r"|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:billion|million|trillion|thousand|tỷ|triệu|k|m|b)\b"
     r"|\b\d+(?:,\d{3})*(?:\.\d+)?\b",
     re.IGNORECASE,
 )
@@ -111,6 +112,9 @@ ANTONYM_PAIRS: dict[str, set[str]] = {
     "growth": {"decline", "contraction", "decrease"},
     "increase": {"decrease", "decline", "reduction", "drop"},
     "increased": {"decreased", "declined", "reduced", "dropped"},
+    "grew": {"declined", "dropped", "shrank", "decreased"},
+    "lowered": {"raised", "hiked", "increased"},
+    "raised": {"lowered", "cut", "reduced", "decreased"},
     "passed": {"failed"},
     "failed": {"passed", "succeeded"},
     "hired": {"fired", "dismissed", "terminated"},
@@ -126,6 +130,10 @@ for _k, _vs in list(ANTONYM_PAIRS.items()):
 ABSTENTION_PATTERNS = [
     re.compile(
         r"\b(?:no|insufficient|not enough)\s+(?:information|evidence|data|documents|records|details)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:do\s+not|does\s+not|did\s+not|cannot)\s+have\s+(?:sufficient|enough)?\s*(?:evidence|information|data)\b",
         re.IGNORECASE,
     ),
     re.compile(

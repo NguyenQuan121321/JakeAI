@@ -1,8 +1,39 @@
-"""AI Evaluation Package for JakeAI Phase 06."""
-
+from app.evals.agent_evaluator import (
+    AgentEvaluationResult,
+    evaluate_agent_selection,
+    evaluate_goal_interpretation,
+    evaluate_lifecycle_and_terminal_state,
+    evaluate_model_selection,
+    evaluate_plan_structure,
+    evaluate_tool_selection_and_schema,
+    evaluate_verification_and_recovery,
+)
+from app.evals.hallucination_evaluator import (
+    HallucinationCategory,
+    HallucinationEvaluationResult,
+    evaluate_hallucination_case,
+)
 from app.evals.llm_judge import BlindedOrder, JudgeComparisonResult, LLMJudge
 from app.evals.quality_oracle import QualityOracle, QualityScoreResult
-from app.evals.rag_evaluator import RAGEvalResult, evaluate_rag_case
+from app.evals.rag_evaluator import (
+    RAGDimensionEvalResult,
+    RAGEvalResult,
+    compute_dcg,
+    compute_mrr,
+    compute_ndcg,
+    compute_precision_at_k,
+    evaluate_citation_integrity,
+    evaluate_context_budget_behavior,
+    evaluate_context_construction,
+    evaluate_contradiction_detection,
+    evaluate_epistemic_abstention,
+    evaluate_grounding_entailment,
+    evaluate_prompt_injection_resistance,
+    evaluate_rag_case,
+    evaluate_rag_tenant_isolation,
+    evaluate_retrieval_relevance,
+    evaluate_unsupported_claim_detection,
+)
 from app.evals.regression_detector import (
     DetectedRegression,
     RegressionDetector,
@@ -18,13 +49,17 @@ from app.evals.rubric_evaluator import (
 )
 
 __all__ = [
+    "AgentEvaluationResult",
     "BlindedOrder",
     "DetectedRegression",
     "DimensionScore",
+    "HallucinationCategory",
+    "HallucinationEvaluationResult",
     "JudgeComparisonResult",
     "LLMJudge",
     "QualityOracle",
     "QualityScoreResult",
+    "RAGDimensionEvalResult",
     "RAGEvalResult",
     "RegressionDetector",
     "RegressionReport",
@@ -33,5 +68,27 @@ __all__ = [
     "RubricDimension",
     "RubricEvaluationResult",
     "RubricEvaluator",
+    "compute_dcg",
+    "compute_mrr",
+    "compute_ndcg",
+    "compute_precision_at_k",
+    "evaluate_agent_selection",
+    "evaluate_citation_integrity",
+    "evaluate_context_budget_behavior",
+    "evaluate_context_construction",
+    "evaluate_contradiction_detection",
+    "evaluate_epistemic_abstention",
+    "evaluate_goal_interpretation",
+    "evaluate_grounding_entailment",
+    "evaluate_hallucination_case",
+    "evaluate_lifecycle_and_terminal_state",
+    "evaluate_model_selection",
+    "evaluate_plan_structure",
+    "evaluate_prompt_injection_resistance",
     "evaluate_rag_case",
+    "evaluate_rag_tenant_isolation",
+    "evaluate_retrieval_relevance",
+    "evaluate_tool_selection_and_schema",
+    "evaluate_unsupported_claim_detection",
+    "evaluate_verification_and_recovery",
 ]
