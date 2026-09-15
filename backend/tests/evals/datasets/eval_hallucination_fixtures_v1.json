@@ -1,0 +1,83 @@
+[
+  {
+    "case_id": "HALLUC-EVAL-001",
+    "task": "supported_claims",
+    "input": {
+      "context": "Global shipping volume reached 42.5 million TEU in 2025, representing an increase of 6.2% over the previous year. Operating margin was 18.4%.",
+      "candidate_answer": "In 2025, global shipping volume was 42.5M TEU, reflecting a 6.2% increase with an operating margin of 18.4%.",
+      "evidence_type": "numerical_and_qualitative"
+    },
+    "expected_property": "SUPPORTED: All proposition metrics (42.5M, 6.2%, 18.4%) and relational assertions are strictly grounded in context.",
+    "pass_condition": "entailment_classification == 'SUPPORTED' and groundedness_ratio == 1.0 and len(unsupported_claims) == 0 and len(contradicted_claims) == 0.",
+    "fail_condition": "Marked UNSUPPORTED, CONTRADICTED, or UNCERTAIN, or metric format mismatch flags false hallucination.",
+    "severity": "CRITICAL"
+  },
+  {
+    "case_id": "HALLUC-EVAL-002",
+    "task": "unsupported_claims",
+    "input": {
+      "context": "Cloud infrastructure spend reached $14.2B in Q2 2026 across primary enterprise accounts.",
+      "candidate_answer": "Cloud infrastructure spend reached $14.2B in Q2 2026 across primary enterprise accounts, and the firm projects $88.5B total cloud revenue by 2030 with 45 new datacenter builds.",
+      "evidence_type": "extrapolated_speculation"
+    },
+    "expected_property": "UNSUPPORTED: Secondary claim regarding $88.5B projections and 45 new datacenters is completely unevidenced.",
+    "pass_condition": "entailment_classification == 'UNSUPPORTED' and len(unsupported_claims) >= 1 and any('$88.5B' in c.claim_text for c in unsupported_claims).",
+    "fail_condition": "Marked SUPPORTED or unevidenced projections pass quality gate.",
+    "severity": "CRITICAL"
+  },
+  {
+    "case_id": "HALLUC-EVAL-003",
+    "task": "contradictory_claims",
+    "input": {
+      "context": "The central bank lowered benchmark interest rates by 50 basis points to 4.25% in September.",
+      "candidate_answer": "The central bank raised benchmark interest rates by 50 basis points to 5.75% in September.",
+      "evidence_type": "antonym_and_numeric_contradiction"
+    },
+    "expected_property": "CONTRADICTORY: Direct factual inversion ('lowered' vs 'raised') and metric mismatch (4.25% vs 5.75%).",
+    "pass_condition": "entailment_classification == 'CONTRADICTED' and len(contradicted_claims) >= 1 and contradiction_detected is True.",
+    "fail_condition": "Marked SUPPORTED with false positive token overlap score.",
+    "severity": "CRITICAL"
+  },
+  {
+    "case_id": "HALLUC-EVAL-004",
+    "task": "insufficient_evidence",
+    "input": {
+      "context": "The company operates in North America and Western Europe, offering cybersecurity audit software.",
+      "candidate_answer": "I do not have sufficient evidence in the provided documents to determine the average customer acquisition cost or churn rate.",
+      "evidence_type": "epistemic_abstention"
+    },
+    "expected_property": "INSUFFICIENT EVIDENCE: Context lacks information; epistemic abstention is recognized as correct and grounded behavior.",
+    "pass_condition": "entailment_classification == 'INSUFFICIENT_EVIDENCE' and is_epistemic_abstention is True and abstention_reason in ['NO_RELEVANT_EVIDENCE', 'INSUFFICIENT_EVIDENCE'].",
+    "fail_condition": "Treated as unsupported or penalized for not inventing facts.",
+    "severity": "CRITICAL"
+  },
+  {
+    "case_id": "HALLUC-EVAL-005",
+    "task": "multi_chunk_compound_metrics",
+    "input": {
+      "passages": [
+        "In FY2024, North America division delivered $100M revenue.",
+        "In FY2025, North America division expanded to $130M revenue."
+      ],
+      "candidate_answer": "North America revenue expanded from $100M in FY2024 to $130M in FY2025.",
+      "evidence_type": "multi_chunk_synthesis"
+    },
+    "expected_property": "SUPPORTED: Multi-chunk ensemble verification verifies compound metrics across disparate passages without triggering false contradiction.",
+    "pass_condition": "entailment_classification == 'SUPPORTED' and groundedness_ratio == 1.0 and len(contradicted_claims) == 0.",
+    "fail_condition": "Flagged as CONTRADICTED or UNSUPPORTED due to single-chunk checking.",
+    "severity": "HIGH"
+  },
+  {
+    "case_id": "HALLUC-EVAL-006",
+    "task": "entity_divergence_contradiction",
+    "input": {
+      "context": "The cybersecurity summit was hosted in Singapore with over 5,000 delegates.",
+      "candidate_answer": "The cybersecurity summit was hosted in Berlin with over 5,000 delegates.",
+      "evidence_type": "named_entity_collision"
+    },
+    "expected_property": "CONTRADICTORY: Named entity conflict ('Singapore' vs 'Berlin') detected despite 80% lexical token match.",
+    "pass_condition": "entailment_classification in ['CONTRADICTED', 'UNSUPPORTED'] and entity_mismatch_detected is True.",
+    "fail_condition": "Marked SUPPORTED based on high word overlap.",
+    "severity": "HIGH"
+  }
+]

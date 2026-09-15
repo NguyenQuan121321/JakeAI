@@ -1,17 +1,17 @@
 # TEST-CATALOG — JakeAI Automated Test Suite Catalog
-**Audit Baseline**: `main` (`72c318f`) | **Status**: TEST-01 REORGANIZATION & TEST-02 UNIT TEST EXPANSION COMPLETED
+**Audit Baseline**: `main` (`045adcc`) | **Status**: TEST-06 AI / AGENT / RAG EVALUATION AUTOMATION COMPLETED
 **Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/`
 
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 120 tracked in catalog (118 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 118
-- **Total Test Functions / Methods**: 1,276 (collected by Pytest as 1,750 test items)
+- **Total Tracked Test Files**: 123 tracked in catalog (121 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 121
+- **Total Test Functions / Methods**: 1,339 (collected by Pytest as 1,813 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 25 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05: `CAT-116` through `CAT-120`)
+  - `CREATED`: 28 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06: `CAT-121` through `CAT-123`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
@@ -19,15 +19,15 @@
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
   - `PERF-*`: 2 files (`PERF-001` through `PERF-002`, 4 tests)
   - `E2E-*`: 2 files (`E2E-001` through `E2E-002`, 30 tests)
-  - `AI-*`: 11 files (`AI-001` through `AI-011`, 68 tests)
+  - `AI-*`: 14 files (`AI-001` through `AI-014`, 131 tests)
   - `INT-*`: 25 files (`INT-001` through `INT-025`, 332 tests)
   - `UNIT-*`: 61 files (`UNIT-001` through `UNIT-061`, 1,011 tests)
 - **Duplicate / Overlap Status Breakdown**:
   - `COMPLEMENTARY`: 75 files
-  - `UNIQUE`: 29 files
+  - `UNIQUE`: 32 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,643 passed, 2 skipped in offline mode, 0 failed)
+- **Test Suite Pass Rate**: **100%** (1,706 passed, 2 skipped in offline mode, 0 failed)
 - **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
@@ -158,6 +158,9 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `SEC-008` | `CAT-118` | [`tests/security/test_security_tenant_isolation.py`](file:///e:/JakeAI/backend/tests/security/test_security_tenant_isolation.py) | 10 functions (`test_tenant_isolation_agent_tasks_and_runs` ...) | Security & Governance | Security | Multi-tenant boundary regression suite across Agent tasks/runs, LangGraph threads, exact/semantic caches, RAG indexes, BYOK keys, and uniform 404s. | Redis, Qdrant, HTTP / ASGI | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-AI-04 / R-LOGIC-02 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated runtime tenant isolation regression suite. |
 | `SEC-009` | `CAT-119` | [`tests/security/test_security_llm_tool_safety.py`](file:///e:/JakeAI/backend/tests/security/test_security_llm_tool_safety.py) | 12 functions (40 items: `test_direct_prompt_injection_detection` ...) | Security & Governance | Security | LLM & tool security suite for direct/indirect prompt injection, tool output contamination, dangerous shell blocking, path traversal, schema bounds, secret scrubbing, and error sanitization. | None (Pure In-Memory) | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-AI-02 / R-AI-03 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated runtime LLM & tool security regression suite. |
 | `SEC-010` | `CAT-120` | [`tests/security/test_security_fail_closed.py`](file:///e:/JakeAI/backend/tests/security/test_security_fail_closed.py) | 14 functions (`test_fail_closed_verifier_rejects_mathematical_variance` ...) | Security & Governance | Security | Fail-closed invariants suite for verifier variance, foreign tenant breaches, unapproved tools, missing BYOK credentials, budget overflow, and empty auth headers. | HTTP / ASGI | Dedicated Runtime Security Regression Suite (TEST-05) | PR / Push (main) | `UNIQUE` | R-LOGIC-00 / R-LOGIC-02 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-05 dedicated fail-closed invariants regression suite. |
+| `AI-012` | `CAT-121` | [`tests/evals/test_eval_agent_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py) | 15 functions (29 items: `test_eval_agent_01_goal_interpretation_and_constraint_extraction` ...) | Agent Orchestration | AI Eval / Benchmark | Comprehensive automated evaluation for 14 agent orchestration dimensions (goal interpretation, plan structure, agent selection, model selection, tool selection, tool execution, verification, recovery, retry bounds, approval flow, resume integrity, cancellation, terminal state, failure truthfulness) plus versioned regression fixtures. | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-FUNC-01 / R-AI-00 | Bruno/03 — Agent (01-10) | **`CREATED`** | New TEST-06 automated evaluation layer for 14 agent orchestration dimensions and versioned regression fixtures. |
+| `AI-013` | `CAT-122` | [`tests/evals/test_eval_rag_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py) | 11 functions (20 items: `test_eval_rag_01_retrieval_relevance_ranking` ...) | RAG Pipeline | AI Eval / Benchmark | Comprehensive automated evaluation for 10 RAG dimensions (MRR/NDCG retrieval relevance, multi-tenant isolation, 6-stage context construction, grounding entailment, citation integrity, unsupported claim detection, contradiction detection, epistemic abstention, prompt injection resistance, context budget load shedding) plus versioned regression fixtures. | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-FUNC-02 / R-AI-01 / R-AI-04 | Bruno/04 — RAG (01-07) | **`CREATED`** | New TEST-06 automated evaluation layer for 10 RAG pipeline dimensions, retrieval math, and versioned regression fixtures. |
+| `AI-014` | `CAT-123` | [`tests/evals/test_eval_hallucination_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py) | 9 functions (14 items: `test_eval_hallucination_01_supported_claims` ...) | AI Evaluation & Benchmarking | AI Eval / Benchmark | Controlled dataset evaluation covering 4 mandatory categories (SUPPORTED, UNSUPPORTED, CONTRADICTORY, INSUFFICIENT EVIDENCE) and edge cases via deterministic assertions (metric canonicalization, antonym polarity matrix, entity divergence, epistemic abstention). | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-AI-01 / R-AI-02 / R-AI-04 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-06 automated evaluation layer for deterministic hallucination categories, metric normalizer, and polarity matrix. |
 
 ---
 
@@ -165,7 +168,7 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 
 Detailed inventory and test function manifest for each subsystem.
 
-### 3.1 Subsystem: AI Evaluation & Benchmarking (7 Files)
+### 3.1 Subsystem: AI Evaluation & Benchmarking (8 Files)
 #### `CAT-076`: [`test_baseline_and_regression_gate.py`](file:///e:/JakeAI/backend/tests/evals/test_baseline_and_regression_gate.py)
 - **Test File Path**: `backend/tests/evals/test_baseline_and_regression_gate.py` (92 lines)
 - **Subsystem**: `AI Evaluation & Benchmarking`
@@ -314,7 +317,31 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_enterprise_workload_token_benchmark_40_percent_gate`](file:///e:/JakeAI/backend/tests/evals/test_token_benchmark.py#L1): Empirically prove that the combined AI Gateway optimization achieves >= 40% Token Reduction. (5 assertions)
   - [`test_token_accounting_mathematical_conservation`](file:///e:/JakeAI/backend/tests/evals/test_token_benchmark.py#L1): Verify that TokenAccounting adheres strictly to the Conservation of Tokens law. (8 assertions)
 
-### 3.2 Subsystem: Agent Orchestration (9 Files)
+#### `CAT-123`: [`test_eval_hallucination_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py)
+- **Test File Path**: `backend/tests/evals/test_eval_hallucination_automation.py` (245 lines)
+- **Subsystem**: `AI Evaluation & Benchmarking`
+- **Test Level**: `AI Eval / Benchmark`
+- **Purpose**: Controlled dataset evaluation covering 4 mandatory categories (SUPPORTED, UNSUPPORTED, CONTRADICTORY, INSUFFICIENT EVIDENCE) and edge cases via deterministic assertions (metric canonicalization, antonym polarity matrix, entity divergence, epistemic abstention).
+- **Dependencies / Fixtures**: None (Pure In-Memory)
+- **CI Job Execution**: `AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-AI-01 / R-AI-02 / R-AI-04`
+- **Bruno Collection Coverage**: `Bruno/08 — Security & Negative (01-11)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/evals/`)
+- **Disposition Rationale & Evidence**: New TEST-06 automated evaluation layer for deterministic hallucination categories, metric normalizer, and polarity matrix.
+- **Discovered Test Functions (9)**:
+  - [`test_eval_hallucination_01_supported_claims`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate fully supported propositions with metrics (42.5M, 6.2%, 18.4%) pass with 1.0 groundedness.
+  - [`test_eval_hallucination_02_unsupported_extrapolations`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate unevidenced projections ($88.5B by 2030, 45 datacenters) are flagged as ungrounded.
+  - [`test_eval_hallucination_03_contradictory_claims`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate antonym polarity ('lowered' vs 'raised') and metric conflict (4.25% vs 5.75%) detected.
+  - [`test_eval_hallucination_04_insufficient_evidence_abstention`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate explicit epistemic abstention is recognized as grounded behavior and not penalized.
+  - [`test_eval_hallucination_05_multi_chunk_compound_metrics`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate compound metrics across distinct passages are validated ensemble without false conflict.
+  - [`test_eval_hallucination_06_entity_divergence_contradiction`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate named entity collision ('Singapore' vs 'Berlin') flagged despite 80% lexical overlap.
+  - [`test_eval_hallucination_07_deterministic_metric_canonicalization`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate metric normalizer equates formatted variations deterministically.
+  - [`test_eval_hallucination_08_deterministic_antonym_polarity`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Evaluate known antonym pairs are recognized in the bidirectional polarity dictionary.
+  - [`test_eval_hallucination_versioned_fixtures_pass`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py#L1): Execute evaluation assertions across all versioned hallucination fixtures (6 items).
+
+### 3.2 Subsystem: Agent Orchestration (10 Files)
 #### `CAT-002`: [`test_agent_platform.py`](file:///e:/JakeAI/backend/tests/test_agent_platform.py)
 - **Test File Path**: `backend/tests/test_agent_platform.py` (789 lines)
 - **Subsystem**: `Agent Orchestration`
@@ -543,6 +570,36 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_internal_resume_perimeter_security`](file:///e:/JakeAI/backend/tests/test_resume_bridge.py#L1): POST /internal/v1/coding/resume enforces Invariant 4 perimeter credentials and error mapping. (6 assertions)
   - [`test_resume_bridge_redis_lock_cleanup_and_error_branches`](file:///e:/JakeAI/backend/tests/test_resume_bridge.py#L1): Exercise Redis lock release on 404, 403, in-flight locks, and lock acquisition exceptions. (3 assertions)
   - [`test_resume_bridge_event_loop_validation_branches`](file:///e:/JakeAI/backend/tests/test_resume_bridge.py#L1): Verify loop rehydration in _get_redis for closed, active, and invalid client loops. (5 assertions)
+
+#### `CAT-121`: [`test_eval_agent_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py)
+- **Test File Path**: `backend/tests/evals/test_eval_agent_automation.py` (500 lines)
+- **Subsystem**: `Agent Orchestration`
+- **Test Level**: `AI Eval / Benchmark`
+- **Purpose**: Comprehensive automated evaluation for 14 agent orchestration dimensions (goal interpretation, plan structure, agent selection, model selection, tool selection, tool execution, verification, recovery, retry bounds, approval flow, resume integrity, cancellation, terminal state, failure truthfulness) plus versioned regression fixtures.
+- **Dependencies / Fixtures**: None (Pure In-Memory)
+- **CI Job Execution**: `AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-FUNC-01 / R-AI-00`
+- **Bruno Collection Coverage**: `Bruno/03 — Agent (01-10)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/evals/`)
+- **Disposition Rationale & Evidence**: New TEST-06 automated evaluation layer for 14 agent orchestration dimensions and versioned regression fixtures.
+- **Discovered Test Functions (15)**:
+  - [`test_eval_agent_01_goal_interpretation_and_constraint_extraction`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate goal interpretation extracts objectives and respects negative tool constraints.
+  - [`test_eval_agent_02_plan_structure_dag_acyclicity_and_dependencies`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate plan DAG acyclicity, dependency validation, and parallel execution tiers.
+  - [`test_eval_agent_03_agent_selection_and_fallback`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate semantic agent selection chooses specialized agents and provides fallback with confidence.
+  - [`test_eval_agent_04_model_selection_and_no_default_leak`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate model router matches workload class and never exposes the literal token 'default'.
+  - [`test_eval_agent_05_tool_selection_and_synonym_resolution`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate semantic tool resolution understands synonyms and excludes forbidden tools.
+  - [`test_eval_agent_06_tool_execution_and_schema_validation`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate ToolRegistry enforces schema types, boundaries, and rejects unexpected properties fail-closed.
+  - [`test_eval_agent_07_verification_mathematical_and_security_gate`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate CanonicalVerifier catches discrepancies and mathematical variance.
+  - [`test_eval_agent_08_recovery_error_taxonomy_classification`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate recovery manager partitions errors into non-retryable vs retryable.
+  - [`test_eval_agent_09_retry_bounds_and_budget_exhaustion`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate recovery engine halts at max_retries and marks step FAILED without runaway looping.
+  - [`test_eval_agent_10_approval_flow_and_toctou_defense`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate dangerous tools pause in WAITING_APPROVAL and reject altered arguments upon resume.
+  - [`test_eval_agent_11_resume_without_step_duplication`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate checkpoint resume executes only pending steps without duplicating completed steps.
+  - [`test_eval_agent_12_cancellation_halts_pipeline_immediately`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate CANCELLED transitions halt execution and record clean cancellation metadata.
+  - [`test_eval_agent_13_terminal_state_immutability`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate terminal states are strictly absorbing and reject subsequent status mutations.
+  - [`test_eval_agent_14_failure_truthfulness_no_false_success`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Evaluate failed tasks accurately transition to FAILED and never emit COMPLETED.
+  - [`test_eval_agent_versioned_fixtures_pass`](file:///e:/JakeAI/backend/tests/evals/test_eval_agent_automation.py#L1): Parameterized regression suite across all 15 versioned agent fixtures.
 
 ### 3.3 Subsystem: BYOK Security (1 Files)
 #### `CAT-006`: [`test_byok.py`](file:///e:/JakeAI/backend/tests/test_byok.py)
@@ -1687,7 +1744,7 @@ Detailed inventory and test function manifest for each subsystem.
   - [`test_prometheus_metrics_generation`](file:///e:/JakeAI/backend/tests/test_observability_and_tracing.py#L1): Direct assertion (14 assertions)
   - [`test_get_metrics_endpoint_and_w3c_header`](file:///e:/JakeAI/backend/tests/test_observability_and_tracing.py#L1): Direct assertion (6 assertions)
 
-### 3.11 Subsystem: RAG Pipeline (31 Files)
+### 3.11 Subsystem: RAG Pipeline (32 Files)
 #### `CAT-005`: [`test_async_worker.py`](file:///e:/JakeAI/backend/tests/test_async_worker.py)
 - **Test File Path**: `backend/tests/test_async_worker.py` (467 lines)
 - **Subsystem**: `RAG Pipeline`
@@ -2430,6 +2487,32 @@ Detailed inventory and test function manifest for each subsystem.
 - **Disposition Rationale & Evidence**: AI evaluation or empirical token benchmark suite. Move to evals/.
 - **Discovered Test Functions (1)**:
   - [`test_rag_quality_gate`](file:///e:/JakeAI/backend/tests/evals/test_rag_regression.py#L1): Run RAG evaluation gate against golden test cases. (7 assertions)
+
+#### `CAT-122`: [`test_eval_rag_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py)
+- **Test File Path**: `backend/tests/evals/test_eval_rag_automation.py` (420 lines)
+- **Subsystem**: `RAG Pipeline`
+- **Test Level**: `AI Eval / Benchmark`
+- **Purpose**: Comprehensive automated evaluation for 10 RAG dimensions (MRR/NDCG retrieval relevance, multi-tenant isolation, 6-stage context construction, grounding entailment, citation integrity, unsupported claim detection, contradiction detection, epistemic abstention, prompt injection resistance, context budget load shedding) plus versioned regression fixtures.
+- **Dependencies / Fixtures**: None (Pure In-Memory)
+- **CI Job Execution**: `AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06)`
+- **Recommended Run Frequency**: `PR / Push (main)`
+- **Duplicate / Overlap Classification**: `UNIQUE`
+- **RIGHT Test Suite Coverage**: `R-FUNC-02 / R-AI-01 / R-AI-04`
+- **Bruno Collection Coverage**: `Bruno/04 — RAG (01-07)`
+- **Architectural Disposition**: **`CREATED`** (Target Destination: `backend/tests/evals/`)
+- **Disposition Rationale & Evidence**: New TEST-06 automated evaluation layer for 10 RAG pipeline dimensions, retrieval math, and versioned regression fixtures.
+- **Discovered Test Functions (11)**:
+  - [`test_eval_rag_01_retrieval_relevance_ranking`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate retrieval relevance ranking satisfies MRR >= 0.80 and NDCG@3 >= 0.85.
+  - [`test_eval_rag_02_tenant_isolation_zero_leakage`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate cross-tenant chunks are dropped fail-closed and foreign secrets never leak.
+  - [`test_eval_rag_03_canonical_context_construction`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate 6-stage context envelope strictly follows canonical sequence and strips scores.
+  - [`test_eval_rag_04_grounding_and_entailment`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate factual claims, metrics, and entities in generated answer are entailed by context.
+  - [`test_eval_rag_05_citation_integrity_and_hallucinated_stripping`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate citations match evidence passages and hallucinated unbacked footnotes are stripped.
+  - [`test_eval_rag_06_unsupported_claim_detection`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate identification and segregation of unsupported claims not found in context.
+  - [`test_eval_rag_07_contradiction_detection`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate antonym polarities (approved vs rejected) are detected as direct contradictions.
+  - [`test_eval_rag_08_epistemic_abstention_on_missing_evidence`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate safe refusal and epistemic boundary when context lacks relevant evidence.
+  - [`test_eval_rag_09_prompt_injection_resistance`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate indirect document-embedded prompt injection is neutralized without execution.
+  - [`test_eval_rag_10_context_budget_load_shedding`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Evaluate context builder sheds negotiable stages while strictly preserving core constraints.
+  - [`test_eval_rag_versioned_fixtures_pass`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py#L1): Execute evaluation assertions for each versioned RAG fixture (10 items).
 
 ### 3.12 Subsystem: Security & Governance (8 Files)
 #### `CAT-010`: [`test_cosign_oidc_signing.py`](file:///e:/JakeAI/backend/tests/test_cosign_oidc_signing.py)
