@@ -1,16 +1,17 @@
 # TEST-CATALOG — JakeAI Automated Test Suite Catalog
-**Audit Baseline**: `main` (`431818a` / tag `v0.48.0`) | **Status**: TEST-01 REORGANIZATION & DEDUPLICATION COMPLETED
+**Audit Baseline**: `main` (`72c318f`) | **Status**: TEST-01 REORGANIZATION & TEST-02 UNIT TEST EXPANSION COMPLETED
 **Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/`
 
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 95 tracked in audit (93 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 93
-- **Total Test Functions / Methods**: 941 (collected by Pytest as 1,101 test items)
+- **Total Tracked Test Files**: 104 tracked in catalog (102 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 102
+- **Total Test Functions / Methods**: 1,029 (collected by Pytest as 1,449 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
+  - `CREATED`: 9 files (new unit test suites under `tests/unit/` added in TEST-02)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
@@ -20,14 +21,14 @@
   - `E2E-*`: 2 files (`E2E-001` through `E2E-002`, 30 tests)
   - `AI-*`: 11 files (`AI-001` through `AI-011`, 68 tests)
   - `INT-*`: 16 files (`INT-001` through `INT-016`, 233 tests)
-  - `UNIT-*`: 52 files (`UNIT-001` through `UNIT-052`, 663 tests)
+  - `UNIT-*`: 61 files (`UNIT-001` through `UNIT-061`, 1,011 tests)
 - **Duplicate / Overlap Status Breakdown**:
   - `COMPLEMENTARY`: 66 files
-  - `UNIQUE`: 18 files
+  - `UNIQUE`: 27 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,099 passed, 2 skipped in offline mode, 0 failed)
-- **Code Coverage**: Branch: **86.97%** (>=85% gate), Line: **89.58%** (>=85% gate), Patch: **91.42%** (>=80% gate)
+- **Test Suite Pass Rate**: **100%** (1,447 passed, 2 skipped in offline mode, 0 failed)
+- **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
 
@@ -132,6 +133,15 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `UNIT-005` | `CAT-093` | [`tests/unit/test_direct_provider.py`](file:///e:/JakeAI/backend/tests/unit/test_direct_provider.py) | 7 functions (`test_direct_provider_defaults_and_credentials` ...) | Core / Platform | Unit | Unit tests for DirectProviderBackend adapter and credential hygiene. | HTTP / ASGI, Mocks / Monkeypatch | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | R-FUNC-04 | NONE | **`PRESERVED`** | Preserved in unit/. DirectProviderBackend adapter unit tests. |
 | `UNIT-006` | `CAT-094` | [`tests/unit/test_state_bridges.py`](file:///e:/JakeAI/backend/tests/unit/test_state_bridges.py) | 2 functions (`test_run_state_bidirectional_conversion` ...) | Core / Platform | Unit | Unit tests for WORK-01 state bridge converters and RunState bidirectional mapping. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `COMPLEMENTARY` | NONE | NONE | **`PRESERVED`** | Preserved in unit/. RunState/AgentState bridge converters unit tests. |
 | `CONTRACT-004` | `CAT-095` | [`tests/contract/test_structured_conversation_contract.py`](file:///e:/JakeAI/backend/tests/contract/test_structured_conversation_contract.py) | 28 functions (`TestProviderRequestContract::test_provider_request_with_structured_messages` ...) | Contract & Schema | Contract | Comprehensive Regression and Contract Tests for REPAIR-01 (PROV-02). | Mocks / Monkeypatch | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-ARCH-04 | NONE | **`MOVED`** | Moved to contract/. Structured conversation envelope contracts. |
+| `UNIT-053` | `CAT-096` | [`tests/unit/test_state_transitions.py`](file:///e:/JakeAI/backend/tests/unit/test_state_transitions.py) | 142 functions / items (`test_run_status_valid_transitions` ...) | Core / Platform | Unit | Comprehensive deterministic unit tests for RunStatus, TaskStatus, and CircuitBreaker state transitions and idempotency. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-LOGIC-01 | NONE | **`CREATED`** | New TEST-02 unit test suite for state machines and circuit breaker transitions. |
+| `UNIT-054` | `CAT-097` | [`tests/unit/test_agent_memory.py`](file:///e:/JakeAI/backend/tests/unit/test_agent_memory.py) | 15 functions (`TestLongTermMemoryUnit::test_multi_tenant_isolation` ...) | Agent Orchestration | Unit | In-memory unit tests for LongTermMemory, ShortTermMemory, and AgentMemoryManager multi-tenant isolation, TTL pruning, and state snapshotting. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-ARCH-00 / R-LOGIC-00 | NONE | **`CREATED`** | New TEST-02 unit test suite for isolated agent memory managers. |
+| `UNIT-055` | `CAT-098` | [`tests/unit/test_tool_policy_and_validation.py`](file:///e:/JakeAI/backend/tests/unit/test_tool_policy_and_validation.py) | 43 functions (`TestToolPolicyEngineUnit::test_admin_role_bypass` ...) | Core / Platform | Unit | Deterministic unit tests for ToolPolicyEngine path traversal, shell injection, risk gating, and ToolRegistry JSON schema validation. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-AI-03 | NONE | **`CREATED`** | New TEST-02 unit test suite for tool policy, safety gating, and argument validation. |
+| `UNIT-056` | `CAT-099` | [`tests/unit/test_recovery_and_decision_logic.py`](file:///e:/JakeAI/backend/tests/unit/test_recovery_and_decision_logic.py) | 37 functions (`TestRecoveryLimits::test_default_limits_and_aliases` ...) | Agent Orchestration | Unit | Unit tests for agent step failure recovery, verification evaluation, budget ceilings, and alternative model switching. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-LOGIC-04 | NONE | **`CREATED`** | New TEST-02 unit test suite for deterministic recovery and replanning decision logic. |
+| `UNIT-057` | `CAT-100` | [`tests/unit/test_failover_decision_logic.py`](file:///e:/JakeAI/backend/tests/unit/test_failover_decision_logic.py) | 11 functions (`test_failover_config_defaults_and_validation` ...) | Core / Platform | Unit | Unit tests for failover exponential backoff jitter, duplicate candidate pruning, attempt ceilings, credential isolation, and streaming failover. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-FUNC-04 / R-LOGIC-04 | NONE | **`CREATED`** | New TEST-02 unit test suite for failover decision algorithms and credential isolation. |
+| `UNIT-058` | `CAT-101` | [`tests/unit/test_request_normalization.py`](file:///e:/JakeAI/backend/tests/unit/test_request_normalization.py) | 11 functions (`test_provider_request_sync_prompt_and_system` ...) | Core / Platform | Unit | Unit tests for ProviderRequest wire normalization across OpenAI, Anthropic (system extraction, turn alternation), and Gemini (functionResponse). | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-FUNC-04 | NONE | **`CREATED`** | New TEST-02 unit test suite for provider wire request schema normalization. |
+| `UNIT-059` | `CAT-102` | [`tests/unit/test_provider_cache_adapters.py`](file:///e:/JakeAI/backend/tests/unit/test_provider_cache_adapters.py) | 21 functions (`test_resolve_provider_cache_policy_defaults` ...) | Token Optimization & Caching | Unit | Unit tests for provider prompt cache adapters, policy resolution, eligibility evaluation, CacheMissReason attribution, and usage parsing. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-FUNC-03 / R-AI-02 | NONE | **`CREATED`** | New TEST-02 unit test suite for Tier 5 provider cache adapters and telemetry. |
+| `UNIT-060` | `CAT-103` | [`tests/unit/test_citations_and_context_sanitization.py`](file:///e:/JakeAI/backend/tests/unit/test_citations_and_context_sanitization.py) | 39 functions (`TestCitationGenerator::test_strip_hallucinated_footnotes_empty_passages` ...) | RAG Pipeline | Unit | Unit tests for CitationGenerator footnote stripping, metric/qualitative matching, score scrubbing, and ContextEnvelopeBuilder assembly. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-AI-01 / R-AI-04 | NONE | **`CREATED`** | New TEST-02 unit test suite for RAG citations, score sanitization, and envelope budgeting. |
+| `UNIT-061` | `CAT-104` | [`tests/unit/test_finops_and_error_classification.py`](file:///e:/JakeAI/backend/tests/unit/test_finops_and_error_classification.py) | 29 functions (`TestFinOpsPricingCalculations::test_get_pricing_known_and_fallback_models` ...) | FinOps & Billing | Unit | Unit tests for FinOps pricing matrices, cache/routing savings calculations, secret redaction, and typed provider error normalization. | None (Pure In-Memory) | unit-and-ai-tests (Full Suite Floor) | PR / Push (main) | `UNIQUE` | R-LOGIC-03 / R-LOGIC-04 | NONE | **`CREATED`** | New TEST-02 unit test suite for FinOps pricing formulas and normalized error taxonomy. |
 
 ---
 
