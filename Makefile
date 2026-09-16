@@ -23,6 +23,9 @@ help:
 	@echo "  make bruno-e2e    Run Bruno CLI critical-e2e test suite"
 	@echo "  make bruno-full   Run complete Bruno CLI test suite"
 	@echo "  make bruno-live   Run Bruno CLI live integration suite"
+	@echo "  make perf-smoke   Run fast performance regression smoke suite (<10s)"
+	@echo "  make perf-full    Run full statistical performance load benchmark"
+	@echo "  make perf-baseline Record new versioned empirical baseline"
 	@echo "  make audit        Scan dependencies for CVEs using pip-audit"
 	@echo "  make sast         Run static application security testing using Bandit"
 	@echo "  make openapi      Export static OpenAPI specification JSON"
@@ -65,6 +68,17 @@ bruno-full:
 
 bruno-live:
 	$(PYTHON) scripts/run_bruno_tests.py --suite live-release
+
+perf-smoke:
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+	cd backend && $(PYTEST) tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py -v
+
+perf-full:
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode full --fail-on-regression
+	cd backend && $(PYTEST) tests/performance/test_load_and_concurrency.py -v
+
+perf-baseline:
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode baseline-record --baseline-version v1
 
 audit:
 	cd backend && $(PIP_AUDIT) -r requirements.txt
