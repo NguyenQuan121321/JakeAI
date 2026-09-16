@@ -151,6 +151,30 @@ def test_regression_detector_blocks_meaningful_latency_regression() -> None:
     assert "Meaningful latency regression" in p95_finding.message
 
 
+def test_regression_detector_throughput_noise_filtering() -> None:
+    """PERF-005: Throughput drop below min_significant_delta_rps produces WARN, not blocking FAIL."""
+    base = _create_dummy_baseline(rps=50.0)
+    # Drop of 20 RPS is >35% drop, but within 25.0 RPS noise floor
+    curr = _create_dummy_result(rps=30.0)
+
+    findings = PerformanceRegressionDetector.evaluate_scenario(curr, base)
+    rps_finding = next(f for f in findings if f.metric_name == "throughput_rps")
+    assert rps_finding.verdict == RegressionVerdict.WARN
+    assert "noise margin" in rps_finding.message
+
+
+def test_regression_detector_blocks_meaningful_throughput_regression() -> None:
+    """PERF-005: Throughput drop exceeding percentage AND min_significant_delta_rps triggers FAIL."""
+    base = _create_dummy_baseline(rps=100.0)
+    # Drop of 60 RPS exceeds 35% AND exceeds 25.0 RPS noise floor
+    curr = _create_dummy_result(rps=40.0)
+
+    findings = PerformanceRegressionDetector.evaluate_scenario(curr, base)
+    rps_finding = next(f for f in findings if f.metric_name == "throughput_rps")
+    assert rps_finding.verdict == RegressionVerdict.FAIL
+    assert "Throughput regression" in rps_finding.message
+
+
 def test_baseline_store_persistence_and_introspection() -> None:
     """PERF-005: Verify filesystem persistence of versioned baseline with metadata."""
     with tempfile.TemporaryDirectory() as tmpdir:

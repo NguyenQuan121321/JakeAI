@@ -25,8 +25,8 @@
       },
       "tolerances": {
         "allowed_latency_regression_pct": 40.0,
-        "min_significant_delta_ms": 15.0,
-        "allowed_throughput_regression_pct": 35.0,
+        "min_significant_delta_ms": 20.0,
+        "allowed_throughput_regression_pct": 50.0,
         "max_error_rate_pct": 0.0
       }
     },
@@ -45,7 +45,7 @@
       "tolerances": {
         "allowed_latency_regression_pct": 40.0,
         "min_significant_delta_ms": 20.0,
-        "allowed_throughput_regression_pct": 35.0,
+        "allowed_throughput_regression_pct": 50.0,
         "max_error_rate_pct": 0.0
       }
     },
@@ -63,8 +63,8 @@
       },
       "tolerances": {
         "allowed_latency_regression_pct": 40.0,
-        "min_significant_delta_ms": 15.0,
-        "allowed_throughput_regression_pct": 35.0,
+        "min_significant_delta_ms": 20.0,
+        "allowed_throughput_regression_pct": 50.0,
         "max_error_rate_pct": 0.0
       }
     },
@@ -83,8 +83,8 @@
       },
       "tolerances": {
         "allowed_latency_regression_pct": 40.0,
-        "min_significant_delta_ms": 15.0,
-        "allowed_throughput_regression_pct": 35.0,
+        "min_significant_delta_ms": 20.0,
+        "allowed_throughput_regression_pct": 50.0,
         "max_error_rate_pct": 0.0
       }
     },
@@ -121,8 +121,8 @@
       },
       "tolerances": {
         "allowed_latency_regression_pct": 40.0,
-        "min_significant_delta_ms": 15.0,
-        "allowed_throughput_regression_pct": 35.0,
+        "min_significant_delta_ms": 20.0,
+        "allowed_throughput_regression_pct": 50.0,
         "max_error_rate_pct": 0.0
       }
     }

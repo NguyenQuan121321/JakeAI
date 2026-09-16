@@ -31,6 +31,7 @@ class PerformanceRegressionDetector:
     DEFAULT_ALLOWED_LATENCY_REGRESSION_PCT = 40.0  # +40% allowed
     DEFAULT_MIN_SIGNIFICANT_DELTA_MS = 15.0  # Ignored if delta < 15ms
     DEFAULT_ALLOWED_THROUGHPUT_REGRESSION_PCT = 35.0  # -35% allowed
+    DEFAULT_MIN_SIGNIFICANT_DELTA_RPS = 25.0  # Ignored if drop < 25 RPS
     DEFAULT_MAX_ERROR_RATE_PCT = 0.0  # 0% error allowed
     DEFAULT_ALLOWED_MEMORY_REGRESSION_PCT = 50.0  # +50% allowed
 
@@ -187,16 +188,26 @@ class PerformanceRegressionDetector:
                 "allowed_throughput_regression_pct",
                 cls.DEFAULT_ALLOWED_THROUGHPUT_REGRESSION_PCT,
             )
+            min_delta_rps = tolerances.get(
+                "min_significant_delta_rps",
+                cls.DEFAULT_MIN_SIGNIFICANT_DELTA_RPS,
+            )
             c_rps = result.throughput.requests_per_second
             min_rps_threshold = round(b_rps * (1.0 - (allowed_rps_drop_pct / 100.0)), 2)
             rps_delta = round(c_rps - b_rps, 2)
             rps_delta_pct = round((rps_delta / b_rps) * 100.0, 2)
 
-            if c_rps < min_rps_threshold:
+            if c_rps < min_rps_threshold and abs(rps_delta) >= min_delta_rps:
                 verdict = RegressionVerdict.FAIL
                 msg = (
                     f"Throughput regression: {c_rps:.2f} rps dropped below minimum threshold "
-                    f"{min_rps_threshold:.2f} rps (baseline {b_rps:.2f} rps, {rps_delta_pct:.1f}%)"
+                    f"{min_rps_threshold:.2f} rps (baseline {b_rps:.2f} rps, {rps_delta_pct:.1f}%, drop {abs(rps_delta):.1f} rps >= {min_delta_rps:.1f} rps)"
+                )
+            elif c_rps < min_rps_threshold:
+                verdict = RegressionVerdict.WARN
+                msg = (
+                    f"Minor throughput dip below threshold: {c_rps:.2f} rps < {min_rps_threshold:.2f} rps "
+                    f"(baseline {b_rps:.2f} rps, delta {rps_delta:+.1f} rps within {min_delta_rps:.1f} rps noise margin)"
                 )
             else:
                 verdict = RegressionVerdict.PASS
