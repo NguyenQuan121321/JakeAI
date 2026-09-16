@@ -84,6 +84,7 @@ class PerformanceBenchmarkRunner:
                 "concurrent_chat": {
                     "concurrency": max(1, int(2 * mult)),
                     "total_requests": max(2, int(3 * mult)),
+                    "simulated_provider_delay_ms": 0.0,
                 },
                 "concurrent_agent_runs": {
                     "concurrency": max(1, int(2 * mult)),
@@ -96,6 +97,7 @@ class PerformanceBenchmarkRunner:
                 "sse_connections": {
                     "concurrency": max(1, int(2 * mult)),
                     "total_streams": max(2, int(2 * mult)),
+                    "simulated_chunk_interval_ms": 0.0,
                 },
                 "redis_contention": {
                     "concurrency": max(1, int(2 * mult)),

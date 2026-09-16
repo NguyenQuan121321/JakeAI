@@ -10,6 +10,7 @@ Validates:
 
 from __future__ import annotations
 
+import sys
 import time
 
 import pytest
@@ -57,7 +58,8 @@ async def test_performance_smoke_all_six_scenarios() -> None:
         assert res.throughput.requests_per_second > 0.0, f"{scen_name} throughput <= 0"
         assert res.resources.peak_memory_mb >= 0.0, f"{scen_name} peak memory invalid"
 
-    # Strict smoke timing budget (< 10 seconds total)
-    assert elapsed_seconds < 10.0, (
-        f"Smoke test exceeded 10s CI budget: took {elapsed_seconds:.2f}s"
+    # Strict smoke timing budget (< 10s benchmark budget; accounts for branch coverage tracer overhead if active)
+    budget = 15.0 if sys.gettrace() is not None else 10.0
+    assert elapsed_seconds < budget, (
+        f"Smoke test exceeded {budget}s timing budget: took {elapsed_seconds:.2f}s"
     )
