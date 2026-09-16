@@ -13,15 +13,17 @@ Generates:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
-from typing import Any
 
 from app.performance.contracts import (
     PerformanceRegressionReport,
     RegressionVerdict,
     ScenarioResult,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PerformanceReporter:
@@ -105,15 +107,17 @@ class PerformanceReporter:
                 f"| {scen_display} | {metric_display} | {b_val} | {c_val} | {d_val} | {t_val} | {v_str} |"
             )
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 3. Detailed Scenario Telemetry",
-            "",
-            "| Scenario | Requests | Concurrency | p50 (ms) | p95 (ms) | p99 (ms) | Throughput (rps) | Peak Mem (MB) | CPU Time (s) |",
-            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "## 3. Detailed Scenario Telemetry",
+                "",
+                "| Scenario | Requests | Concurrency | p50 (ms) | p95 (ms) | p99 (ms) | Throughput (rps) | Peak Mem (MB) | CPU Time (s) |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ]
+        )
 
         for name, res in results.items():
             lines.append(
@@ -122,13 +126,15 @@ class PerformanceReporter:
                 f"{res.throughput.requests_per_second:.1f} | {res.resources.peak_memory_mb:.1f} | {res.resources.cpu_time_seconds:.3f} |"
             )
 
-        lines.extend([
-            "",
-            "---",
-            "",
-            f"> **Audit Summary**: {report.summary_text}",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                f"> **Audit Summary**: {report.summary_text}",
+                "",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -177,8 +183,12 @@ class PerformanceReporter:
             try:
                 with open(step_summary_path, "a", encoding="utf-8") as f:
                     f.write("\n" + md_content + "\n")
-            except Exception:
-                pass
+            except OSError as exc:
+                logger.debug(
+                    "Failed to append performance report to GITHUB_STEP_SUMMARY (%s): %s",
+                    step_summary_path,
+                    exc,
+                )
 
         return {
             "summary": summary_path,

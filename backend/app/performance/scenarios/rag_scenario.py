@@ -11,8 +11,8 @@ Measures:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
-from typing import Any
 
 from app.performance.contracts import (
     LatencyMetrics,
@@ -31,6 +31,8 @@ from app.rag.reranker import CrossEncoderReranker
 from app.rag.retriever import HybridRetriever
 from app.rag.vector_store import QdrantVectorStore
 
+logger = logging.getLogger(__name__)
+
 
 async def run_concurrent_rag_scenario(
     concurrency: int = 10,
@@ -40,14 +42,15 @@ async def run_concurrent_rag_scenario(
     fake_emb = TestOnlyFakeEmbeddingProvider(dimension=384)
     vector_store = QdrantVectorStore(embedding_provider=fake_emb)
 
-    is_live = await vector_store._get_client() is not None and vector_store._is_qdrant_available
+    is_live = (
+        await vector_store._get_client() is not None
+        and vector_store._is_qdrant_available
+    )
     if not is_live:
-        async def _no_client() -> Any:
-            return None
-        vector_store._get_client = _no_client
+        vector_store._client = False
 
     fast_reranker = CrossEncoderReranker(
-        cross_encoder_fn=lambda q, docs: [0.95 - (0.01 * i) for i in range(len(docs))]
+        cross_encoder_fn=lambda _q, docs: [0.95 - (0.01 * i) for i in range(len(docs))]
     )
     retriever = HybridRetriever(vector_store=vector_store, reranker=fast_reranker)
     selector = get_context_selector()
@@ -85,6 +88,7 @@ async def run_concurrent_rag_scenario(
     ]
 
     with PerformanceProfiler() as profiler:
+
         async def _worker(idx: int) -> None:
             nonlocal errors, success, total_chunks_retrieved, total_tokens_saved
             q_text = test_queries[idx % len(test_queries)]
@@ -119,7 +123,8 @@ async def run_concurrent_rag_scenario(
                     success += 1
                     total_chunks_retrieved += len(candidates)
                     total_tokens_saved += selection.tokens_saved
-                except Exception:
+                except (RuntimeError, ValueError, KeyError, OSError) as exc:
+                    logger.debug("RAG scenario worker encountered an error: %s", exc)
                     errors += 1
 
         tasks = [_worker(i) for i in range(total_queries)]
@@ -157,7 +162,9 @@ async def run_concurrent_rag_scenario(
         ),
         custom_metrics={
             "total_chunks_retrieved": total_chunks_retrieved,
-            "avg_candidates_per_query": round(total_chunks_retrieved / max(1, success), 1),
+            "avg_candidates_per_query": round(
+                total_chunks_retrieved / max(1, success), 1
+            ),
             "total_tokens_saved": total_tokens_saved,
         },
     )

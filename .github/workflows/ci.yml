@@ -308,7 +308,7 @@ jobs:
         run: |
           cd backend
           python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
-          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py -v
+          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py tests/performance/test_performance_exceptions.py -v
 
       - name: Archive Performance Benchmark Smoke Artifacts
         if: always() && matrix.python-version == '3.12'

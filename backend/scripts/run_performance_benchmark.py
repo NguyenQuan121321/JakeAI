@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -23,7 +22,6 @@ backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-from app.performance.contracts import RegressionVerdict  # noqa: E402
 from app.performance.reporter import PerformanceReporter  # noqa: E402
 from app.performance.runner import PerformanceBenchmarkRunner  # noqa: E402
 
@@ -111,7 +109,9 @@ async def async_main() -> int:
     print("\nFinal Performance Verdict: " + report.verdict.value)
 
     if args.fail_on_regression and report.has_blocking_regressions:
-        print("\n[ERROR] Blocking performance regression detected! Exiting with code 1.")
+        print(
+            "\n[ERROR] Blocking performance regression detected! Exiting with code 1."
+        )
         return 1
 
     return 0

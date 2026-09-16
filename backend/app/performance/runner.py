@@ -13,6 +13,8 @@ import asyncio
 import logging
 from typing import Literal
 
+import httpx
+
 from app.performance.baseline_store import (
     capture_environment_metadata,
     get_performance_baseline_store,
@@ -58,14 +60,18 @@ class PerformanceBenchmarkRunner:
         logger.info("Executing performance benchmark warmup...")
         try:
             await asyncio.gather(
-                run_concurrent_chat_scenario(concurrency=2, total_requests=2, simulated_provider_delay_ms=0),
+                run_concurrent_chat_scenario(
+                    concurrency=2, total_requests=2, simulated_provider_delay_ms=0
+                ),
                 run_concurrent_agent_scenario(concurrency=2, total_runs=2),
                 run_concurrent_rag_scenario(concurrency=2, total_queries=2),
-                run_concurrent_sse_scenario(concurrency=2, total_streams=2, simulated_chunk_interval_ms=0),
+                run_concurrent_sse_scenario(
+                    concurrency=2, total_streams=2, simulated_chunk_interval_ms=0
+                ),
                 run_redis_contention_scenario(concurrency=2, total_operations=4),
                 run_concurrent_qdrant_scenario(concurrency=2, total_operations=4),
             )
-        except Exception as exc:
+        except (httpx.HTTPError, OSError) as exc:
             logger.debug("Warmup error ignored: %s", exc)
 
     async def run_scenario(self, scenario_name: str) -> ScenarioResult:
@@ -75,22 +81,58 @@ class PerformanceBenchmarkRunner:
         if self.mode == "smoke":
             # Fast CI smoke mode (< 10 seconds total across all 6 scenarios)
             cfg = {
-                "concurrent_chat": {"concurrency": max(1, int(3 * mult)), "total_requests": max(2, int(6 * mult))},
-                "concurrent_agent_runs": {"concurrency": max(1, int(2 * mult)), "total_runs": max(2, int(4 * mult))},
-                "concurrent_rag_queries": {"concurrency": max(1, int(3 * mult)), "total_queries": max(2, int(6 * mult))},
-                "sse_connections": {"concurrency": max(1, int(2 * mult)), "total_streams": max(2, int(4 * mult))},
-                "redis_contention": {"concurrency": max(1, int(4 * mult)), "total_operations": max(4, int(10 * mult))},
-                "qdrant_access": {"concurrency": max(1, int(3 * mult)), "total_operations": max(3, int(6 * mult))},
+                "concurrent_chat": {
+                    "concurrency": max(1, int(3 * mult)),
+                    "total_requests": max(2, int(6 * mult)),
+                },
+                "concurrent_agent_runs": {
+                    "concurrency": max(1, int(2 * mult)),
+                    "total_runs": max(2, int(4 * mult)),
+                },
+                "concurrent_rag_queries": {
+                    "concurrency": max(1, int(3 * mult)),
+                    "total_queries": max(2, int(6 * mult)),
+                },
+                "sse_connections": {
+                    "concurrency": max(1, int(2 * mult)),
+                    "total_streams": max(2, int(4 * mult)),
+                },
+                "redis_contention": {
+                    "concurrency": max(1, int(4 * mult)),
+                    "total_operations": max(4, int(10 * mult)),
+                },
+                "qdrant_access": {
+                    "concurrency": max(1, int(3 * mult)),
+                    "total_operations": max(3, int(6 * mult)),
+                },
             }
         else:
             # Full statistical load mode
             cfg = {
-                "concurrent_chat": {"concurrency": max(2, int(10 * mult)), "total_requests": max(10, int(30 * mult))},
-                "concurrent_agent_runs": {"concurrency": max(2, int(5 * mult)), "total_runs": max(5, int(15 * mult))},
-                "concurrent_rag_queries": {"concurrency": max(2, int(10 * mult)), "total_queries": max(10, int(30 * mult))},
-                "sse_connections": {"concurrency": max(2, int(8 * mult)), "total_streams": max(8, int(16 * mult))},
-                "redis_contention": {"concurrency": max(4, int(15 * mult)), "total_operations": max(15, int(50 * mult))},
-                "qdrant_access": {"concurrency": max(2, int(10 * mult)), "total_operations": max(10, int(30 * mult))},
+                "concurrent_chat": {
+                    "concurrency": max(2, int(10 * mult)),
+                    "total_requests": max(10, int(30 * mult)),
+                },
+                "concurrent_agent_runs": {
+                    "concurrency": max(2, int(5 * mult)),
+                    "total_runs": max(5, int(15 * mult)),
+                },
+                "concurrent_rag_queries": {
+                    "concurrency": max(2, int(10 * mult)),
+                    "total_queries": max(10, int(30 * mult)),
+                },
+                "sse_connections": {
+                    "concurrency": max(2, int(8 * mult)),
+                    "total_streams": max(8, int(16 * mult)),
+                },
+                "redis_contention": {
+                    "concurrency": max(4, int(15 * mult)),
+                    "total_operations": max(15, int(50 * mult)),
+                },
+                "qdrant_access": {
+                    "concurrency": max(2, int(10 * mult)),
+                    "total_operations": max(10, int(30 * mult)),
+                },
             }
 
         params = cfg.get(scenario_name, {"concurrency": 2, "total_requests": 5})
@@ -110,7 +152,9 @@ class PerformanceBenchmarkRunner:
         else:
             raise ValueError(f"Unknown performance scenario: {scenario_name}")
 
-    async def run_all_scenarios(self, run_warmup: bool = True) -> dict[str, ScenarioResult]:
+    async def run_all_scenarios(
+        self, run_warmup: bool = True
+    ) -> dict[str, ScenarioResult]:
         """Execute all 6 performance scenarios sequentially to avoid inter-scenario interference."""
         if run_warmup:
             await self._warmup()
@@ -140,7 +184,9 @@ class PerformanceBenchmarkRunner:
 
         return results
 
-    async def run_benchmark_and_audit(self) -> tuple[dict[str, ScenarioResult], PerformanceRegressionReport]:
+    async def run_benchmark_and_audit(
+        self,
+    ) -> tuple[dict[str, ScenarioResult], PerformanceRegressionReport]:
         """Run all scenarios and audit against the versioned baseline."""
         results = await self.run_all_scenarios(run_warmup=True)
         baseline = self.store.load_baseline(self.baseline_version)
@@ -151,7 +197,9 @@ class PerformanceBenchmarkRunner:
         # Reproducibility check: If regressions detected, run confirmation trial on failed scenarios
         if report.has_blocking_regressions:
             failed_scenarios = [
-                f.scenario for f in report.findings if f.verdict == RegressionVerdict.FAIL
+                f.scenario
+                for f in report.findings
+                if f.verdict == RegressionVerdict.FAIL
             ]
             unique_failed = list(dict.fromkeys(failed_scenarios))
             logger.warning(
@@ -166,7 +214,9 @@ class PerformanceBenchmarkRunner:
                 reconfirmed_results[scen_name] = confirm_res
 
             # Re-evaluate with confirmed results
-            report = PerformanceRegressionDetector.evaluate_all(reconfirmed_results, baseline)
+            report = PerformanceRegressionDetector.evaluate_all(
+                reconfirmed_results, baseline
+            )
             results = reconfirmed_results
 
         return results, report
@@ -193,7 +243,11 @@ class PerformanceBenchmarkRunner:
                     "throughput_rps": res.throughput.requests_per_second,
                     "error_rate_pct": res.error_rate_pct,
                     "memory_peak_mb": res.resources.peak_memory_mb,
-                    **({"ttfc_p95_ms": res.latency.ttfc_ms.p95} if res.latency.ttfc_ms.count > 0 else {}),
+                    **(
+                        {"ttfc_p95_ms": res.latency.ttfc_ms.p95}
+                        if res.latency.ttfc_ms.count > 0
+                        else {}
+                    ),
                 },
                 tolerances={
                     "allowed_latency_regression_pct": 40.0,

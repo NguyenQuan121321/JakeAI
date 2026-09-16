@@ -11,11 +11,14 @@ Measures:
 from __future__ import annotations
 
 import asyncio
-import time
-from collections.abc import AsyncGenerator
-from typing import Any
+import logging
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+import httpx
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
@@ -32,12 +35,14 @@ from app.performance.profiler import (
 from app.providers.base import ProviderCacheTelemetry
 from tests.fixtures.auth import create_test_jwt
 
+logger = logging.getLogger(__name__)
+
 
 async def _mock_stream_workflow(
-    prompt: str,
-    context: Any,
-    conversation_id: str,
-    model: str | None = None,
+    _prompt: str,
+    _context: Any,
+    _conversation_id: str,
+    _model: str | None = None,
     chunk_delay_ms: float = 3.0,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Mock multi-agent streaming workflow generator for deterministic performance profiling."""
@@ -105,8 +110,12 @@ async def run_concurrent_sse_scenario(
     semaphore = asyncio.Semaphore(concurrency)
     transport = ASGITransport(app=app)
 
-    async def _mock_stream_patch(prompt: str, context: Any, conversation_id: str, model: str | None = None) -> AsyncGenerator[dict[str, Any], None]:
-        async for chunk in _mock_stream_workflow(prompt, context, conversation_id, model, simulated_chunk_interval_ms):
+    async def _mock_stream_patch(
+        prompt: str, context: Any, conversation_id: str, model: str | None = None
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        async for chunk in _mock_stream_workflow(
+            prompt, context, conversation_id, model, simulated_chunk_interval_ms
+        ):
             yield chunk
 
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -125,10 +134,11 @@ async def run_concurrent_sse_scenario(
                 ) as warm_resp:
                     async for _ in warm_resp.aiter_lines():
                         pass
-            except Exception:
-                pass
+            except httpx.HTTPError as exc:
+                logger.debug("SSE stream warmup request failed: %s", exc)
 
             with PerformanceProfiler() as profiler:
+
                 async def _stream_worker(idx: int) -> None:
                     nonlocal errors, success, total_chunks_received
                     collector = StreamMetricsCollector()
@@ -161,10 +171,13 @@ async def run_concurrent_sse_scenario(
                                 total_chunks_received += collector.chunk_count
                                 ttfc_samples.append(collector.ttfc_ms)
                                 stream_durations.append(collector.total_duration_ms)
-                                inter_chunk_samples.extend(collector.inter_chunk_delays_ms[1:])
+                                inter_chunk_samples.extend(
+                                    collector.inter_chunk_delays_ms[1:]
+                                )
                             else:
                                 errors += 1
-                        except Exception:
+                        except (httpx.HTTPError, ValueError) as exc:
+                            logger.debug("SSE scenario stream failed: %s", exc)
                             errors += 1
 
                 tasks = [_stream_worker(i) for i in range(total_streams)]

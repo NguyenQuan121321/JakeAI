@@ -11,10 +11,12 @@ Measures:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 from httpx import ASGITransport, AsyncClient
 
 from app.core.llm_provider import UpstreamLLMResponse
@@ -33,8 +35,12 @@ from app.performance.profiler import (
 from app.providers.base import ProviderCacheTelemetry
 from tests.fixtures.auth import create_test_jwt
 
+logger = logging.getLogger(__name__)
 
-def _create_mock_chat_response(text: str = "Analysis: Q3 Operating Profit stood at $63.4M.") -> UpstreamLLMResponse:
+
+def _create_mock_chat_response(
+    text: str = "Analysis: Q3 Operating Profit stood at $63.4M.",
+) -> UpstreamLLMResponse:
     """Deterministic upstream LLM test double for pure platform performance measurement."""
     return UpstreamLLMResponse(
         text=text,
@@ -74,18 +80,21 @@ async def run_concurrent_chat_scenario(
     semaphore = asyncio.Semaphore(concurrency)
     transport = ASGITransport(app=app)
 
-    async def _mock_call(*args: Any, **kwargs: Any) -> UpstreamLLMResponse:
+    async def _mock_call(*_args: Any, **_kwargs: Any) -> UpstreamLLMResponse:
         if simulated_provider_delay_ms > 0:
             await asyncio.sleep(simulated_provider_delay_ms / 1000.0)
         return _create_mock_chat_response()
 
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        with patch(
-            "app.services.ai_gateway.call_upstream_llm_detailed",
-            side_effect=_mock_call,
-        ), patch(
-            "app.core.llm_provider.call_upstream_llm_detailed",
-            side_effect=_mock_call,
+        with (
+            patch(
+                "app.services.ai_gateway.call_upstream_llm_detailed",
+                side_effect=_mock_call,
+            ),
+            patch(
+                "app.core.llm_provider.call_upstream_llm_detailed",
+                side_effect=_mock_call,
+            ),
         ):
             # Pre-warm ASGI route & singleton handlers before starting profiler
             try:
@@ -95,17 +104,21 @@ async def run_concurrent_chat_scenario(
                     headers=headers,
                     timeout=10.0,
                 )
-            except Exception:
-                pass
+            except httpx.HTTPError as exc:
+                logger.debug("Chat ASGI warmup request failed: %s", exc)
 
             with PerformanceProfiler() as profiler:
+
                 async def _worker(idx: int) -> None:
                     nonlocal errors, success, cache_hits, cache_misses
                     # Alternate queries between recurring (testing cache) and unique
                     query_id = idx % 5
                     payload = {
                         "messages": [
-                            {"role": "user", "content": f"Summarize invoice batch #{query_id} for reconciliation"}
+                            {
+                                "role": "user",
+                                "content": f"Summarize invoice batch #{query_id} for reconciliation",
+                            }
                         ],
                         "model": "gemini-1.5-flash",
                     }
@@ -126,13 +139,17 @@ async def run_concurrent_chat_scenario(
                             if resp.status_code == 200:
                                 success += 1
                                 data = resp.json()
-                                if data.get("cached") or data.get("usage", {}).get("cached_tokens", 0) > 0:
+                                if (
+                                    data.get("cached")
+                                    or data.get("usage", {}).get("cached_tokens", 0) > 0
+                                ):
                                     cache_hits += 1
                                 else:
                                     cache_misses += 1
                             else:
                                 errors += 1
-                        except Exception:
+                        except (httpx.HTTPError, ValueError) as exc:
+                            logger.debug("Chat worker request failed: %s", exc)
                             errors += 1
 
                 tasks = [_worker(i) for i in range(total_requests)]
@@ -143,7 +160,9 @@ async def run_concurrent_chat_scenario(
     throughput = calculate_throughput(total_requests, dur, concurrency)
     res_metrics = profiler.get_resource_metrics()
 
-    err_rate = round((errors / total_requests * 100.0), 2) if total_requests > 0 else 0.0
+    err_rate = (
+        round((errors / total_requests * 100.0), 2) if total_requests > 0 else 0.0
+    )
     hit_rate = (
         round((cache_hits / (cache_hits + cache_misses) * 100.0), 2)
         if (cache_hits + cache_misses) > 0

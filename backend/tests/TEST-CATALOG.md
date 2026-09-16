@@ -7,17 +7,17 @@
 ## 1. Catalog Overview & Summary Statistics
 - **Total Tracked Test Files**: 127 tracked in catalog (125 active test files + 1 shared fixture module + 1 deleted obsolete file)
 - **Active Executable Test Files**: 125
-- **Total Test Functions / Methods**: 1,359 (collected by Pytest as 1,833 test items)
+- **Total Test Functions / Methods**: 1,368 (collected by Pytest as 1,842 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 32 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 3 Performance in TEST-09: `CAT-125`..`CAT-127`)
+  - `CREATED`: 33 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
-  - `PERF-*`: 5 files (`PERF-001` through `PERF-005`, 15 tests)
+  - `PERF-*`: 6 files (`PERF-001` through `PERF-006`, 24 tests)
   - `E2E-*`: 3 files (`E2E-001` through `E2E-003`, 39 tests)
   - `AI-*`: 14 files (`AI-001` through `AI-014`, 131 tests)
   - `INT-*`: 25 files (`INT-001` through `INT-025`, 332 tests)
@@ -2982,6 +2982,7 @@ JakeAI implements an automated, reproducible performance regression detection an
 | `PERF-003` | `CAT-125` | [`tests/performance/test_performance_smoke.py`](file:///e:/JakeAI/backend/tests/performance/test_performance_smoke.py) | Fast smoke gate executing all 6 scenarios in <10s with 0% error rate | All 6 scenarios | Continuous Integration | PR / Push (main) |
 | `PERF-004` | `CAT-126` | [`tests/performance/test_load_and_concurrency.py`](file:///e:/JakeAI/backend/tests/performance/test_load_and_concurrency.py) | Multi-worker concurrency, contention stability & SSE frame integrity | Chat, Redis, SSE, Qdrant | Scheduled Benchmark | Nightly / Release |
 | `PERF-005` | `CAT-127` | [`tests/performance/test_performance_regression_gate.py`](file:///e:/JakeAI/backend/tests/performance/test_performance_regression_gate.py) | Regression detector tolerance, noise floor, and artifact generation | Detector engine & store | Continuous Integration | PR / Push (main) |
+| `PERF-006` | `CAT-128` | [`tests/performance/test_performance_exceptions.py`](file:///e:/JakeAI/backend/tests/performance/test_performance_exceptions.py) | Non-fatal network failure in warmup, defect propagation, cancellation | Scenarios, Runner, Reporter | Continuous Integration | PR / Push (main) |
 
 
 

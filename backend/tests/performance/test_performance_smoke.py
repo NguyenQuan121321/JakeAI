@@ -11,6 +11,7 @@ Validates:
 from __future__ import annotations
 
 import time
+
 import pytest
 
 from app.performance.runner import PerformanceBenchmarkRunner
@@ -21,7 +22,7 @@ from app.performance.runner import PerformanceBenchmarkRunner
 async def test_performance_smoke_all_six_scenarios() -> None:
     """PERF-003: Verify all 6 performance scenarios complete with zero error rate under 10s."""
     runner = PerformanceBenchmarkRunner(mode="smoke", concurrency_multiplier=1.0)
-    
+
     t0 = time.perf_counter()
     results = await runner.run_all_scenarios(run_warmup=False)
     elapsed_seconds = time.perf_counter() - t0
@@ -42,8 +43,12 @@ async def test_performance_smoke_all_six_scenarios() -> None:
         res = results[scen_name]
 
         # Zero tolerance for errors in CI smoke
-        assert res.error_count == 0, f"Scenario {scen_name} had {res.error_count} errors"
-        assert res.error_rate_pct == 0.0, f"Scenario {scen_name} had non-zero error rate: {res.error_rate_pct}%"
+        assert res.error_count == 0, (
+            f"Scenario {scen_name} had {res.error_count} errors"
+        )
+        assert res.error_rate_pct == 0.0, (
+            f"Scenario {scen_name} had non-zero error rate: {res.error_rate_pct}%"
+        )
         assert res.success_count > 0, f"Scenario {scen_name} had zero successes"
 
         # Telemetry sanity checks
@@ -53,4 +58,6 @@ async def test_performance_smoke_all_six_scenarios() -> None:
         assert res.resources.peak_memory_mb >= 0.0, f"{scen_name} peak memory invalid"
 
     # Strict smoke timing budget (< 10 seconds total)
-    assert elapsed_seconds < 10.0, f"Smoke test exceeded 10s CI budget: took {elapsed_seconds:.2f}s"
+    assert elapsed_seconds < 10.0, (
+        f"Smoke test exceeded 10s CI budget: took {elapsed_seconds:.2f}s"
+    )

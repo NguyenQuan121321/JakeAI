@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
-from typing import Any
 from unittest.mock import patch
 
 from app.agent.backends.base import BackendResponse
@@ -28,20 +28,24 @@ from app.performance.profiler import (
     compute_distribution,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _make_mock_plan_json(idx: int) -> str:
-    return json.dumps({
-        "analysis": f"Deterministic execution plan for batch #{idx}",
-        "steps": [
-            {
-                "step_id": f"step_{idx}_1",
-                "description": f"Calculate tax differential for batch #{idx}",
-                "tool_name": "calculator",
-                "tool_arguments": {"expression": f"{100 + idx} * 1.1"},
-                "dependencies": [],
-            }
-        ],
-    })
+    return json.dumps(
+        {
+            "analysis": f"Deterministic execution plan for batch #{idx}",
+            "steps": [
+                {
+                    "step_id": f"step_{idx}_1",
+                    "description": f"Calculate tax differential for batch #{idx}",
+                    "tool_name": "calculator",
+                    "tool_arguments": {"expression": f"{100 + idx} * 1.1"},
+                    "dependencies": [],
+                }
+            ],
+        }
+    )
 
 
 async def run_concurrent_agent_scenario(
@@ -59,6 +63,7 @@ async def run_concurrent_agent_scenario(
     total_steps_executed = 0
 
     with PerformanceProfiler() as profiler:
+
         async def _worker(idx: int) -> None:
             nonlocal errors, success, total_steps_executed
             tenant_id = f"tenant-perf-agent-{idx % 3}"
@@ -68,7 +73,8 @@ async def run_concurrent_agent_scenario(
             mock_response = BackendResponse(
                 content=plan_json,
                 model="gemini-1.5-flash",
-                usage={"total_tokens": 40},
+                input_tokens=25,
+                output_tokens=15,
             )
 
             async with semaphore:
@@ -104,7 +110,8 @@ async def run_concurrent_agent_scenario(
                             success += 1
                         else:
                             errors += 1
-                except Exception:
+                except (RuntimeError, ValueError, KeyError, OSError) as exc:
+                    logger.debug("Agent run worker error: %s", exc)
                     errors += 1
 
         tasks = [_worker(i) for i in range(total_runs)]

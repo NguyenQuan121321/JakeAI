@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-import pytest
 
-from app.performance.baseline_store import PerformanceBaselineStore, capture_environment_metadata
+from app.performance.baseline_store import (
+    PerformanceBaselineStore,
+    capture_environment_metadata,
+)
 from app.performance.contracts import (
-    EnvironmentMetadata,
     LatencyMetrics,
     MetricDistribution,
     PerformanceBaseline,
@@ -64,7 +65,9 @@ def _create_dummy_result(
             requests_per_second=rps,
             concurrency=10,
         ),
-        resources=ResourceMetrics(peak_memory_mb=10.0, memory_delta_mb=1.0, cpu_process_time_seconds=0.1),
+        resources=ResourceMetrics(
+            peak_memory_mb=10.0, memory_delta_mb=1.0, cpu_process_time_seconds=0.1
+        ),
     )
 
 
@@ -107,7 +110,9 @@ def test_regression_detector_passes_within_tolerance() -> None:
     findings = PerformanceRegressionDetector.evaluate_scenario(curr, base)
     verdicts = [f.verdict for f in findings]
     assert RegressionVerdict.FAIL not in verdicts
-    assert all(f.verdict in (RegressionVerdict.PASS, RegressionVerdict.WARN) for f in findings)
+    assert all(
+        f.verdict in (RegressionVerdict.PASS, RegressionVerdict.WARN) for f in findings
+    )
 
 
 def test_regression_detector_blocks_on_error_rate() -> None:
@@ -181,7 +186,9 @@ def test_reporter_artifacts_generation() -> None:
             environment=capture_environment_metadata(),
             scenarios={"chat": base},
         )
-        report = PerformanceRegressionDetector.evaluate_all({"chat": res}, perf_baseline)
+        report = PerformanceRegressionDetector.evaluate_all(
+            {"chat": res}, perf_baseline
+        )
 
         artifacts = reporter.save_artifacts(report, {"chat": res})
         assert Path(artifacts["summary"]).exists()
@@ -190,5 +197,8 @@ def test_reporter_artifacts_generation() -> None:
 
         md_content = Path(artifacts["markdown"]).read_text(encoding="utf-8")
         assert "JakeAI Performance Regression Report" in md_content
-        assert "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |" in md_content
+        assert (
+            "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |"
+            in md_content
+        )
         assert "`chat`" in md_content

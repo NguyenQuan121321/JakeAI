@@ -11,7 +11,6 @@ Evaluates empirical benchmark results against versioned baselines:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from app.performance.contracts import (
     PerformanceBaseline,
@@ -66,7 +65,9 @@ class PerformanceRegressionDetector:
         tolerances = baseline.tolerances
 
         # 1. Error Rate Audit (Hard Zero-Tolerance Gate)
-        max_err_rate = tolerances.get("max_error_rate_pct", cls.DEFAULT_MAX_ERROR_RATE_PCT)
+        max_err_rate = tolerances.get(
+            "max_error_rate_pct", cls.DEFAULT_MAX_ERROR_RATE_PCT
+        )
         curr_err_rate = result.error_rate_pct
         if curr_err_rate > max_err_rate:
             findings.append(
@@ -108,15 +109,31 @@ class PerformanceRegressionDetector:
         )
 
         latency_checks = [
-            ("latency_p50_ms", base_metrics.get("latency_p50_ms"), result.latency.overall_ms.median_p50),
-            ("latency_p95_ms", base_metrics.get("latency_p95_ms"), result.latency.overall_ms.p95),
-            ("latency_p99_ms", base_metrics.get("latency_p99_ms"), result.latency.overall_ms.p99),
+            (
+                "latency_p50_ms",
+                base_metrics.get("latency_p50_ms"),
+                result.latency.overall_ms.median_p50,
+            ),
+            (
+                "latency_p95_ms",
+                base_metrics.get("latency_p95_ms"),
+                result.latency.overall_ms.p95,
+            ),
+            (
+                "latency_p99_ms",
+                base_metrics.get("latency_p99_ms"),
+                result.latency.overall_ms.p99,
+            ),
         ]
 
         # Additional streaming TTFC check if present in scenario
         if result.latency.ttfc_ms.count > 0 and "ttfc_p95_ms" in base_metrics:
             latency_checks.append(
-                ("ttfc_p95_ms", base_metrics.get("ttfc_p95_ms"), result.latency.ttfc_ms.p95)
+                (
+                    "ttfc_p95_ms",
+                    base_metrics.get("ttfc_p95_ms"),
+                    result.latency.ttfc_ms.p95,
+                )
             )
 
         for metric_name, b_val, c_val in latency_checks:
@@ -167,7 +184,8 @@ class PerformanceRegressionDetector:
         b_rps = base_metrics.get("throughput_rps")
         if b_rps and b_rps > 0.0:
             allowed_rps_drop_pct = tolerances.get(
-                "allowed_throughput_regression_pct", cls.DEFAULT_ALLOWED_THROUGHPUT_REGRESSION_PCT
+                "allowed_throughput_regression_pct",
+                cls.DEFAULT_ALLOWED_THROUGHPUT_REGRESSION_PCT,
             )
             c_rps = result.throughput.requests_per_second
             min_rps_threshold = round(b_rps * (1.0 - (allowed_rps_drop_pct / 100.0)), 2)

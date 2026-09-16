@@ -13,6 +13,7 @@ Measures:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -21,7 +22,6 @@ from app.agent.state.models import RunState, RunStatus
 from app.core.redis_client import acquire_redis_client
 from app.finops.budget import FinOpsBudgetManager
 from app.optimizer.semantic_cache import SemanticCacheManager
-from app.rag.embedding import TestOnlyFakeEmbeddingProvider
 from app.performance.contracts import (
     CacheMetrics,
     LatencyMetrics,
@@ -32,6 +32,9 @@ from app.performance.profiler import (
     calculate_throughput,
     compute_distribution,
 )
+from app.rag.embedding import TestOnlyFakeEmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 
 class InMemoryContentionRedis:
@@ -47,7 +50,7 @@ class InMemoryContentionRedis:
         async with self._lock:
             return self._store.get(key)
 
-    async def set(self, key: str, value: Any, ex: int | None = None) -> bool:
+    async def set(self, key: str, value: Any, _ex: int | None = None) -> bool:
         async with self._lock:
             self._store[key] = value
             return True
@@ -82,7 +85,7 @@ class InMemoryContentionRedis:
     async def ping(self) -> bool:
         return True
 
-    async def eval(self, script: str, numkeys: int, *keys_and_args: Any) -> list[Any]:
+    async def eval(self, script: str, numkeys: int, *_keys_and_args: Any) -> list[Any]:
         async with self._lock:
             # FinOps finalize script check
             if "finalized" in script or numkeys == 3:
@@ -103,7 +106,9 @@ async def run_redis_contention_scenario(
     budget_mgr = FinOpsBudgetManager()
     budget_mgr.redis_client = mock_redis
     fake_emb = TestOnlyFakeEmbeddingProvider(dimension=384)
-    cache_mgr = SemanticCacheManager(redis_client=mock_redis, embedding_provider=fake_emb)
+    cache_mgr = SemanticCacheManager(
+        redis_client=mock_redis, embedding_provider=fake_emb
+    )
     cache_mgr._qdrant_available = False
     cache_mgr._qdrant_retry_after = time.time() + 3600
     chk_mgr = CheckpointManager()
@@ -116,6 +121,7 @@ async def run_redis_contention_scenario(
     cache_hits = 0
 
     with PerformanceProfiler() as profiler:
+
         async def _contention_worker(idx: int) -> None:
             nonlocal errors, success, cache_hits
             # Target shared tenant key to force contention across coroutines
@@ -133,7 +139,9 @@ async def run_redis_contention_scenario(
                     )
 
                     # 2. Competing cache read & write
-                    cached = await cache_mgr.get(prompt=cache_key, tenant_id=tenant_id, exact_only=True)
+                    cached = await cache_mgr.get(
+                        prompt=cache_key, tenant_id=tenant_id, exact_only=True
+                    )
                     if cached:
                         cache_hits += 1
                     else:
@@ -161,7 +169,9 @@ async def run_redis_contention_scenario(
                         status=RunStatus.COMPLETED,
                     )
                     await chk_mgr.save_checkpoint(run_state)
-                    loaded = await chk_mgr.load_checkpoint(run_state.run_id, tenant_id=tenant_id)
+                    loaded = await chk_mgr.load_checkpoint(
+                        run_state.run_id, tenant_id=tenant_id
+                    )
 
                     t1 = time.perf_counter()
                     lat_ms = (t1 - t0) * 1000.0
@@ -171,7 +181,8 @@ async def run_redis_contention_scenario(
                         success += 1
                     else:
                         errors += 1
-                except Exception:
+                except (RuntimeError, ValueError, KeyError, OSError) as exc:
+                    logger.debug("Redis contention worker error: %s", exc)
                     errors += 1
 
         tasks = [_contention_worker(i) for i in range(total_operations)]
@@ -182,7 +193,9 @@ async def run_redis_contention_scenario(
     throughput = calculate_throughput(total_operations, dur, concurrency)
     res_metrics = profiler.get_resource_metrics()
 
-    err_rate = round((errors / total_operations * 100.0), 2) if total_operations > 0 else 0.0
+    err_rate = (
+        round((errors / total_operations * 100.0), 2) if total_operations > 0 else 0.0
+    )
 
     return ScenarioResult(
         scenario_name="redis_contention",

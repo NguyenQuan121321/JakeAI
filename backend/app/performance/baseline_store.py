@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -20,29 +19,45 @@ from pathlib import Path
 from app.performance.contracts import (
     EnvironmentMetadata,
     PerformanceBaseline,
-    ScenarioBaseline,
 )
 
 logger = logging.getLogger(__name__)
 
 
+def _read_git_commit() -> str:
+    """Read current git commit hash safely from git metadata or environment."""
+    env_sha = os.environ.get("GITHUB_SHA") or os.environ.get("GIT_COMMIT")
+    if env_sha:
+        return env_sha[:12]
+    try:
+        git_dir = Path(__file__).resolve().parent.parent.parent.parent / ".git"
+        head_file = git_dir / "HEAD"
+        if not head_file.is_file():
+            return "unknown"
+        head_content = head_file.read_text(encoding="utf-8").strip()
+        if head_content.startswith("ref:"):
+            ref_path = head_content.split(":", 1)[1].strip()
+            target = git_dir / ref_path
+            if target.is_file():
+                return target.read_text(encoding="utf-8").strip()[:12]
+            packed = git_dir / "packed-refs"
+            if packed.is_file():
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    parts = line.strip().split()
+                    if len(parts) == 2 and parts[1] == ref_path:
+                        return parts[0][:12]
+        elif len(head_content) >= 7:
+            return head_content[:12]
+    except OSError as exc:
+        logger.debug("Failed reading git commit from filesystem: %s", exc)
+        return "unknown"
+    return "unknown"
+
+
 def capture_environment_metadata(env_name: str = "local") -> EnvironmentMetadata:
     """Introspect current host environment, runtime versions, and dependency hash."""
     # 1. Capture Git Commit Hash
-    commit_hash = os.environ.get("GITHUB_SHA") or "unknown"
-    if commit_hash == "unknown":
-        try:
-            res = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if res.returncode == 0:
-                commit_hash = res.stdout.strip()[:12]
-        except Exception:
-            commit_hash = "unknown"
+    commit_hash = _read_git_commit()
 
     # 2. Dependency Hash of requirements.txt
     dep_hash = "unknown"
@@ -51,7 +66,8 @@ def capture_environment_metadata(env_name: str = "local") -> EnvironmentMetadata
         try:
             content = req_path.read_bytes()
             dep_hash = hashlib.sha256(content).hexdigest()[:16]
-        except Exception:
+        except OSError as exc:
+            logger.debug("Failed reading requirements.txt for hash: %s", exc)
             dep_hash = "unknown"
 
     return EnvironmentMetadata(

@@ -11,8 +11,8 @@ Measures:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
-from typing import Any
 
 from app.performance.contracts import (
     LatencyMetrics,
@@ -27,6 +27,8 @@ from app.rag.embedding import TestOnlyFakeEmbeddingProvider
 from app.rag.models import DocumentChunk
 from app.rag.vector_store import QdrantVectorStore
 
+logger = logging.getLogger(__name__)
+
 
 async def run_concurrent_qdrant_scenario(
     concurrency: int = 10,
@@ -37,13 +39,13 @@ async def run_concurrent_qdrant_scenario(
     vector_store = QdrantVectorStore(embedding_provider=fake_emb)
     semaphore = asyncio.Semaphore(concurrency)
 
-    # Check if live Qdrant is active
-    client = await vector_store._get_client()
-    is_live_qdrant = vector_store._is_qdrant_available
+    # Probe connectivity to determine whether to exercise live Qdrant or in-memory fallback
+    is_live_qdrant = (
+        await vector_store._get_client() is not None
+        and vector_store._is_qdrant_available
+    )
     if not is_live_qdrant:
-        async def _no_client() -> Any:
-            return None
-        vector_store._get_client = _no_client
+        vector_store._client = False
 
     # Seed initial vectors across 3 tenants
     initial_chunks = [
@@ -63,6 +65,7 @@ async def run_concurrent_qdrant_scenario(
     success = 0
 
     with PerformanceProfiler() as profiler:
+
         async def _vector_worker(idx: int) -> None:
             nonlocal errors, success
             tenant_id = f"tenant-qdrant-{idx % 3}"
@@ -71,7 +74,7 @@ async def run_concurrent_qdrant_scenario(
                 try:
                     # 1. Concurrent Search
                     t0 = time.perf_counter()
-                    results = await vector_store.search(
+                    await vector_store.search(
                         query="balance sheet assets and financial report",
                         tenant_id=tenant_id,
                         top_k=3,
@@ -92,7 +95,8 @@ async def run_concurrent_qdrant_scenario(
                     upsert_latencies.append((t_up1 - t_up0) * 1000.0)
 
                     success += 1
-                except Exception:
+                except (RuntimeError, ValueError, KeyError, OSError) as exc:
+                    logger.debug("Qdrant access worker operation failed: %s", exc)
                     errors += 1
 
         tasks = [_vector_worker(i) for i in range(total_operations)]
@@ -104,7 +108,9 @@ async def run_concurrent_qdrant_scenario(
     throughput = calculate_throughput(total_operations, dur, concurrency)
     res_metrics = profiler.get_resource_metrics()
 
-    err_rate = round((errors / total_operations * 100.0), 2) if total_operations > 0 else 0.0
+    err_rate = (
+        round((errors / total_operations * 100.0), 2) if total_operations > 0 else 0.0
+    )
 
     return ScenarioResult(
         scenario_name="qdrant_access",

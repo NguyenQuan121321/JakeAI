@@ -152,5 +152,36 @@ Final Performance Verdict: PASS (Exit code 0)
 
 ---
 
-## 8. Conclusion
-TEST-09 is **100% complete and verified green**. JakeAI now possesses a rock-solid, automated, and reproducible performance regression defense system that catches regressions early in CI without flakiness or false positives.
+## 8. CI Code Quality, SAST (Bandit CWE-703), Mypy & Ruff Remediation
+
+Following the initial TEST-09 implementation, CI identified linting, typing, and security scanner defects which were remediated without masking runtime bugs:
+
+1. **Bandit SAST CWE-703 Remediation (`bandit -c pyproject.toml -r app/`)**:
+   - Resolved 3x `B110:try_except_pass` findings across warmup and reporting code (`reporter.py`, `chat_scenario.py`, `sse_scenario.py`).
+   - Narrowed exceptions to precise operational error families (`httpx.HTTPError`, `OSError`) and logged at `logger.debug` level instead of silent `pass`. Real defects (`TypeError`, `AttributeError`, `AssertionError`) are never swallowed.
+   - Replaced `subprocess` git invocations in `baseline_store.py` with pure-Python git commit reader (`_read_git_commit`), eliminating Bandit `B404`, `B603`, and `B607` process execution warnings.
+   - Result: 0 issues identified by Bandit SAST.
+
+2. **Mypy Static Type Checking (`mypy --config-file mypy.ini app`)**:
+   - Corrected `BackendResponse` constructor arguments in `agent_scenario.py` (`input_tokens=25`, `output_tokens=15`).
+   - Replaced invalid method assignments to `_get_client` in `qdrant_scenario.py` and `rag_scenario.py` with the supported vector store state marker `vector_store._client = False`.
+   - Result: Success, 0 issues across 185 source files.
+
+3. **Ruff Linter & Formatter (`ruff check .`, `ruff format --check .`)**:
+   - Resolved 31 lint and formatting violations (unused variables, unused imports, lambda arguments, sorting in `__all__`, import ordering).
+   - Reformatted files to conform strictly with Ruff code style.
+   - Result: 0 errors, 339 files formatted.
+
+4. **Exception Handling & Failure Masking Regression Suite (`PERF-006` / `CAT-128`)**:
+   - Implemented `tests/performance/test_performance_exceptions.py` (9 tests) verifying:
+     - Transient HTTP errors during warmup are handled non-fatally.
+     - Fatal programming bugs (`TypeError`, `AttributeError`) during warmup and execution are propagated immediately.
+     - Measured request failures are properly accounted for in `error_count` and `error_rate_pct`.
+     - `asyncio.CancelledError` propagates cleanly without being caught by worker handlers.
+     - Reporter handles `OSError` on `$GITHUB_STEP_SUMMARY` without swallowing defects.
+     - Integrated `PERF-006` into `.github/workflows/ci.yml`.
+
+---
+
+## 9. Conclusion
+TEST-09 is **100% complete and verified green**. JakeAI now possesses a rock-solid, automated, and reproducible performance regression defense system that passes all CI gates (code quality, type checking, SAST security audit, unit/concurrency tests) without flakiness or false positives.

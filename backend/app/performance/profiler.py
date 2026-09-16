@@ -17,7 +17,6 @@ import tracemalloc
 from typing import Any
 
 from app.performance.contracts import (
-    LatencyMetrics,
     MetricDistribution,
     ResourceMetrics,
     ThroughputMetrics,
@@ -77,7 +76,7 @@ class PerformanceProfiler:
         self.end_mem: int = 0
         self._was_tracemalloc_active: bool = False
 
-    def __enter__(self) -> "PerformanceProfiler":
+    def __enter__(self) -> PerformanceProfiler:
         if self.track_memory:
             self._was_tracemalloc_active = tracemalloc.is_tracing()
             if not self._was_tracemalloc_active:
