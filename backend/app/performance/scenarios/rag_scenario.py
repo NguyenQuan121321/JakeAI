@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
+from urllib.parse import urlparse
 
+from app.core.config import get_settings
 from app.performance.contracts import (
     LatencyMetrics,
     ScenarioResult,
@@ -34,6 +37,19 @@ from app.rag.vector_store import QdrantVectorStore
 logger = logging.getLogger(__name__)
 
 
+def _is_qdrant_online(url: str | None = None, timeout: float = 0.05) -> bool:
+    """Fast probe checking if Qdrant socket is reachable to avoid slow client timeouts."""
+    target_url = url or get_settings().QDRANT_URL
+    parsed = urlparse(target_url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 6333
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 async def run_concurrent_rag_scenario(
     concurrency: int = 10,
     total_queries: int = 30,
@@ -42,12 +58,17 @@ async def run_concurrent_rag_scenario(
     fake_emb = TestOnlyFakeEmbeddingProvider(dimension=384)
     vector_store = QdrantVectorStore(embedding_provider=fake_emb)
 
-    is_live = (
-        await vector_store._get_client() is not None
-        and vector_store._is_qdrant_available
-    )
-    if not is_live:
+    if not _is_qdrant_online():
         vector_store._client = False
+        vector_store._is_qdrant_available = False
+        is_live = False
+    else:
+        is_live = (
+            await vector_store._get_client() is not None
+            and vector_store._is_qdrant_available
+        )
+        if not is_live:
+            vector_store._client = False
 
     fast_reranker = CrossEncoderReranker(
         cross_encoder_fn=lambda _q, docs: [0.95 - (0.01 * i) for i in range(len(docs))]

@@ -85,75 +85,96 @@ async def run_concurrent_chat_scenario(
             await asyncio.sleep(simulated_provider_delay_ms / 1000.0)
         return _create_mock_chat_response()
 
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        with (
-            patch(
-                "app.services.ai_gateway.call_upstream_llm_detailed",
-                side_effect=_mock_call,
-            ),
-            patch(
-                "app.core.llm_provider.call_upstream_llm_detailed",
-                side_effect=_mock_call,
-            ),
-        ):
-            # Pre-warm ASGI route & singleton handlers before starting profiler
-            try:
-                await client.post(
-                    "/api/v1/gateway/chat/completions",
-                    json={"messages": [{"role": "user", "content": "warmup"}]},
-                    headers=headers,
-                    timeout=10.0,
-                )
-            except httpx.HTTPError as exc:
-                logger.debug("Chat ASGI warmup request failed: %s", exc)
+    from app.rag.embedding import TestOnlyFakeEmbeddingProvider
+    from app.services.ai_gateway import get_gateway_proxy
 
-            with PerformanceProfiler() as profiler:
+    proxy = get_gateway_proxy()
+    orig_emb = proxy.cache_mgr._embedding_provider
+    orig_qdrant_avail = proxy.cache_mgr._qdrant_available
+    orig_retry = proxy.cache_mgr._qdrant_retry_after
 
-                async def _worker(idx: int) -> None:
-                    nonlocal errors, success, cache_hits, cache_misses
-                    # Alternate queries between recurring (testing cache) and unique
-                    query_id = idx % 5
-                    payload = {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": f"Summarize invoice batch #{query_id} for reconciliation",
-                            }
-                        ],
-                        "model": "gemini-1.5-flash",
-                    }
+    proxy.cache_mgr._embedding_provider = TestOnlyFakeEmbeddingProvider(dimension=384)
+    if proxy.cache_mgr.qdrant_client is None:
+        proxy.cache_mgr._qdrant_available = False
+        proxy.cache_mgr._qdrant_retry_after = time.time() + 3600
 
-                    async with semaphore:
-                        t0 = time.perf_counter()
-                        try:
-                            resp = await client.post(
-                                "/api/v1/gateway/chat/completions",
-                                json=payload,
-                                headers=headers,
-                                timeout=10.0,
-                            )
-                            t1 = time.perf_counter()
-                            lat_ms = (t1 - t0) * 1000.0
-                            latencies.append(lat_ms)
+    try:
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            with (
+                patch(
+                    "app.services.ai_gateway.call_upstream_llm_detailed",
+                    side_effect=_mock_call,
+                ),
+                patch(
+                    "app.core.llm_provider.call_upstream_llm_detailed",
+                    side_effect=_mock_call,
+                ),
+            ):
+                # Pre-warm ASGI route & singleton handlers before starting profiler
+                try:
+                    await client.post(
+                        "/api/v1/gateway/chat/completions",
+                        json={"messages": [{"role": "user", "content": "warmup"}]},
+                        headers=headers,
+                        timeout=10.0,
+                    )
+                except httpx.HTTPError as exc:
+                    logger.debug("Chat ASGI warmup request failed: %s", exc)
 
-                            if resp.status_code == 200:
-                                success += 1
-                                data = resp.json()
-                                if (
-                                    data.get("cached")
-                                    or data.get("usage", {}).get("cached_tokens", 0) > 0
-                                ):
-                                    cache_hits += 1
+                with PerformanceProfiler() as profiler:
+
+                    async def _worker(idx: int) -> None:
+                        nonlocal errors, success, cache_hits, cache_misses
+                        # Alternate queries between recurring (testing cache) and unique
+                        query_id = idx % 5
+                        payload = {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": f"Summarize invoice batch #{query_id} for reconciliation",
+                                }
+                            ],
+                            "model": "gemini-1.5-flash",
+                        }
+
+                        async with semaphore:
+                            t0 = time.perf_counter()
+                            try:
+                                resp = await client.post(
+                                    "/api/v1/gateway/chat/completions",
+                                    json=payload,
+                                    headers=headers,
+                                    timeout=10.0,
+                                )
+                                t1 = time.perf_counter()
+                                lat_ms = (t1 - t0) * 1000.0
+                                latencies.append(lat_ms)
+
+                                if resp.status_code == 200:
+                                    success += 1
+                                    data = resp.json()
+                                    if (
+                                        data.get("cached")
+                                        or data.get("usage", {}).get("cached_tokens", 0)
+                                        > 0
+                                    ):
+                                        cache_hits += 1
+                                    else:
+                                        cache_misses += 1
                                 else:
-                                    cache_misses += 1
-                            else:
+                                    errors += 1
+                            except (httpx.HTTPError, ValueError) as exc:
+                                logger.debug("Chat worker request failed: %s", exc)
                                 errors += 1
-                        except (httpx.HTTPError, ValueError) as exc:
-                            logger.debug("Chat worker request failed: %s", exc)
-                            errors += 1
 
-                tasks = [_worker(i) for i in range(total_requests)]
-                await asyncio.gather(*tasks)
+                    tasks = [_worker(i) for i in range(total_requests)]
+                    await asyncio.gather(*tasks)
+    finally:
+        proxy.cache_mgr._embedding_provider = orig_emb
+        proxy.cache_mgr._qdrant_available = orig_qdrant_avail
+        proxy.cache_mgr._qdrant_retry_after = orig_retry
 
     dur = profiler.duration_seconds
     lat_dist = compute_distribution(latencies)

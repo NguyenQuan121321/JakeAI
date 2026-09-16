@@ -119,6 +119,24 @@ async def run_redis_contention_scenario(
     errors = 0
     success = 0
     cache_hits = 0
+    # Pre-warm Redis connection pool and seed Tier 1 exact cache keys
+    try:
+        if is_live_redis and mock_redis is not None and hasattr(mock_redis, "ping"):
+            await mock_redis.ping()
+        for i in range(5):
+            t_id = f"tenant-contention-{i % 3}"
+            c_key = f"perf-cache-prompt-{i % 5}"
+            await budget_mgr.reserve_budget(
+                tenant_id=t_id, estimated_tokens=10, estimated_cost_usd=0.0005
+            )
+            await cache_mgr.set(
+                prompt=c_key,
+                tenant_id=t_id,
+                response="Contention test cached answer",
+                model="gemini-1.5-flash",
+            )
+    except (RuntimeError, ValueError, KeyError, OSError) as exc:
+        logger.debug("Redis contention scenario warmup error: %s", exc)
 
     with PerformanceProfiler() as profiler:
 
@@ -196,6 +214,15 @@ async def run_redis_contention_scenario(
     err_rate = (
         round((errors / total_operations * 100.0), 2) if total_operations > 0 else 0.0
     )
+
+    if is_live_redis and client is not None:
+        try:
+            if hasattr(client, "aclose"):
+                await client.aclose()
+            elif hasattr(client, "close"):
+                await client.close()
+        except Exception as exc:
+            logger.debug("Redis client close error ignored: %s", exc)
 
     return ScenarioResult(
         scenario_name="redis_contention",

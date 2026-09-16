@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
+from urllib.parse import urlparse
 
+from app.core.config import get_settings
 from app.performance.contracts import (
     LatencyMetrics,
     ScenarioResult,
@@ -30,6 +33,19 @@ from app.rag.vector_store import QdrantVectorStore
 logger = logging.getLogger(__name__)
 
 
+def _is_qdrant_online(url: str | None = None, timeout: float = 0.05) -> bool:
+    """Fast probe checking if Qdrant socket is reachable to avoid slow client timeouts."""
+    target_url = url or get_settings().QDRANT_URL
+    parsed = urlparse(target_url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 6333
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 async def run_concurrent_qdrant_scenario(
     concurrency: int = 10,
     total_operations: int = 30,
@@ -40,12 +56,17 @@ async def run_concurrent_qdrant_scenario(
     semaphore = asyncio.Semaphore(concurrency)
 
     # Probe connectivity to determine whether to exercise live Qdrant or in-memory fallback
-    is_live_qdrant = (
-        await vector_store._get_client() is not None
-        and vector_store._is_qdrant_available
-    )
-    if not is_live_qdrant:
+    if not _is_qdrant_online():
         vector_store._client = False
+        vector_store._is_qdrant_available = False
+        is_live_qdrant = False
+    else:
+        is_live_qdrant = (
+            await vector_store._get_client() is not None
+            and vector_store._is_qdrant_available
+        )
+        if not is_live_qdrant:
+            vector_store._client = False
 
     # Seed initial vectors across 3 tenants
     initial_chunks = [
