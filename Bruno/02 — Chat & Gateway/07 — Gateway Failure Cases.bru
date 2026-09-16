@@ -1,0 +1,38 @@
+meta {
+  name: 07 — Gateway Failure Cases
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "model": "{{model}}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Test negative boundary ceiling"
+      }
+    ],
+    "max_tokens": -50
+  }
+}
+
+tests {
+  test("Invalid max_tokens rejected with 422", function() {
+    expect(res.getStatus()).to.equal(422);
+  });
+}

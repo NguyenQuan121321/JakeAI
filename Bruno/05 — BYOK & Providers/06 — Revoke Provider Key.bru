@@ -1,0 +1,29 @@
+meta {
+  name: 06 — Revoke Provider Key
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/byok/keys/{{provider}}/revoke
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Revocation returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Key status transitioned to revoked", function() {
+    const data = res.getBody();
+    expect(data.status).to.equal("revoked");
+  });
+}

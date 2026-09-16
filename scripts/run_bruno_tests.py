@@ -1,0 +1,784 @@
+#!/usr/bin/env python3
+"""JakeAI Bruno CLI Automated Test Runner (TEST-08).
+
+Orchestrates automated execution of the Bruno API/E2E test suite using
+`@usebruno/cli`. Implements:
+  - Suite selection (smoke, critical-e2e, full, live-release)
+  - Selective execution (single folder, single request)
+  - External dependency governance (FinnApiGo availability detection,
+    clean BLOCKED/SKIPPED reporting without false PASS)
+  - Uvicorn backend server health verification and optional auto-start
+  - Standardized reporting: JSON, JUnit XML, Markdown summary
+  - GitHub Actions CI step summary integration
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import hmac
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# Ensure UTF-8 console output across Windows and Linux
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+# Known requests targeting the external FinnApiGo identity authority
+EXTERNAL_FINNAPIGO_REQUESTS = {
+    "00 — Setup & Environment/03 — Authentication Dependency Check.bru",
+    "00 — Setup & Environment\\03 — Authentication Dependency Check.bru",
+    "01 — Authentication & Tenant/01 — FinnApiGo Login.bru",
+    "01 — Authentication & Tenant\\01 — FinnApiGo Login.bru",
+}
+
+ALL_FOLDERS = [
+    "00 — Setup & Environment",
+    "01 — Authentication & Tenant",
+    "02 — Chat & Gateway",
+    "03 — Agent",
+    "04 — RAG",
+    "05 — BYOK & Providers",
+    "06 — Cache",
+    "07 — FinOps & Billing",
+    "08 — Security & Negative",
+    "09 — Failure & Recovery",
+    "10 — Cross System E2E",
+    "99 — Final Smoke",
+]
+
+CRITICAL_E2E_FOLDERS = [
+    "00 — Setup & Environment",
+    "01 — Authentication & Tenant",
+    "02 — Chat & Gateway",
+    "03 — Agent",
+    "04 — RAG",
+    "05 — BYOK & Providers",
+    "06 — Cache",
+    "07 — FinOps & Billing",
+    "10 — Cross System E2E",
+    "99 — Final Smoke",
+]
+
+SMOKE_TARGETS = [
+    "99 — Final Smoke",
+    "00 — Setup & Environment/01 — Health Smoke.bru",
+    "00 — Setup & Environment/02 — Configuration Check.bru",
+    "01 — Authentication & Tenant/03 — JakeAI Authenticated Health.bru",
+    "02 — Chat & Gateway/01 — Basic Chat.bru",
+    "03 — Agent/01 — Create Task.bru",
+    "04 — RAG/01 — Ingest Document.bru",
+]
+
+
+@dataclass
+class TestItemResult:
+    """Individual test item execution outcome."""
+
+    name: str
+    target: str
+    status: str  # "passed", "failed", "blocked", "skipped"
+    duration_ms: float = 0.0
+    status_code: int | None = None
+    tests_passed: int = 0
+    tests_total: int = 0
+    error_message: str | None = None
+    is_external: bool = False
+
+
+@dataclass
+class SuiteSummary:
+    """Aggregated test suite results."""
+
+    suite: str
+    environment: str
+    total_requests: int = 0
+    passed: int = 0
+    failed: int = 0
+    blocked: int = 0
+    skipped: int = 0
+    duration_seconds: float = 0.0
+    items: list[TestItemResult] = field(default_factory=list)
+    finnapigo_online: bool = False
+    jakeai_online: bool = False
+
+    @property
+    def pass_rate(self) -> float:
+        evaluated = self.passed + self.failed
+        return (self.passed / evaluated * 100.0) if evaluated > 0 else 0.0
+
+    @property
+    def is_success(self) -> bool:
+        # Fails if any test failed.
+        # If live-release suite, any blocked external dependency also fails.
+        if self.failed > 0:
+            return False
+        return not (self.suite == "live-release" and self.blocked > 0)
+
+
+def check_http_endpoint(url: str, timeout_sec: float = 2.5) -> tuple[bool, int, str]:
+    """Check if an HTTP endpoint is reachable and returning 200 OK."""
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "JakeAI-Bruno-Runner/1.0",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+            return (response.status == 200, response.status, "")
+    except urllib.error.HTTPError as err:
+        return (False, err.code, f"HTTP {err.code}: {err.reason}")
+    except Exception as exc:  # noqa: BLE001
+        return (False, 0, str(exc))
+
+
+def find_workspace_root() -> Path:
+    """Locate the root of the JakeAI repository."""
+    current = Path(__file__).resolve()
+    for parent in [current.parent, current.parent.parent, current.parent.parent.parent]:
+        if (parent / "Bruno").is_dir() and (parent / "backend").is_dir():
+            return parent
+    return Path.cwd()
+
+
+def resolve_npx() -> str:
+    """Find the npx executable across platforms."""
+    npx_bin = shutil.which("npx") or shutil.which("npx.cmd")
+    if not npx_bin:
+        raise RuntimeError(
+            "Node.js 'npx' command not found in PATH. Please install Node.js (v18+) to run Bruno tests."
+        )
+    return npx_bin
+
+
+def find_uvicorn_python(repo_root: Path) -> str:
+    """Locate Python executable with uvicorn installed."""
+    venv_python = repo_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    if venv_python.is_file():
+        return str(venv_python)
+    venv_python_unix = repo_root / "backend" / ".venv" / "bin" / "python"
+    if venv_python_unix.is_file():
+        return str(venv_python_unix)
+    return sys.executable
+
+
+def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[str]:
+    """Start local JakeAI backend server in the background."""
+    python_bin = find_uvicorn_python(repo_root)
+    cmd = [
+        python_bin,
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+    ]
+    backend_dir = repo_root / "backend"
+    print(f"[*] Starting JakeAI backend server on 127.0.0.1:{port}...")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(backend_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    # Wait up to 20 seconds for /health to answer
+    health_url = f"http://127.0.0.1:{port}/api/v1/health"
+    start_time = time.time()
+    while time.time() - start_time < 20:
+        ok, _, _ = check_http_endpoint(health_url, timeout_sec=1.0)
+        if ok:
+            print(
+                f"[✓] JakeAI backend server is ready on port {port} (PID: {proc.pid})"
+            )
+            return proc
+        time.sleep(0.5)
+
+    proc.terminate()
+    raise RuntimeError(
+        f"Timed out waiting for JakeAI backend on port {port} to become healthy."
+    )
+
+
+def generate_runtime_dev_jwts() -> dict[str, str]:
+    """Dynamically generate deterministic test JWTs at runtime so no secrets are committed."""
+    secret = (
+        os.environ.get("FINNAPIGO_JWT_SECRET")
+        or os.environ.get("JWT_SECRET_KEY")
+        or "insecure-development-secret-change-in-production"
+    )
+    now = int(time.time())
+
+    def _b64url(b: bytes) -> str:
+        return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+
+    def _make_jwt(sub: str, tenant_id: str, exp_offset: int, role: str = "admin") -> str:
+        header = {"alg": "HS256", "typ": "JWT", "kid": "012139cc"}
+        payload = {
+            "sub": sub,
+            "uid": sub,
+            "tenant_id": tenant_id,
+            "tid": tenant_id,
+            "role": role,
+            "roles": [role],
+            "permissions": ["*"] if role == "admin" else ["read"],
+            "perms": ["*"] if role == "admin" else ["read"],
+            "type": "access",
+            "iat": now,
+            "exp": now + exp_offset,
+            "jti": f"dev-token-{sub}",
+        }
+        h_str = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+        p_str = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        sig = hmac.new(secret.encode("utf-8"), f"{h_str}.{p_str}".encode("utf-8"), hashlib.sha256).digest()
+        return f"{h_str}.{p_str}.{_b64url(sig)}"
+
+    return {
+        "token_a": _make_jwt("16", "default", exp_offset=86400 * 30, role="admin"),
+        "token_b": _make_jwt("user-beta", "tenant_beta", exp_offset=86400 * 30, role="user"),
+        "token_expired": _make_jwt("16", "default", exp_offset=-3600, role="admin"),
+    }
+
+
+def run_bruno_cli_target(
+    npx_bin: str,
+    bruno_dir: Path,
+    target: str,
+    environment: str,
+    temp_json_path: Path,
+    verbose: bool = False,
+    extra_env_vars: dict[str, str] | None = None,
+) -> tuple[int, list[TestItemResult]]:
+    """Execute Bruno CLI for a specific folder or request and parse output."""
+    cmd = [
+        npx_bin,
+        "--yes",
+        "@usebruno/cli",
+        "run",
+        target,
+        "--env",
+        environment,
+        "--reporter-json",
+        str(temp_json_path),
+        "--reporter-skip-headers",
+        "Authorization",
+    ]
+    if extra_env_vars:
+        for k, v in extra_env_vars.items():
+            cmd.extend(["--env-var", f"{k}={v}"])
+
+    if verbose:
+        print(f"[DEBUG] Executing: {' '.join(cmd)}")
+
+    res = subprocess.run(
+        cmd,
+        cwd=str(bruno_dir),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    if verbose or res.returncode != 0:
+        if res.stdout:
+            print(res.stdout)
+        if res.stderr:
+            print(res.stderr, file=sys.stderr)
+
+    results: list[TestItemResult] = []
+    if temp_json_path.is_file():
+        try:
+            with open(temp_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # data is a list of iterations
+            for iteration in data:
+                for item in iteration.get("results", []):
+                    rel_name = (
+                        item.get("name")
+                        or item.get("test", {}).get("filename")
+                        or target
+                    )
+                    filename = item.get("test", {}).get("filename") or target
+                    duration = float(item.get("response", {}).get("duration", 0.0))
+                    status_code = item.get("response", {}).get("status")
+                    test_results = item.get("testResults", [])
+                    t_total = len(test_results)
+                    t_passed = sum(1 for t in test_results if t.get("status") == "pass")
+
+                    item_status = "passed" if item.get("status") == "pass" else "failed"
+                    error_msg = item.get("error")
+                    if not error_msg and item_status == "failed":
+                        failures = [
+                            t.get("error")
+                            for t in test_results
+                            if t.get("status") == "fail"
+                        ]
+                        error_msg = "; ".join(filter(None, failures))
+
+                    results.append(
+                        TestItemResult(
+                            name=rel_name,
+                            target=filename,
+                            status=item_status,
+                            duration_ms=duration,
+                            status_code=status_code,
+                            tests_passed=t_passed,
+                            tests_total=t_total,
+                            error_message=error_msg,
+                        )
+                    )
+        except Exception as exc:  # noqa: BLE001
+            if verbose:
+                print(
+                    f"[WARN] Failed parsing Bruno JSON report {temp_json_path}: {exc}"
+                )
+
+    # Fallback if json report had 0 results but command exited with error
+    if not results and res.returncode != 0:
+        results.append(
+            TestItemResult(
+                name=target,
+                target=target,
+                status="failed",
+                error_message=res.stderr or res.stdout or "Command failed",
+            )
+        )
+
+    return res.returncode, results
+
+
+def generate_junit_xml(summary: SuiteSummary, output_path: Path) -> None:
+    """Generate JUnit XML report from the aggregated summary."""
+    testsuites = ET.Element(
+        "testsuites",
+        name=f"Bruno-{summary.suite}",
+        tests=str(summary.total_requests),
+        failures=str(summary.failed),
+        errors="0",
+        skipped=str(summary.blocked + summary.skipped),
+        time=f"{summary.duration_seconds:.3f}",
+    )
+    testsuite = ET.SubElement(
+        testsuites,
+        "testsuite",
+        name=summary.suite,
+        tests=str(summary.total_requests),
+        failures=str(summary.failed),
+        errors="0",
+        skipped=str(summary.blocked + summary.skipped),
+        time=f"{summary.duration_seconds:.3f}",
+    )
+
+    for item in summary.items:
+        tc = ET.SubElement(
+            testsuite,
+            "testcase",
+            name=item.name,
+            classname=item.target.replace("\\", ".").replace("/", "."),
+            time=f"{item.duration_ms / 1000.0:.3f}",
+        )
+        if item.status == "failed":
+            failure = ET.SubElement(
+                tc, "failure", message=item.error_message or "Assertion failure"
+            )
+            failure.text = item.error_message or "Assertion failed in Bruno test"
+        elif item.status in ("blocked", "skipped"):
+            skipped = ET.SubElement(
+                tc, "skipped", message=item.error_message or f"Test {item.status}"
+            )
+            skipped.text = (
+                item.error_message or f"Dependency unavailable: {item.status}"
+            )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tree = ET.ElementTree(testsuites)
+    tree.write(str(output_path), encoding="utf-8", xml_declaration=True)
+
+
+def generate_markdown_summary(summary: SuiteSummary) -> str:
+    """Create GitHub Flavored Markdown summary report."""
+    status_badge = "🟢 **PASS**" if summary.is_success else "🔴 **FAIL**"
+    lines = [
+        f"## 🐶 JakeAI Bruno CLI Automated Test Summary — `{summary.suite}`",
+        "",
+        f"- **Suite Profile**: `{summary.suite}`",
+        f"- **Environment**: `{summary.environment}`",
+        f"- **Overall Status**: {status_badge}",
+        f"- **Pass Rate**: `{summary.pass_rate:.1f}%`",
+        f"- **Total Requests Evaluated**: `{summary.total_requests}`",
+        f"- **Passed**: `✓ {summary.passed}` | **Failed**: `✗ {summary.failed}` | **Blocked (External)**: `⏸ {summary.blocked}` | **Skipped**: `○ {summary.skipped}`",
+        f"- **Execution Duration**: `{summary.duration_seconds:.2f}s`",
+        f"- **FinnApiGo Authority**: `{'ONLINE' if summary.finnapigo_online else 'OFFLINE (Dev Fallback Active)'}`",
+        "",
+        "### Request Breakdown",
+        "",
+        "| Status | Request / Target | Tests | Status Code | Duration (ms) | Notes |",
+        "| :---: | :--- | :---: | :---: | :---: | :--- |",
+    ]
+
+    for item in summary.items:
+        if item.status == "passed":
+            icon = "✓ PASS"
+        elif item.status == "failed":
+            icon = "✗ FAIL"
+        elif item.status == "blocked":
+            icon = "⏸ BLOCKED"
+        else:
+            icon = "○ SKIP"
+
+        tests_str = (
+            f"{item.tests_passed}/{item.tests_total}" if item.tests_total > 0 else "-"
+        )
+        sc_str = str(item.status_code) if item.status_code else "-"
+        notes = item.error_message or (
+            "External Dependency" if item.is_external else ""
+        )
+        if len(notes) > 70:
+            notes = notes[:67] + "..."
+        lines.append(
+            f"| {icon} | `{item.name}` | {tests_str} | {sc_str} | {item.duration_ms:.1f} | {notes} |"
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def print_console_summary(summary: SuiteSummary) -> None:
+    """Print high-contrast console summary."""
+    print("\n" + "=" * 76)
+    print(
+        f" JAKEAI BRUNO AUTOMATION SUITE: {summary.suite.upper()} (Env: {summary.environment})"
+    )
+    print("=" * 76)
+    print(f" Overall Status : {'✓ PASS' if summary.is_success else '✗ FAIL'}")
+    print(f" Requests Total : {summary.total_requests}")
+    print(f" Passed         : {summary.passed}")
+    print(f" Failed         : {summary.failed}")
+    print(f" Blocked (Ext)  : {summary.blocked} (Dependency Governance)")
+    print(f" Skipped        : {summary.skipped}")
+    print(f" Pass Rate      : {summary.pass_rate:.1f}%")
+    print(f" Duration       : {summary.duration_seconds:.2f}s")
+    print(
+        f" FinnApiGo Auth : {'ONLINE' if summary.finnapigo_online else 'OFFLINE (Fallback Active)'}"
+    )
+    print("-" * 76)
+
+    if summary.failed > 0:
+        print("\n[!] Failed Requests:")
+        for item in summary.items:
+            if item.status == "failed":
+                print(f"  - {item.name}: {item.error_message or 'Assertion failed'}")
+
+    if summary.blocked > 0:
+        print(
+            "\n[i] Blocked Requests (Unverified external dependency; not falsely passed):"
+        )
+        for item in summary.items:
+            if item.status == "blocked":
+                print(f"  - {item.name}: {item.error_message}")
+
+    print("=" * 76 + "\n")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="JakeAI Bruno CLI Automated Test Runner (TEST-08)"
+    )
+    parser.add_argument(
+        "--suite",
+        choices=["smoke", "critical-e2e", "full", "live-release"],
+        default="smoke",
+        help="Test suite execution profile (default: smoke)",
+    )
+    parser.add_argument(
+        "--folder", default=None, help="Execute only a specific Bruno folder"
+    )
+    parser.add_argument(
+        "--request", default=None, help="Execute only a specific .bru request file"
+    )
+    parser.add_argument(
+        "--env", default="Local", help="Bruno environment name (default: Local)"
+    )
+    parser.add_argument(
+        "--base-url", default="http://localhost:8000", help="JakeAI base URL"
+    )
+    parser.add_argument(
+        "--finnapigo-url", default="http://localhost:8081", help="FinnApiGo base URL"
+    )
+    parser.add_argument(
+        "--report-dir", default=None, help="Directory to store JSON and JUnit reports"
+    )
+    parser.add_argument(
+        "--auto-start", action="store_true", help="Auto-start uvicorn server if offline"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="Print verbose execution details"
+    )
+
+    args = parser.parse_args()
+
+    start_time = time.time()
+    repo_root = find_workspace_root()
+    bruno_dir = repo_root / "Bruno"
+
+    if not bruno_dir.is_dir():
+        print(
+            f"[ERROR] Bruno collection directory not found at {bruno_dir}",
+            file=sys.stderr,
+        )
+        return 1
+
+    npx_bin = resolve_npx()
+
+    # Determine report directory
+    if args.report_dir:
+        report_dir = Path(args.report_dir).resolve()
+    else:
+        report_dir = repo_root / "backend" / "reports" / "bruno"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Health Verification
+    jakeai_ok, _, _ = check_http_endpoint(f"{args.base_url}/health")
+    if not jakeai_ok:
+        # Check /api/v1/health fallback
+        jakeai_ok, _, _ = check_http_endpoint(f"{args.base_url}/api/v1/health")
+
+    server_proc = None
+    if not jakeai_ok:
+        if args.auto_start or os.environ.get("CI"):
+            print("[*] JakeAI server not detected. Auto-starting backend...")
+            server_proc = start_uvicorn_server(repo_root)
+            jakeai_ok = True
+        else:
+            print(
+                f"[ERROR] JakeAI server is offline at {args.base_url}. Start uvicorn or pass --auto-start.",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Check external dependency (FinnApiGo)
+    finnapigo_ok, _, _ = check_http_endpoint(
+        f"{args.finnapigo_url}/healthz", timeout_sec=1.5
+    )
+    print(
+        f"[*] Identity Authority (FinnApiGo): {'ONLINE' if finnapigo_ok else 'OFFLINE (Dev Fallback Active)'}"
+    )
+
+    summary = SuiteSummary(
+        suite=args.suite if not (args.folder or args.request) else "custom",
+        environment=args.env,
+        finnapigo_online=finnapigo_ok,
+        jakeai_online=jakeai_ok,
+    )
+
+    try:
+        # Determine targets
+        if args.request:
+            targets = [args.request]
+        elif args.folder:
+            matched = [f for f in ALL_FOLDERS if args.folder.lower() in f.lower()]
+            targets = [matched[0]] if matched else [args.folder]
+        elif args.suite == "smoke":
+            targets = SMOKE_TARGETS
+        elif args.suite == "critical-e2e":
+            targets = CRITICAL_E2E_FOLDERS
+        elif args.suite in ("full", "live-release"):
+            targets = ALL_FOLDERS
+        else:
+            targets = ALL_FOLDERS
+
+        temp_json = report_dir / "temp_run.json"
+        runtime_dev_jwts = generate_runtime_dev_jwts()
+
+        for target in targets:
+            is_folder_target = (bruno_dir / target).is_dir()
+
+            if (
+                is_folder_target
+                and not finnapigo_ok
+                and ("00" in target or "01" in target)
+            ):
+                folder_path = bruno_dir / target
+                bru_files = sorted(folder_path.glob("*.bru"))
+                for bru_file in bru_files:
+                    rel_bru = str(bru_file.relative_to(bruno_dir))
+                    norm_rel = rel_bru.replace("\\", "/")
+                    if norm_rel in EXTERNAL_FINNAPIGO_REQUESTS or any(
+                        ext in norm_rel
+                        for ext in [
+                            "03 — Authentication Dependency Check",
+                            "01 — FinnApiGo Login",
+                        ]
+                    ):
+                        if args.suite == "live-release":
+                            summary.items.append(
+                                TestItemResult(
+                                    name=bru_file.stem,
+                                    target=rel_bru,
+                                    status="failed",
+                                    error_message=f"Live release mandates online FinnApiGo at {args.finnapigo_url}",
+                                    is_external=True,
+                                )
+                            )
+                        else:
+                            summary.items.append(
+                                TestItemResult(
+                                    name=bru_file.stem,
+                                    target=rel_bru,
+                                    status="blocked",
+                                    error_message=f"FinnApiGo identity authority is offline at {args.finnapigo_url} (dev tokens active)",
+                                    is_external=True,
+                                )
+                            )
+                    else:
+                        _, res_items = run_bruno_cli_target(
+                            npx_bin=npx_bin,
+                            bruno_dir=bruno_dir,
+                            target=rel_bru,
+                            environment=args.env,
+                            temp_json_path=temp_json,
+                            verbose=args.verbose,
+                            extra_env_vars=runtime_dev_jwts,
+                        )
+                        summary.items.extend(res_items)
+            else:
+                norm_target = target.replace("\\", "/")
+                if not finnapigo_ok and any(
+                    ext in norm_target
+                    for ext in [
+                        "03 — Authentication Dependency Check",
+                        "01 — FinnApiGo Login",
+                    ]
+                ):
+                    if args.suite == "live-release":
+                        summary.items.append(
+                            TestItemResult(
+                                name=target,
+                                target=target,
+                                status="failed",
+                                error_message=f"Live release mandates online FinnApiGo at {args.finnapigo_url}",
+                                is_external=True,
+                            )
+                        )
+                    else:
+                        summary.items.append(
+                            TestItemResult(
+                                name=target,
+                                target=target,
+                                status="blocked",
+                                error_message=f"FinnApiGo offline at {args.finnapigo_url} (dev tokens active)",
+                                is_external=True,
+                            )
+                        )
+                    continue
+
+                _, res_items = run_bruno_cli_target(
+                    npx_bin=npx_bin,
+                    bruno_dir=bruno_dir,
+                    target=target,
+                    environment=args.env,
+                    temp_json_path=temp_json,
+                    verbose=args.verbose,
+                    extra_env_vars=runtime_dev_jwts,
+                )
+                summary.items.extend(res_items)
+
+        if temp_json.is_file():
+            temp_json.unlink(missing_ok=True)
+
+    finally:
+        if server_proc:
+            print("[*] Terminating auto-started JakeAI backend...")
+            server_proc.terminate()
+            try:
+                server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server_proc.kill()
+
+    summary.duration_seconds = time.time() - start_time
+    summary.total_requests = len(summary.items)
+    summary.passed = sum(1 for i in summary.items if i.status == "passed")
+    summary.failed = sum(1 for i in summary.items if i.status == "failed")
+    summary.blocked = sum(1 for i in summary.items if i.status == "blocked")
+    summary.skipped = sum(1 for i in summary.items if i.status == "skipped")
+
+    json_path = report_dir / "bruno-results.json"
+    junit_path = report_dir / "bruno-junit.xml"
+    summary_md_path = report_dir / "bruno-summary.md"
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "suite": summary.suite,
+                "environment": summary.environment,
+                "is_success": summary.is_success,
+                "pass_rate": summary.pass_rate,
+                "total_requests": summary.total_requests,
+                "passed": summary.passed,
+                "failed": summary.failed,
+                "blocked": summary.blocked,
+                "skipped": summary.skipped,
+                "duration_seconds": summary.duration_seconds,
+                "finnapigo_online": summary.finnapigo_online,
+                "items": [
+                    {
+                        "name": i.name,
+                        "target": i.target,
+                        "status": i.status,
+                        "duration_ms": i.duration_ms,
+                        "status_code": i.status_code,
+                        "tests_passed": i.tests_passed,
+                        "tests_total": i.tests_total,
+                        "error_message": i.error_message,
+                        "is_external": i.is_external,
+                    }
+                    for i in summary.items
+                ],
+            },
+            f,
+            indent=2,
+        )
+
+    generate_junit_xml(summary, junit_path)
+
+    md_content = generate_markdown_summary(summary)
+    with open(summary_md_path, "w", encoding="utf-8") as f:
+        f.write(md_content)
+
+    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        try:
+            with open(step_summary, "a", encoding="utf-8") as f:
+                f.write(md_content + "\n\n")
+        except Exception as err:  # noqa: BLE001
+            print(
+                f"[WARN] Failed writing to GITHUB_STEP_SUMMARY: {err}", file=sys.stderr
+            )
+
+    print_console_summary(summary)
+    print(
+        f"[✓] Reports written to:\n  - {json_path}\n  - {junit_path}\n  - {summary_md_path}\n"
+    )
+
+    return 0 if summary.is_success else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

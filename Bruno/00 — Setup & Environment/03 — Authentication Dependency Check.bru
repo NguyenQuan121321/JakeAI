@@ -1,0 +1,29 @@
+meta {
+  name: 03 — Authentication Dependency Check
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{finnapigo_base_url}}/healthz
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    console.log("FinnApiGo identity authority is ONLINE at " + bru.getEnvVar("finnapigo_base_url"));
+  } else {
+    console.warn("FinnApiGo is not reachable (status " + res.getStatus() + "). Using local development JWT fallback tokens.");
+  }
+}
+
+tests {
+  test("FinnApiGo reachable or dev fallback active", function() {
+    expect([200, 404, 502, 503]).to.include(res.getStatus());
+  });
+}

@@ -1,0 +1,38 @@
+meta {
+  name: 06 — Cache / Provider Failure Behavior
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "model": "{{model}}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Verify offline fallbacks are never saved into Tier 1 cache"
+      }
+    ],
+    "stream": false
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

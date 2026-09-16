@@ -1,0 +1,37 @@
+meta {
+  name: 04 — Generate Grounded Answer
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "How much transaction volume did JakeAI process in 2026?",
+    "top_k": 3
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Answer is generated with SUCCESS or graceful status", function() {
+    const data = res.getBody();
+    expect(["SUCCESS", "ABSTAINED"]).to.include(data.status);
+    expect(data.answer).to.be.a("string");
+  });
+}

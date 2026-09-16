@@ -1,6 +1,6 @@
 # TEST-CATALOG — JakeAI Automated Test Suite Catalog
-**Audit Baseline**: `main` (`07ddb5d`) | **Status**: TEST-07 E2E WORKFLOW AUTOMATION COMPLETED
-**Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/`
+**Audit Baseline**: `main` (`971a340`) | **Status**: TEST-08 BRUNO CLI AUTOMATION COMPLETED
+**Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/` and automated Bruno collection under `Bruno/`
 
 ---
 
@@ -2892,17 +2892,66 @@ The Pytest contract suite (`test_api_contract.py`, `test_api_negative_contracts.
   - Negative contracts covering all 10 legitimate HTTP status codes (`400`, `401`, `403`, `404`, `409`, `413`, `422`, `429`, `500`, `503`) at the ASGI boundary with exact error envelope assertions.
   - 5 representative end-to-end multi-request workflows verifying asynchronous SSE streams, RAG indexing, BYOK encryption, AI Gateway & FinOps, and Human-in-the-Loop resume bridges.
 
-### 4.3 Bruno Collection (`bruno/JakeAI-Platform/`)
-The Bruno collection serves as the developer-facing, client-oriented operational toolkit:
-- **Execution Environment**: External desktop app or Bruno CLI (`bru run`) making real network requests over TCP/HTTP to a running JakeAI instance (`http://localhost:8000`).
-- **Use Cases**:
-  - Ad-hoc manual verification during local development.
-  - Smoke testing deployed staging or production environments.
-  - Visual payload inspection, token substitution, and live debugging of streaming SSE responses in a GUI.
-- **Collection Layout**: 8 modular folders (00-Setup, 01-Health, 02-Chat & Gateway, 03-Agent, 04-RAG, 05-BYOK & Providers, 06-Cache, 07-FinOps & Billing, 08-Security & Negative).
+### 4.3 Bruno Collection & CLI Automation (`Bruno/` — TEST-08)
+The Bruno collection serves as the authoritative, automated HTTP and E2E regression testing layer driven by `@usebruno/cli`:
+- **Execution Environment**: Automated CLI runner (`python scripts/run_bruno_tests.py`) or Bruno CLI (`bru run`), issuing real HTTP/1.1 and SSE network requests over TCP to a live JakeAI server (`http://localhost:8000`).
+- **Profiles Supported**:
+  - `smoke`: Fastest confidence check (<10 seconds, PR confidence).
+  - `critical-e2e`: Core business workflows across subsystems (PR gate).
+  - `full`: Complete 85-request collection across all 12 folders (Main/Release gate).
+  - `live-release`: Full collection requiring live FinnApiGo and provider keys.
+- **Collection Layout**: 12 structured folders (00-Setup, 01-Authentication & Tenant, 02-Chat & Gateway, 03-Agent, 04-RAG, 05-BYOK & Providers, 06-Cache, 07-FinOps & Billing, 08-Security & Negative, 09-Failure & Recovery, 10-Cross System E2E, 99-Final Smoke).
+- **External Dependency Governance**: Explicitly probes FinnApiGo; reports missing dependencies as `BLOCKED (Dependency Governance)` without false PASS, and verifies all 83 self-contained JakeAI requests.
+- **Reporting**: Generates machine-readable reports in `backend/reports/bruno/` (`bruno-results.json`, `bruno-junit.xml`, `bruno-summary.md`) and populates GitHub Actions `$GITHUB_STEP_SUMMARY`.
 
-### 4.4 Rationale: Avoiding Request-for-Request Duplication
-JakeAI explicitly avoids replicating the Bruno collection request-for-request inside Pytest:
-1. **Separation of Concerns**: Pytest tests the application code and OpenAPI contracts in CI. Bruno tests external network reachability, TLS, and operator workflows.
-2. **Anti-Pattern Prevention**: Duplicating 60+ Bruno `.bru` files 1:1 in Pytest leads to test bloat, brittle fixtures, and maintenance overhead without adding coverage.
-3. **Complementary Synergy**: Pytest provides exhaustive static schema proofs, boundary parameter testing, and negative contract matrices; Bruno provides realistic external client scenarios and staging sanity checks.
+### 4.4 Rationale: Complementary Testing Architecture
+JakeAI employs a layered, non-overlapping testing architecture:
+1. **Pytest Unit & Integration**: Tests deep Python logic, state machine transitions, math invariants, and mock error injections in in-process memory.
+2. **Pytest Contract**: Verifies OpenAPI schema drift and route invariants via ASGI transport.
+3. **Pytest AI Evals**: Measures retrieval precision, citation fidelity, and token optimization benchmarks against golden datasets.
+4. **Bruno CLI Automation**: Exercises real HTTP network transport, actual serialization/deserialization, live header propagation, SSE streaming frame delivery, and end-to-end multi-tenant workflows.
+
+---
+
+## 5. Bruno CLI Automated Test Master Table (TEST-08)
+
+| FOLDER | NAME | TOTAL REQUESTS | TARGET SUBSYSTEM | AUTOMATION SUITE | DEPENDENCY POLICY |
+|---|---|:---:|---|---|---|
+| `00` | Setup & Environment | 3 | Health, Readiness & Core Banking | `smoke`, `critical-e2e`, `full` | 01-02 Local / 03 FinnApiGo (BLOCKED if offline) |
+| `01` | Authentication & Tenant | 8 | JWT Auth, Claims & Tenant Isolation | `critical-e2e`, `full` | 01 FinnApiGo / 02-08 Local Dev Tokens |
+| `02` | Chat & Gateway | 7 | OpenAI Proxy & SSE Streaming | `smoke`, `critical-e2e`, `full` | Pure Local |
+| `03` | Agent | 10 | Task DAG, Run Lifecycle & Approvals | `smoke`, `critical-e2e`, `full` | Pure Local |
+| `04` | RAG | 7 | Ingestion, Hybrid Search & Grounding | `smoke`, `critical-e2e`, `full` | Pure Local (Qdrant & FastEmbed) |
+| `05` | BYOK & Providers | 7 | AES Vault & Key Lifecycle | `critical-e2e`, `full` | Pure Local |
+| `06` | Cache | 6 | Tier 1 Redis & Parameter Isolation | `critical-e2e`, `full` | Pure Local (R-LOGIC-04 Fallback preserved) |
+| `07` | FinOps & Billing | 6 | Token Ledger, Budget & Reconciliation | `critical-e2e`, `full` | Pure Local |
+| `08` | Security & Negative | 11 | Injection, Fuzzing, Bounds & Negative | `full` | Pure Local |
+| `09` | Failure & Recovery | 9 | Timeouts, Retries, Failover & Recovery | `full` | Pure Local |
+| `10` | Cross System E2E | 8 | Complete Multi-Hop Business Workflows | `critical-e2e`, `full` | Pure Local |
+| `99` | Final Smoke | 3 | Production, Security & E2E Smoke | `smoke`, `critical-e2e`, `full` | Pure Local |
+| **TOTAL** | **12 Folders** | **85** | **Complete Platform Surface** | **All Suites** | **83 Local PASS / 2 Dependency BLOCKED** |
+
+---
+
+## 6. DevSecOps CI Security Hardening (Gitleaks Least-Privilege Scanner)
+
+### 6.1 Security Audit Baseline
+- **Workflow**: `Continuous Integration / DevSecOps - Secret & Key Leak Detection` (`secret-scanning` in `.github/workflows/ci.yml`)
+- **Action**: `gitleaks/gitleaks-action@v3`
+- **Audit Date**: 2026-09-16
+- **Status**: **VERIFIED GREEN & LEAST PRIVILEGE ENFORCED**
+
+### 6.2 Incident & Resolution Summary
+- **Current Failure**: Job failed on PR events with `HttpError: Resource not accessible by integration (403)` when `gitleaks-action` attempted to write PR comments using a read-only `GITHUB_TOKEN`.
+- **Root Cause**: `gitleaks-action@v3` enables PR comments by default (`GITLEAKS_ENABLE_COMMENTS: true`), which invokes GitHub REST API comment endpoints when leaks are found (`exitCode == 2`). Initial Bruno environment files contained static dev JWTs that triggered detection.
+- **Least-Privilege Remediation**:
+  1. **Strict Job-Level Permissions**: Configured `permissions: contents: read`. Write permissions (`pull-requests: write`, `contents: write`) were explicitly rejected as PR commenting is purely cosmetic and granting write tokens violates least-privilege security for untrusted PRs and forks.
+  2. **Disabled PR Comments**: Set `GITLEAKS_ENABLE_COMMENTS: "false"`.
+  3. **Preserved DevSecOps Gate**: Set `GITLEAKS_ENABLE_SUMMARY: "true"` and `GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"`. Failures continue to block CI (`exitCode == 1`), write full markdown summaries to `$GITHUB_STEP_SUMMARY`, and upload SARIF reports.
+  4. **Sanitized Environment Fixtures**: `Bruno/environments/Local.bru` and `bruno-collection-environments.json` were sanitized to empty placeholders.
+  5. **Dynamic Runtime Dev Tokens**: `scripts/run_bruno_tests.py` mints valid HMAC-SHA256 test tokens at execution time using standard library `hmac`/`hashlib`, passing them via Bruno CLI `--env-var` flags without ever writing secrets to disk.
+- **Empirical Regression Verification**:
+  - **CASE A (Clean Repository)**: `gitleaks detect --log-opts="origin/main..HEAD" --config=.gitleaks.toml -v` -> 0 leaks found, Exit 0 (PASS).
+  - **CASE B (Controlled Synthetic Secret)**: Injected `FAKE_API_KEY` into temporary commit -> 1 leak detected (`RuleID: generic-api-key`), Exit 1 (FAIL). Confirmed scanner remains fully operational with comments disabled.
+
+

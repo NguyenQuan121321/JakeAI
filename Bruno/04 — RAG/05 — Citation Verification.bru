@@ -1,0 +1,39 @@
+meta {
+  name: 05 — Citation Verification
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "What caching technologies does JakeAI implement?",
+    "top_k": 3
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Citations structure is verified", function() {
+    const data = res.getBody();
+    expect(data.citations).to.be.an("array");
+    if (data.status === "SUCCESS" && data.citations.length > 0) {
+      expect(data.citations[0].source).to.be.a("string");
+    }
+  });
+}

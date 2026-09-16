@@ -1,0 +1,30 @@
+meta {
+  name: 05 — Agent → Tool → Verification
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/metrics
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Verification counters are non-negative", function() {
+    const data = res.getBody();
+    const count = data.tool_calls_total !== undefined ? data.tool_calls_total : data.verifications_passed;
+    expect(count).to.be.at.least(0);
+  });
+}

@@ -1,0 +1,36 @@
+meta {
+  name: 03 — User → RAG → Grounded Answer
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "What transaction volume did JakeAI process in 2026?",
+    "top_k": 3
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Grounded answer generated", function() {
+    const data = res.getBody();
+    expect(data.answer).to.be.a("string");
+  });
+}

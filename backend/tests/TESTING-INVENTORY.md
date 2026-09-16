@@ -596,5 +596,45 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
   - Total Active Executable Test Files: 122 (124 tracked in catalog).
   - Linter & Formatter (`ruff check` & `ruff format`): 0 errors, 100% clean.
 
+---
+
+## 21. Phase TEST-08 — JakeAI Bruno CLI Automation
+
+- **Phase**: `TEST-08` (Bruno CLI Test Automation)
+- **Branch**: `chore/test-08-bruno-cli-automation`
+- **Scope**: Turned the existing 85-request Bruno collection (`Bruno/`) into a maintainable automated testing layer driven by `@usebruno/cli`.
+- **Key Features**:
+  1. Automated test runner (`scripts/run_bruno_tests.py` and `backend/scripts/run_bruno_tests.py`).
+  2. Execution profiles: `smoke` (9 requests), `critical-e2e` (65 requests), `full` (85 requests), and `live-release`.
+  3. External dependency governance: Detects FinnApiGo availability, reports `BLOCKED (Dependency Governance)` cleanly without false PASS, and allows 83 self-contained requests to pass.
+  4. Multi-format reporting: JSON (`bruno-results.json`), JUnit XML (`bruno-junit.xml`), and Markdown table (`$GITHUB_STEP_SUMMARY`).
+  5. Cross-request variable chaining: Dynamic propagation of `task_id`, `run_id`, `rag_task_id`, and `approval_id`.
+- **Verification Summary**:
+  - `smoke` suite: 9/9 passed in <10s.
+  - `critical-e2e` suite: 63 passed, 2 blocked (FinnApiGo offline), 0 failed.
+  - `full` suite: 83 passed, 2 blocked (FinnApiGo offline), 0 failed (100% success on self-contained surface).
+
+---
+
+## 22. DevSecOps CI Hardening — Gitleaks Least-Privilege Secret Scanning
+
+- **Phase**: `TEST-08` Hardening (Gitleaks CI Permissions & DevSecOps Audit)
+- **Scope**: Resolved CI permission failure in `DevSecOps - Secret & Key Leak Detection` (`secret-scanning` job in `.github/workflows/ci.yml`).
+- **Incident & Root Cause**:
+  - Job failed on PR events with `HttpError: Resource not accessible by integration (403)`.
+  - `gitleaks-action@v3` enables PR comments by default (`GITLEAKS_ENABLE_COMMENTS: true`), which attempts to post inline review comments via Octokit when leaks are found.
+  - Initial Bruno fixtures contained static dev JWTs, causing `exitCode == 2` (leaks detected). The action then attempted to write comments using a read-only `GITHUB_TOKEN`, crashing with HTTP 403.
+- **Least-Privilege Security Hardening**:
+  - Rejected `pull-requests: write` and PAT injection to prevent privilege escalation on untrusted PRs and forks.
+  - Configured explicit job-level `permissions: contents: read`.
+  - Set `GITLEAKS_ENABLE_COMMENTS: "false"` to eliminate the cosmetic PR comment write path.
+  - Enabled `GITLEAKS_ENABLE_SUMMARY: "true"` and `GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"` to maintain full visibility via `$GITHUB_STEP_SUMMARY` and SARIF artifacts.
+  - Sanitized `Bruno/environments/Local.bru` and `bruno-collection-environments.json` to empty placeholders.
+  - Added dynamic HMAC-SHA256 test token generation in `scripts/run_bruno_tests.py` using standard library `hmac`/`hashlib`, injected via `--env-var` flags at runtime.
+- **Dual Regression Testing**:
+  - **CASE A (Clean Repository)**: `gitleaks detect --log-opts="origin/main..HEAD" --config=.gitleaks.toml -v` -> 0 leaks found, Exit 0 (PASS).
+  - **CASE B (Controlled Synthetic Secret)**: Injected synthetic token fixture -> 1 leak detected (`RuleID: generic-api-key`), Exit 1 (FAIL). Proved scanner remains fully active and enforcing fail-fast security gates with PR comments disabled.
+
+
 
 

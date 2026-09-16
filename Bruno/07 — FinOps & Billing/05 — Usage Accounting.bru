@@ -1,0 +1,31 @@
+meta {
+  name: 05 — Usage Accounting
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/reconciliation
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Reconciliation report compares local planning to provider truth", function() {
+    const data = res.getBody();
+    expect(data.tenant_id).to.equal(bru.getEnvVar("tenant_a"));
+    const count = data.total_reconciled !== undefined ? data.total_reconciled : data.total_transactions;
+    expect(count).to.be.a("number");
+  });
+}

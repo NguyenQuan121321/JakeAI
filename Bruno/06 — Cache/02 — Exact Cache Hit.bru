@@ -1,0 +1,48 @@
+meta {
+  name: 02 — Exact Cache Hit
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "model": "{{model}}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Verify exact cache miss for session {{correlation_id}}"
+      }
+    ],
+    "temperature": 0.0,
+    "stream": false
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Identical repeat request is an exact cache HIT or offline fallback preserved", function() {
+    const data = res.getBody();
+    if (data.provider_cache && data.provider_cache.miss_reason === "offline_fallback") {
+      // Under offline fallback (R-LOGIC-04), offline responses are intentionally never cached
+      expect(data.cached).to.equal(false);
+    } else {
+      expect(data.cached).to.equal(true);
+    }
+  });
+}

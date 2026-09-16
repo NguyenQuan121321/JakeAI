@@ -1,0 +1,30 @@
+meta {
+  name: 06 — Cancel Run
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/cancel
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Cancellation preserves state model invariants", function() {
+    const data = res.getBody();
+    expect(data.run_id).to.equal(bru.getVar("run_id") || bru.getEnvVar("run_id"));
+    expect(["cancelled", "completed", "failed"]).to.include(data.status);
+  });
+}

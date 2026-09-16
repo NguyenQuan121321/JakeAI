@@ -1,0 +1,37 @@
+meta {
+  name: 06 — No Evidence / Abstention
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "What is the orbital speed of Jupiter's moon Europa in kilometers per second?",
+    "top_k": 3
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Irrelevant query produces deterministic epistemic abstention", function() {
+    const data = res.getBody();
+    expect(data.status).to.equal("ABSTAINED");
+    expect(data.abstention_reason).to.equal("NO_RELEVANT_EVIDENCE");
+  });
+}

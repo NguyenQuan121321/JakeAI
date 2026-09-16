@@ -1,0 +1,25 @@
+meta {
+  name: 06 — Agent → Approval → Resume
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/approvals/pending
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

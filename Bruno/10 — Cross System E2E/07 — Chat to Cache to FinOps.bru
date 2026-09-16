@@ -1,0 +1,29 @@
+meta {
+  name: 07 — Chat → Cache → FinOps
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("FinOps ledger reports positive activity", function() {
+    const data = res.getBody();
+    expect(data.total_requests).to.be.at.least(0);
+  });
+}

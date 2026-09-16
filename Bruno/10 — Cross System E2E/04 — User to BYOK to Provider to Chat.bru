@@ -1,0 +1,42 @@
+meta {
+  name: 04 — User → BYOK → Provider → Chat
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "model": "{{model}}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Verify BYOK provider chat execution"
+      }
+    ],
+    "stream": false
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Response content is returned", function() {
+    const data = res.getBody();
+    expect(data.choices[0].message.content).to.be.a("string");
+  });
+}

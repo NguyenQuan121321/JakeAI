@@ -16,6 +16,8 @@ jobs:
   secret-scanning:
     name: DevSecOps - Secret & Key Leak Detection
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Complete Repository History
         uses: actions/checkout@v7
@@ -27,6 +29,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
 
   dependency-and-sast:
     name: DevSecOps - Vulnerability Audit, SAST & License Compliance
@@ -280,6 +285,24 @@ jobs:
         run: |
           cd backend
           pytest tests/e2e/test_e2e_business_workflows.py -v -m "not live_external"
+
+      - name: Critical Bruno API/E2E Smoke Gate (TEST-08 / PR Gate)
+        if: github.event_name == 'pull_request'
+        run: |
+          python scripts/run_bruno_tests.py --suite smoke --auto-start
+
+      - name: Full Bruno API/E2E Test Suite (TEST-08 / Main & Release Gate)
+        if: github.event_name != 'pull_request'
+        run: |
+          python scripts/run_bruno_tests.py --suite full --auto-start
+
+      - name: Archive Bruno Test Reports
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bruno-test-reports
+          path: backend/reports/bruno/
+          retention-days: 14
 
       - name: API Breaking Change & Schema Drift Gate (OpenAPI Contract Verification)
         run: |

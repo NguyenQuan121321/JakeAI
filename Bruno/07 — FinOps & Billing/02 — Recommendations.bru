@@ -1,0 +1,30 @@
+meta {
+  name: 02 — Recommendations
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/analytics/dashboard
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Analytics dashboard returns token savings metrics", function() {
+    const data = res.getBody();
+    expect(data.tenant_id).to.equal(bru.getEnvVar("tenant_a"));
+    expect(data.tokens_saved_cache).to.be.a("number");
+  });
+}

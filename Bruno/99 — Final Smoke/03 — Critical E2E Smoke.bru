@@ -1,0 +1,25 @@
+meta {
+  name: 03 — Critical E2E Smoke
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/metrics
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Authenticated telemetry reports operational health", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

@@ -1,0 +1,49 @@
+meta {
+  name: 03 — Start Run
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "max_iterations": 10,
+    "async_execution": true
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    const data = res.getBody();
+    if (data.run_id) {
+      bru.setVar("run_id", data.run_id);
+      bru.setEnvVar("run_id", data.run_id);
+      console.log("Captured run_id: " + data.run_id);
+    }
+  }
+}
+
+tests {
+  test("Status code is 201 Created", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  test("Run state initialized", function() {
+    const data = res.getBody();
+    expect(data.run_id).to.be.a("string");
+    expect(data.task_id).to.equal(bru.getVar("task_id") || bru.getEnvVar("task_id"));
+    expect(["created", "running", "planning", "executing", "completed"]).to.include(data.status);
+  });
+}

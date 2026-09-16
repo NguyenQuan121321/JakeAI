@@ -1,0 +1,21 @@
+meta {
+  name: 02 — Critical Security Smoke
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/byok/keys
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Unauthenticated perimeter access is strictly blocked", function() {
+    expect(res.getStatus()).to.equal(401);
+  });
+}

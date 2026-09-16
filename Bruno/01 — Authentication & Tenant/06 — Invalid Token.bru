@@ -1,0 +1,29 @@
+meta {
+  name: 06 — Invalid Token
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/v1/byok/keys
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: invalid-token-signature-forged-string
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Invalid token returns 401 Unauthorized", function() {
+    expect(res.getStatus()).to.equal(401);
+  });
+  test("Structured error detail is returned", function() {
+    const data = res.getBody();
+    expect(data.detail).to.equal("Invalid authentication token");
+  });
+}

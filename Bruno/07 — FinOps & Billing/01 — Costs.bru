@@ -1,0 +1,32 @@
+meta {
+  name: 01 — Costs
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("FinOps summary exposes baseline and actual costs", function() {
+    const data = res.getBody();
+    expect(data.tenant_id).to.equal(bru.getEnvVar("tenant_a"));
+    expect(data.total_requests).to.be.a("number");
+    const cost = data.total_actual_cost_usd !== undefined ? data.total_actual_cost_usd : data.actual_cost_usd;
+    expect(cost).to.be.a("number");
+  });
+}

@@ -1,0 +1,25 @@
+meta {
+  name: 09 — Resume After Approval
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

@@ -1,0 +1,154 @@
+{
+  "info": {
+    "type": "bruno-environment",
+    "exportedAt": "2026-09-14T20:00:00.000Z",
+    "exportedUsing": "Bruno/v1.38.0"
+  },
+  "environments": [
+    {
+      "name": "Local",
+      "variables": [
+        {
+          "name": "base_url",
+          "value": "http://localhost:8000",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "finnapigo_base_url",
+          "value": "http://localhost:8081",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "tenant_a",
+          "value": "default",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "tenant_b",
+          "value": "tenant_beta",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "user_a",
+          "value": "16",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "user_b",
+          "value": "user-beta",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "user_a_email",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "user_a_password",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "token_a",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "token_b",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "token_expired",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "task_id",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "run_id",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "rag_task_id",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "approval_id",
+          "value": "",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "conversation_id",
+          "value": "conv-manual-test-01",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "provider",
+          "value": "gemini",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "model",
+          "value": "gemini-1.5-flash",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "correlation_id",
+          "value": "cid-manual-e2e-001",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        },
+        {
+          "name": "gemini_api_key",
+          "value": "test-fake-gemini-key-for-byok",
+          "type": "text",
+          "enabled": true,
+          "secret": false
+        }
+      ]
+    }
+  ]
+}

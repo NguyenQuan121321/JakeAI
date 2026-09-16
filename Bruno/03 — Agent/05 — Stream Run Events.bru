@@ -1,0 +1,28 @@
+meta {
+  name: 05 — Stream Run Events
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/events
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Accept: text/event-stream
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Content-Type header is text/event-stream", function() {
+    expect(res.getHeader("content-type")).to.include("text/event-stream");
+  });
+}

@@ -1,0 +1,30 @@
+meta {
+  name: 06 — Billing Subscription
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/v1/billing/subscription
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Subscription tier is returned", function() {
+    const data = res.getBody();
+    expect(data.tenant_id).to.equal(bru.getEnvVar("tenant_a"));
+    expect(data.tier).to.be.a("string");
+  });
+}
