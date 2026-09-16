@@ -1,0 +1,131 @@
+{
+  "version": "v1",
+  "environment": {
+    "commit": "c96a5eb18952",
+    "environment": "local",
+    "python_version": "3.12.8",
+    "os_name": "Windows",
+    "platform_name": "Windows-11-10.0.26200-SP0",
+    "cpu_count": 12,
+    "dependencies_hash": "dcca4223ed4d1972",
+    "recorded_at": 1789528363.764263
+  },
+  "scenarios": {
+    "concurrent_chat": {
+      "scenario_name": "concurrent_chat",
+      "concurrency": 10,
+      "input_size": "30 requests",
+      "baseline_metrics": {
+        "latency_p50_ms": 42.55,
+        "latency_p95_ms": 98.441,
+        "latency_p99_ms": 99.137,
+        "throughput_rps": 161.61,
+        "error_rate_pct": 0.0,
+        "memory_peak_mb": 1.024
+      },
+      "tolerances": {
+        "allowed_latency_regression_pct": 40.0,
+        "min_significant_delta_ms": 15.0,
+        "allowed_throughput_regression_pct": 35.0,
+        "max_error_rate_pct": 0.0
+      }
+    },
+    "concurrent_agent_runs": {
+      "scenario_name": "concurrent_agent_runs",
+      "concurrency": 5,
+      "input_size": "15 requests",
+      "baseline_metrics": {
+        "latency_p50_ms": 4.815,
+        "latency_p95_ms": 5.609,
+        "latency_p99_ms": 5.745,
+        "throughput_rps": 198.46,
+        "error_rate_pct": 0.0,
+        "memory_peak_mb": 0.468
+      },
+      "tolerances": {
+        "allowed_latency_regression_pct": 40.0,
+        "min_significant_delta_ms": 15.0,
+        "allowed_throughput_regression_pct": 35.0,
+        "max_error_rate_pct": 0.0
+      }
+    },
+    "concurrent_rag_queries": {
+      "scenario_name": "concurrent_rag_queries",
+      "concurrency": 10,
+      "input_size": "30 requests",
+      "baseline_metrics": {
+        "latency_p50_ms": 64.239,
+        "latency_p95_ms": 97.441,
+        "latency_p99_ms": 113.726,
+        "throughput_rps": 117.24,
+        "error_rate_pct": 0.0,
+        "memory_peak_mb": 0.504
+      },
+      "tolerances": {
+        "allowed_latency_regression_pct": 40.0,
+        "min_significant_delta_ms": 15.0,
+        "allowed_throughput_regression_pct": 35.0,
+        "max_error_rate_pct": 0.0
+      }
+    },
+    "sse_connections": {
+      "scenario_name": "sse_connections",
+      "concurrency": 8,
+      "input_size": "16 requests",
+      "baseline_metrics": {
+        "latency_p50_ms": 224.108,
+        "latency_p95_ms": 285.419,
+        "latency_p99_ms": 285.715,
+        "throughput_rps": 55.01,
+        "error_rate_pct": 0.0,
+        "memory_peak_mb": 0.955,
+        "ttfc_p95_ms": 285.297
+      },
+      "tolerances": {
+        "allowed_latency_regression_pct": 40.0,
+        "min_significant_delta_ms": 15.0,
+        "allowed_throughput_regression_pct": 35.0,
+        "max_error_rate_pct": 0.0
+      }
+    },
+    "redis_contention": {
+      "scenario_name": "redis_contention",
+      "concurrency": 15,
+      "input_size": "50 requests",
+      "baseline_metrics": {
+        "latency_p50_ms": 1.652,
+        "latency_p95_ms": 1.882,
+        "latency_p99_ms": 2.237,
+        "throughput_rps": 572.42,
+        "error_rate_pct": 0.0,
+        "memory_peak_mb": 1.16
+      },
+      "tolerances": {
+        "allowed_latency_regression_pct": 40.0,
+        "min_significant_delta_ms": 15.0,
+        "allowed_throughput_regression_pct": 35.0,
+        "max_error_rate_pct": 0.0
+      }
+    },
+    "qdrant_access": {
+      "scenario_name": "qdrant_access",
+      "concurrency": 10,
+      "input_size": "30 requests",
+      "baseline_metrics": {
+        "latency_p50_ms": 1.413,
+        "latency_p95_ms": 1.694,
+        "latency_p99_ms": 1.775,
+        "throughput_rps": 469.94,
+        "error_rate_pct": 0.0,
+        "memory_peak_mb": 0.44
+      },
+      "tolerances": {
+        "allowed_latency_regression_pct": 40.0,
+        "min_significant_delta_ms": 15.0,
+        "allowed_throughput_regression_pct": 35.0,
+        "max_error_rate_pct": 0.0
+      }
+    }
+  },
+  "description": "Empirically recorded baseline v1"
+}

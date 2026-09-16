@@ -1,0 +1,101 @@
+name: Scheduled Performance Regression Benchmark
+
+on:
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Benchmark Execution Mode (full / smoke)"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - full
+          - smoke
+      concurrency_multiplier:
+        description: "Concurrency Scaling Factor"
+        required: false
+        default: "1.0"
+      fail_on_regression:
+        description: "Block / Fail Workflow on Regression"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  performance-benchmark:
+    name: Full Performance Benchmark & Statistical Audit (TEST-09)
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Execute Full Performance Regression Benchmark
+        run: |
+          cd backend
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          MULT="${{ github.event.inputs.concurrency_multiplier || '1.0' }}"
+          FAIL_FLAG=""
+          if [ "${{ github.event.inputs.fail_on_regression || 'true' }}" = "true" ]; then
+            FAIL_FLAG="--fail-on-regression"
+          fi
+          python scripts/run_performance_benchmark.py --mode "$MODE" --concurrency-multiplier "$MULT" $FAIL_FLAG
+
+      - name: Concurrency Stability and Load Verification Suite (PERF-004)
+        run: |
+          cd backend
+          pytest tests/performance/test_load_and_concurrency.py -v
+
+      - name: Publish Markdown Report to GitHub Step Summary
+        if: always()
+        run: |
+          if [ -f backend/benchmark-results/performance-report.md ]; then
+            cat backend/benchmark-results/performance-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Archive Performance Benchmark Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: performance-benchmark-artifacts
+          path: backend/benchmark-results/
+          retention-days: 30

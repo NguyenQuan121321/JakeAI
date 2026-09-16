@@ -304,6 +304,20 @@ jobs:
           path: backend/reports/bruno/
           retention-days: 14
 
+      - name: Performance Regression Smoke Gate (TEST-09 / PERF-003)
+        run: |
+          cd backend
+          python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py -v
+
+      - name: Archive Performance Benchmark Smoke Artifacts
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: performance-benchmark-smoke-results
+          path: backend/benchmark-results/
+          retention-days: 14
+
       - name: API Breaking Change & Schema Drift Gate (OpenAPI Contract Verification)
         run: |
           cd backend
