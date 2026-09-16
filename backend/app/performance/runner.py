@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -78,6 +78,7 @@ class PerformanceBenchmarkRunner:
         """Execute a single scenario based on current mode configuration."""
         mult = self.concurrency_multiplier
 
+        cfg: dict[str, dict[str, Any]]
         if self.mode == "smoke":
             # Fast CI smoke mode (< 10 seconds total across all 6 scenarios)
             cfg = {
@@ -137,7 +138,9 @@ class PerformanceBenchmarkRunner:
                 },
             }
 
-        params = cfg.get(scenario_name, {"concurrency": 2, "total_requests": 5})
+        params: dict[str, Any] = cfg.get(
+            scenario_name, {"concurrency": 2, "total_requests": 5}
+        )
 
         if scenario_name == "concurrent_chat":
             return await run_concurrent_chat_scenario(**params)
