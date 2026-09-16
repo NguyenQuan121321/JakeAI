@@ -51,8 +51,9 @@ All 9 non-performance test failures in the approval state-machine, provider faul
 - **Fix**: Replaced all monkeypatching in `agent_scenario.py` with dependency injection:
   ```python
   class PerformanceMockBackend(AgentBackendInterface):
-      async def generate(self, _request: BackendRequest) -> BackendResponse:
-          ...
+      async def generate(self, _request: BackendRequest) -> BackendResponse: ...
+
+
   engine = ExecutionEngine(backend=PerformanceMockBackend())
   ```
   This guarantees complete immutability of `JakeAIBackend` and zero state leak.

@@ -115,7 +115,9 @@ In `backend/app/performance/scenarios/agent_scenario.py`:
 ```python
 # PREVIOUS FLAWED IMPLEMENTATION:
 async with semaphore:
-    with patch("app.agent.backends.jakeai.JakeAIBackend.generate", return_value=mock_response):
+    with patch(
+        "app.agent.backends.jakeai.JakeAIBackend.generate", return_value=mock_response
+    ):
         async for event in engine.execute_task(spec):
             ...
 ```
