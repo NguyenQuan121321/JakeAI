@@ -1,0 +1,27 @@
+meta {
+  name: 07 — Cancel Race
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/cancel
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Repeated cancellation preserves terminal state", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(["cancelled", "completed", "failed"]).to.include(data.status);
+  });
+}

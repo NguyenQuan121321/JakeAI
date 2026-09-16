@@ -1,0 +1,38 @@
+meta {
+  name: 04 — Budget Update
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/v1/finops/budget
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "token_quota": 5000000,
+    "dollar_budget_usd": 150.0,
+    "warning_threshold": 0.85
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Updated budget reflected in response", function() {
+    const data = res.getBody();
+    expect(data.token_quota).to.equal(5000000);
+    expect(data.dollar_budget_usd).to.equal(150.0);
+  });
+}

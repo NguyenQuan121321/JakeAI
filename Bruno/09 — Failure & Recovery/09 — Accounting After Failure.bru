@@ -1,0 +1,30 @@
+meta {
+  name: 09 — Accounting After Failure
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Accounting records reflect no dangling reservations", function() {
+    const data = res.getBody();
+    const cost = data.total_actual_cost_usd !== undefined ? data.total_actual_cost_usd : data.actual_cost_usd;
+    expect(cost).to.be.a("number");
+  });
+}

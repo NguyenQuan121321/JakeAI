@@ -1,0 +1,49 @@
+meta {
+  name: 01 — Ingest Document
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/ingest?async_mode=true
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "content": "JakeAI Financial Platform Architecture:\nJakeAI implements a two-tier cache with Tier 1 exact SHA-256 Redis and Tier 2 semantic Qdrant cosine similarity.\nIn 2026, JakeAI processed over $100M in algorithmic transactions with zero reconciliation drift.\nAll financial specialist agents execute bounded deterministic arithmetic with Proposition-level citation anchoring.",
+    "source": "jakeai_platform_spec.md",
+    "chunk_size": 350,
+    "chunk_overlap": 50,
+    "metadata": {
+      "category": "architecture",
+      "classification": "verified"
+    }
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 202 || res.getStatus() === 201) {
+    const data = res.getBody();
+    if (data.task_id) {
+      bru.setVar("rag_task_id", data.task_id);
+      bru.setEnvVar("rag_task_id", data.task_id);
+      console.log("Captured rag_task_id: " + data.task_id);
+    }
+  }
+}
+
+tests {
+  test("Document ingestion returns 202 Accepted or 201 Created", function() {
+    expect([201, 202]).to.include(res.getStatus());
+  });
+}

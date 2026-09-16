@@ -1,0 +1,40 @@
+meta {
+  name: 03 — Chat Streaming
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: text/event-stream
+}
+
+body:json {
+  {
+    "prompt": "Summarize financial risk indicators for commercial banking portfolios.",
+    "conversation_id": "{{conversation_id}}",
+    "parameters": {
+      "model": "{{model}}",
+      "temperature": 0.2
+    }
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Content-Type header is text/event-stream", function() {
+    expect(res.getHeader("content-type")).to.include("text/event-stream");
+  });
+}

@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean
+.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live
 
 PYTHON ?= python
 UV ?= uv
@@ -19,6 +19,10 @@ help:
 	@echo "  make test         Execute pytest test suite"
 	@echo "  make test-cov     Execute pytest with coverage report"
 	@echo "  make eval         Run AI RAG regression tests against golden dataset"
+	@echo "  make bruno-smoke  Run Bruno CLI smoke test suite"
+	@echo "  make bruno-e2e    Run Bruno CLI critical-e2e test suite"
+	@echo "  make bruno-full   Run complete Bruno CLI test suite"
+	@echo "  make bruno-live   Run Bruno CLI live integration suite"
 	@echo "  make audit        Scan dependencies for CVEs using pip-audit"
 	@echo "  make sast         Run static application security testing using Bandit"
 	@echo "  make openapi      Export static OpenAPI specification JSON"
@@ -49,6 +53,18 @@ test-cov:
 
 eval:
 	cd backend && $(PYTEST) tests/evals/ -v
+
+bruno-smoke:
+	$(PYTHON) scripts/run_bruno_tests.py --suite smoke
+
+bruno-e2e:
+	$(PYTHON) scripts/run_bruno_tests.py --suite critical-e2e
+
+bruno-full:
+	$(PYTHON) scripts/run_bruno_tests.py --suite full
+
+bruno-live:
+	$(PYTHON) scripts/run_bruno_tests.py --suite live-release
 
 audit:
 	cd backend && $(PIP_AUDIT) -r requirements.txt

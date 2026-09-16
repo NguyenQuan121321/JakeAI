@@ -1,0 +1,15 @@
+{
+  "name": "jakeai-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JakeAI Enterprise Intelligent Layer & AI Platform",
+  "scripts": {
+    "test:bruno": "python scripts/run_bruno_tests.py --suite full",
+    "test:bruno:smoke": "python scripts/run_bruno_tests.py --suite smoke",
+    "test:bruno:e2e": "python scripts/run_bruno_tests.py --suite critical-e2e",
+    "test:bruno:live": "python scripts/run_bruno_tests.py --suite live-release"
+  },
+  "devDependencies": {
+    "@usebruno/cli": "^4.1.0"
+  }
+}

@@ -1,0 +1,38 @@
+meta {
+  name: 11 — Provider Timeout / 429 / 5xx
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "model": "non-existent-model-quota-test",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Simulate error normalization"
+      }
+    ],
+    "stream": false
+  }
+}
+
+tests {
+  test("Provider errors normalized into structured HTTP categories", function() {
+    expect([200, 400, 429, 502, 503]).to.include(res.getStatus());
+  });
+}

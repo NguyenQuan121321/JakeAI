@@ -1,0 +1,29 @@
+meta {
+  name: 08 — Cross Tenant / Authorization
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{base_url}}/api/v1/rag/tasks/00000000-0000-0000-0000-000000000000
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_b}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Cross-tenant resource access is rejected with 404 Not Found", function() {
+    expect(res.getStatus()).to.equal(404);
+  });
+  test("Error detail isolates tenant boundary", function() {
+    const data = res.getBody();
+    expect(data.detail).to.include("tenant_beta");
+  });
+}

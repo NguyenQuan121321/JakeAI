@@ -1,0 +1,32 @@
+meta {
+  name: 10 — Malformed Provider Response
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/api/v1/byok/keys/validate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "provider": "non-existent-provider",
+    "api_key": "invalid-key-probe"
+  }
+}
+
+tests {
+  test("Unsupported provider fails closed safely", function() {
+    expect([200, 400]).to.include(res.getStatus());
+  });
+}

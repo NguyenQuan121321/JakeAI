@@ -1,0 +1,51 @@
+meta {
+  name: 01 — Basic Chat
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-ID: {{correlation_id}}
+}
+
+body:json {
+  {
+    "model": "{{model}}",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are JakeAI financial engineering assistant."
+      },
+      {
+        "role": "user",
+        "content": "Explain the formula and financial purpose of EBITDA."
+      }
+    ],
+    "temperature": 0.2,
+    "stream": false
+  }
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Chat completion response matches OpenAI schema", function() {
+    const data = res.getBody();
+    expect(data.choices).to.be.an("array");
+    expect(data.choices[0].message.content).to.be.a("string");
+    expect(data.choices[0].message.content.length).to.be.greaterThan(10);
+    expect(data.usage.total_tokens).to.be.greaterThan(0);
+  });
+}

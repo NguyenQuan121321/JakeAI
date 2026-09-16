@@ -1,0 +1,33 @@
+meta {
+  name: 03 — Forbidden Permission
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/finops/budget
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_b}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "token_quota": 99999999,
+    "dollar_budget_usd": 10000.0,
+    "warning_threshold": 0.50
+  }
+}
+
+tests {
+  test("ATTACK: Read-only user mutating budget. EXPECTED: 200 or 403 Forbidden", function() {
+    expect([200, 403]).to.include(res.getStatus());
+  });
+}

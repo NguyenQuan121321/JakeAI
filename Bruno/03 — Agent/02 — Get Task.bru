@@ -1,0 +1,30 @@
+meta {
+  name: 02 — Get Task
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Task metadata matches created task", function() {
+    const data = res.getBody();
+    expect(data.task_id).to.equal(bru.getVar("task_id") || bru.getEnvVar("task_id"));
+    expect(data.goal).to.include("EBITDA");
+  });
+}

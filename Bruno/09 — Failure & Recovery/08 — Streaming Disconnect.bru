@@ -1,0 +1,33 @@
+meta {
+  name: 08 — Streaming Disconnect
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  Accept: text/event-stream
+}
+
+body:json {
+  {
+    "prompt": "Test client disconnection handling and lock release",
+    "conversation_id": "conv-disconnect-test"
+  }
+}
+
+tests {
+  test("Streaming connection established cleanly", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

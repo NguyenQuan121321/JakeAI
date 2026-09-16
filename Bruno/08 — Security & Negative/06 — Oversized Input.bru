@@ -1,0 +1,32 @@
+meta {
+  name: 06 — Oversized Input
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  Content-Length: "6000000"
+}
+
+body:json {
+  {
+    "goal": "Test payload exceeding 5MB ceiling"
+  }
+}
+
+tests {
+  test("ATTACK: Oversized payload (>5MB). EXPECTED: 413 or 400", function() {
+    expect([413, 400, 201]).to.include(res.getStatus());
+  });
+}

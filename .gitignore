@@ -46,6 +46,8 @@ coverage.xml
 *.py,cover
 .hypothesis/
 benchmark-results/
+reports/
+backend/reports/
 
 # Type Checking & Linting
 .mypy_cache/
@@ -91,5 +93,3 @@ logs/
 # Worktrees
 .worktrees/
 
-# Bruno Local Collections
-Bruno/
