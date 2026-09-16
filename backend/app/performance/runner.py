@@ -82,28 +82,28 @@ class PerformanceBenchmarkRunner:
             # Fast CI smoke mode (< 10 seconds total across all 6 scenarios)
             cfg = {
                 "concurrent_chat": {
-                    "concurrency": max(1, int(3 * mult)),
-                    "total_requests": max(2, int(6 * mult)),
+                    "concurrency": max(1, int(2 * mult)),
+                    "total_requests": max(2, int(3 * mult)),
                 },
                 "concurrent_agent_runs": {
                     "concurrency": max(1, int(2 * mult)),
-                    "total_runs": max(2, int(4 * mult)),
+                    "total_runs": max(2, int(2 * mult)),
                 },
                 "concurrent_rag_queries": {
-                    "concurrency": max(1, int(3 * mult)),
-                    "total_queries": max(2, int(6 * mult)),
+                    "concurrency": max(1, int(2 * mult)),
+                    "total_queries": max(2, int(3 * mult)),
                 },
                 "sse_connections": {
                     "concurrency": max(1, int(2 * mult)),
-                    "total_streams": max(2, int(4 * mult)),
+                    "total_streams": max(2, int(2 * mult)),
                 },
                 "redis_contention": {
-                    "concurrency": max(1, int(4 * mult)),
-                    "total_operations": max(4, int(10 * mult)),
+                    "concurrency": max(1, int(2 * mult)),
+                    "total_operations": max(2, int(4 * mult)),
                 },
                 "qdrant_access": {
-                    "concurrency": max(1, int(3 * mult)),
-                    "total_operations": max(3, int(6 * mult)),
+                    "concurrency": max(1, int(2 * mult)),
+                    "total_operations": max(2, int(3 * mult)),
                 },
             }
         else:

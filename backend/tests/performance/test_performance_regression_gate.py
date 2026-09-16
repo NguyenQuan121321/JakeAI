@@ -13,6 +13,8 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from app.performance.baseline_store import (
     PerformanceBaselineStore,
     capture_environment_metadata,
@@ -202,3 +204,66 @@ def test_reporter_artifacts_generation() -> None:
             in md_content
         )
         assert "`chat`" in md_content
+
+
+def test_baseline_store_fallback_and_exists() -> None:
+    """Verify baseline store handles missing baseline and existence queries."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = PerformanceBaselineStore(baselines_dir=Path(tmpdir))
+        assert not store.baseline_exists("nonexistent_v99")
+        fallback = store.load_baseline("nonexistent_v99")
+        assert fallback.version == "nonexistent_v99"
+        assert fallback.environment is not None
+
+
+@pytest.mark.asyncio
+async def test_in_memory_contention_redis_methods() -> None:
+    """Verify all auxiliary methods on InMemoryContentionRedis."""
+    from app.performance.scenarios.redis_contention_scenario import (
+        InMemoryContentionRedis,
+    )
+
+    redis = InMemoryContentionRedis()
+    assert await redis.ping() is True
+    await redis.set("k1", "v1")
+    assert await redis.get("k1") == "v1"
+    assert await redis.exists("k1", "k2") == 1
+    assert await redis.incrby("counter", 5) == 5
+    assert await redis.incrbyfloat("f_counter", 2.5) == 2.5
+    assert await redis.delete("k1", "counter") == 2
+    assert await redis.get("k1") is None
+
+
+@pytest.mark.asyncio
+async def test_runner_benchmark_and_audit() -> None:
+    """Verify PerformanceBenchmarkRunner run_benchmark_and_audit pipeline."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.performance.runner import PerformanceBenchmarkRunner
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runner = PerformanceBenchmarkRunner(mode="smoke")
+        runner.store = PerformanceBaselineStore(baselines_dir=Path(tmpdir))
+        # Seed baseline in temporary store
+        base_res = _create_dummy_result("concurrent_chat")
+        scen_base = _create_dummy_baseline("concurrent_chat")
+        base = PerformanceBaseline(
+            version="v1",
+            environment=capture_environment_metadata(),
+            scenarios={"concurrent_chat": scen_base},
+        )
+        runner.store.save_baseline(base, "v1")
+
+        with (
+            patch.object(
+                runner,
+                "run_all_scenarios",
+                new_callable=AsyncMock,
+                return_value={"concurrent_chat": base_res},
+            ),
+            patch.object(runner, "_warmup", new_callable=AsyncMock),
+        ):
+            results, report = await runner.run_benchmark_and_audit()
+            assert "concurrent_chat" in results
+            assert report.baseline_version == "v1"
+            assert report.total_scenarios_evaluated == 1
