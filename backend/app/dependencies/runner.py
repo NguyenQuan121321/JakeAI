@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import datetime
-import subprocess
+import shlex
+import subprocess  # nosec B404
 import sys
 import time
 from pathlib import Path
@@ -120,9 +121,9 @@ class DependencyRegressionRunner:
 
         start_time = time.perf_counter()
         try:
-            proc = subprocess.run(
-                cmd,
-                shell=True,
+            cmd_args = shlex.split(cmd, posix=(sys.platform != "win32"))
+            proc = subprocess.run(  # nosec B603
+                cmd_args,
                 cwd=cwd,
                 capture_output=True,
                 text=True,

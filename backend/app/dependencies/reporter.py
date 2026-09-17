@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.dependencies.models import BreakageReport
+
+logger = logging.getLogger(__name__)
 
 
 class DependencyReporter:
@@ -164,8 +167,12 @@ class DependencyReporter:
             try:
                 with open(step_summary, "a", encoding="utf-8") as f:
                     f.write("\n" + md_content + "\n")
-            except Exception:
-                pass
+            except OSError as exc:
+                logger.warning(
+                    "Failed to append dependency report to GITHUB_STEP_SUMMARY (%s): %s",
+                    step_summary,
+                    exc,
+                )
 
         return {
             "json": json_path,

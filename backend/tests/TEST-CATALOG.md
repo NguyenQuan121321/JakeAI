@@ -7,7 +7,7 @@
 ## 1. Catalog Overview & Summary Statistics
 - **Total Tracked Test Files**: 130 tracked in catalog (128 active test files + 1 shared fixture module + 1 deleted obsolete file)
 - **Active Executable Test Files**: 128
-- **Total Test Functions / Methods**: 1,394 (collected by Pytest as 1,868 test items)
+- **Total Test Functions / Methods**: 1,403 (collected by Pytest as 1,877 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
@@ -15,7 +15,7 @@
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
-  - `DEP-*`: 3 files (`DEP-001` through `DEP-003`, 26 tests)
+  - `DEP-*`: 3 files (`DEP-001` through `DEP-003`, 35 tests)
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
   - `PERF-*`: 6 files (`PERF-001` through `PERF-006`, 24 tests)
@@ -28,7 +28,7 @@
   - `UNIQUE`: 36 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,740 passed, 3 skipped in offline mode, 0 failed)
+- **Test Suite Pass Rate**: **100%** (1,749 passed, 3 skipped in offline mode, 0 failed)
 - **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---

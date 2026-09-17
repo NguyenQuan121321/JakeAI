@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 
 from packaging.version import InvalidVersion, Version
@@ -15,16 +16,32 @@ from app.dependencies.manifest import (
 )
 from app.dependencies.models import DependencyDiff
 
+logger = logging.getLogger(__name__)
+
 
 def parse_git_file_content(ref: str, file_path_in_repo: str) -> str | None:
     """Retrieve text content of a file from a specified git revision."""
     cmd = ["git", "show", f"{ref}:{file_path_in_repo}"]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(  # nosec B603
+            cmd, capture_output=True, text=True, check=False
+        )
         if proc.returncode == 0:
             return proc.stdout
-    except Exception:
-        pass
+        logger.debug(
+            "git show %s:%s returned non-zero exit code %d: %s",
+            ref,
+            file_path_in_repo,
+            proc.returncode,
+            proc.stderr.strip() if proc.stderr else "",
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning(
+            "Failed to execute git show for %s:%s: %s",
+            ref,
+            file_path_in_repo,
+            exc,
+        )
     return None
 
 

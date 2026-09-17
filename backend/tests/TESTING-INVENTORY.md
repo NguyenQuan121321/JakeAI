@@ -635,6 +635,49 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
   - **CASE A (Clean Repository)**: `gitleaks detect --log-opts="origin/main..HEAD" --config=.gitleaks.toml -v` -> 0 leaks found, Exit 0 (PASS).
   - **CASE B (Controlled Synthetic Secret)**: Injected synthetic token fixture -> 1 leak detected (`RuleID: generic-api-key`), Exit 1 (FAIL). Proved scanner remains fully active and enforcing fail-fast security gates with PR comments disabled.
 
+---
+
+## 23. Phase TEST-09 — JakeAI Performance Regression Automation
+
+- **Phase**: `TEST-09` (Performance Regression Automation)
+- **Branch**: `chore/test-09-perf-regression-automation`
+- **Scope**: Established automated performance regression detection across 6 core workloads with versioned baselines, multi-worker concurrency, and noise floor filtering.
+- **Key Features**:
+  1. Monotonic wall-clock latency distributions (`perf_counter`), process CPU time (`process_time`), heap profiling (`tracemalloc`).
+  2. Versioned baseline store in `app/performance/baselines/baseline_v1.json`.
+  3. Anti-flake noise filtering (`min_significant_delta_ms` = 15.0ms floor).
+  4. 4 dedicated performance test suites (`PERF-003`..`PERF-006` / `CAT-125`..`CAT-128`).
+- **Verification Summary**:
+  - `smoke` suite: 6 scenarios in <10s with 0% error rate.
+  - Regression detector: 100% pass across tolerance and anomaly bounds.
+
+---
+
+## 24. Phase TEST-10 — JakeAI Dependency Regression Automation & Bandit SAST Remediation
+
+- **Phase**: `TEST-10` (Dependency Regression Automation & Bandit SAST Remediation)
+- **Branch**: `chore/test-10-dependency-regression-automation`
+- **Scope**: Automated dependency regression system, architectural category mapping (11 categories), 10-layer automated validation matrix, empirical breakage classification, and Bandit B110 SAST remediation.
+- **Key Features**:
+  1. **11 Architectural Dependency Categories**: `fastapi`, `pydantic`, `starlette`, `httpx`, `langchain`, `langgraph`, `qdrant_client`, `redis_client`, `pyjwt`, `provider_sdks`, `test_tooling`.
+  2. **Automated Validation Matrix**: Lint, formatting, type checking, unit, integration, contract, security, AI evals, E2E workflows, Bruno smoke.
+  3. **Empirical Breakage Classification**: 8-field diagnosis reporting `dependency`, `old version`, `new version`, `failure`, `affected test`, `root cause`, `breaking API if confirmed`, and `rollback/revert recommendation` (strictly forbidding unevidenced arbitrary repinning).
+  4. **Dependabot Integration**: Category-aligned update groups in `.github/dependabot.yml`.
+  5. **Bandit SAST B110 Remediation**:
+     - Eliminated broad `except Exception: pass` anti-pattern in `backend/app/dependencies/diff_detector.py` and `backend/app/dependencies/reporter.py`.
+     - Replaced with narrow, documented exceptions: `(OSError, subprocess.SubprocessError)` in git diff extraction and `OSError` in optional GitHub step summary writing.
+     - Added structured logging (`logger.debug`, `logger.warning`) to preserve diagnostics while keeping required artifact generation failures strictly propagating.
+     - Passed Bandit SAST gate with 0 issues identified and 0 skips/noqa for B110.
+  6. **3 Dedicated Test Suites**:
+     - `DEP-001` (`CAT-129`): `tests/unit/test_dependency_categories.py` (8 tests)
+     - `DEP-002` (`CAT-130`): `tests/unit/test_dependency_breakage_classifier.py` (12 tests)
+     - `DEP-003` (`CAT-131`): `tests/unit/test_dependency_regression_runner.py` (15 tests)
+- **Verification Summary**:
+  - 35/35 dependency regression tests passing (100%).
+  - Bandit SAST: 0 issues identified, Exit Code 0.
+  - Ruff linter: 0 violations.
+  - Mypy: 0 errors across 192 source files.
+
 
 
 
