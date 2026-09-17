@@ -1,0 +1,51 @@
+meta {
+  name: 01 — Create Task
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "goal": "Calculate EBITDA and analyze corporate financial liquidity ratios",
+    "metadata": {
+      "priority": "high",
+      "test_source": "bruno_reconciled"
+    }
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    const data = res.getBody();
+    if (data.task_id) {
+      bru.setVar("task_id", data.task_id);
+      bru.setEnvVar("task_id", data.task_id);
+      console.log("Captured task_id: " + data.task_id);
+    }
+  }
+}
+
+tests {
+  test("Status code is 201 Created", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+  test("Task ID and Tenant ID are present", function() {
+    const data = res.getBody();
+    expect(data.task_id).to.be.a("string");
+    expect(["pending", "created"]).to.include(data.status);
+  });
+}

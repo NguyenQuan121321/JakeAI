@@ -1,0 +1,26 @@
+meta {
+  name: 02 — API Health Smoke
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/health
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Status code is 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  test("Configuration fields are present", function() {
+    const data = res.getBody();
+    expect(data.status).to.equal("healthy");
+    expect(data.version).to.equal("0.1.0");
+  });
+}

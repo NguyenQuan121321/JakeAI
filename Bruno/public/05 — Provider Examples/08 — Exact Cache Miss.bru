@@ -1,0 +1,28 @@
+meta {
+  name: 08 — Exact Cache Miss
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "prompt": "Cache verification unique query initial miss",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+tests {
+  test("Initial stream responds", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

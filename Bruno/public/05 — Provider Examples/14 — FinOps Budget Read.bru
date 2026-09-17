@@ -1,0 +1,23 @@
+meta {
+  name: 14 — FinOps Budget Read
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/budget
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("FinOps budget read returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+  });
+}

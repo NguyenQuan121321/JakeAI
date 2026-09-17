@@ -1,0 +1,48 @@
+meta {
+  name: 03 — Start Run
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input_parameters": {
+      "focus": "liquidity_ratios"
+    }
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201 || res.getStatus() === 200) {
+    const data = res.getBody();
+    if (data.run_id) {
+      bru.setVar("run_id", data.run_id);
+      bru.setEnvVar("run_id", data.run_id);
+      console.log("Captured run_id: " + data.run_id);
+    }
+  }
+}
+
+tests {
+  test("Status code is 201 or 200", function() {
+    expect([200, 201]).to.include(res.getStatus());
+  });
+  test("Run ID is returned", function() {
+    const data = res.getBody();
+    expect(data.run_id).to.be.a("string");
+  });
+}

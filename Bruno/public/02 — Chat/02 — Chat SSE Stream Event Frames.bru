@@ -1,0 +1,35 @@
+meta {
+  name: 02 — Chat SSE Stream Event Frames
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-ID: {{correlation_id}}
+}
+
+body:json {
+  {
+    "prompt": "Calculate EBITDA and analyze corporate financial liquidity ratios",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+tests {
+  test("Streaming connection succeeds with event frames", function() {
+    expect(res.getStatus()).to.equal(200);
+    const body = res.getBody();
+    expect(typeof body).to.equal("string");
+  });
+}

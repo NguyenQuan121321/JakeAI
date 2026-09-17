@@ -1,0 +1,31 @@
+meta {
+  name: 23 — Coding Tool Result
+  type: http
+  seq: 23
+}
+
+post {
+  url: {{base_url}}/api/v1/coding/tool-result
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "call_id": "tool-call-12345678",
+    "result": {
+      "output": "AST parsing successful",
+      "status": "success"
+    }
+  }
+}
+
+tests {
+  test("Coding tool result returns 200 or 404 (when call_id is inactive)", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}

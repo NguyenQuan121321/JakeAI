@@ -1,0 +1,32 @@
+meta {
+  name: 08 — Approval Decision
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/approvals/{{approval_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "decision": "approved",
+    "reason": "Safe verification test"
+  }
+}
+
+tests {
+  test("Approval decision returns 200 or 404 (if no pending approval)", function() {
+    expect([200, 404, 409]).to.include(res.getStatus());
+  });
+}

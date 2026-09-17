@@ -1,0 +1,27 @@
+meta {
+  name: 05 — Rotate Provider Key
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/v1/byok/keys/{{provider}}/rotate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "new_api_key": "test-ci-rotated-key-12345"
+  }
+}
+
+tests {
+  test("Rotate key returns 200 or 404", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}

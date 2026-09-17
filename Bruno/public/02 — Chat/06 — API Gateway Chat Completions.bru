@@ -1,0 +1,41 @@
+meta {
+  name: 06 — API Gateway Chat Completions
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/gateway/chat/completions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-ID: {{correlation_id}}
+}
+
+body:json {
+  {
+    "model": "{{model}}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Verify /api/v1/gateway/chat/completions endpoint"
+      }
+    ],
+    "temperature": 0.3
+  }
+}
+
+tests {
+  test("API Gateway chat completions returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.choices).to.be.an("array");
+  });
+}

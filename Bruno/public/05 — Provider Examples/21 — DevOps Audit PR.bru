@@ -1,0 +1,32 @@
+meta {
+  name: 21 — DevOps Audit PR
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{base_url}}/api/v1/devops/audit-pr
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "repo": "organization/repository",
+    "pr_number": 101,
+    "title": "feat: add cashflow and risk assessment module",
+    "raw_diff": "diff --git a/services/risk.py b/services/risk.py\n+def calculate_risk(): return True"
+  }
+}
+
+tests {
+  test("DevOps audit PR returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.pr_number).to.equal(101);
+  });
+}

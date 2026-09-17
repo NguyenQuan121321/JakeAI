@@ -1,0 +1,27 @@
+meta {
+  name: 09 — API Gateway Quotas Read
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/v1/gateway/quotas
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("API gateway quotas read returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+  });
+}

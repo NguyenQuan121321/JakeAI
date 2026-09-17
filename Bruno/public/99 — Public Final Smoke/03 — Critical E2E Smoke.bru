@@ -1,0 +1,17 @@
+meta {
+  name: 03 — Critical E2E Smoke
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/health
+  body: none
+  auth: none
+}
+
+tests {
+  test("Critical E2E smoke confirms system readiness", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

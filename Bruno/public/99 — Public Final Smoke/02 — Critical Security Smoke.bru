@@ -1,0 +1,17 @@
+meta {
+  name: 02 — Critical Security Smoke
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/metrics
+  body: none
+  auth: none
+}
+
+tests {
+  test("Unauthenticated request to protected route is rejected with 401", function() {
+    expect(res.getStatus()).to.equal(401);
+  });
+}

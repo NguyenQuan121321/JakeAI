@@ -1,0 +1,28 @@
+meta {
+  name: 10 — Semantic Cache Hit
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "prompt": "Can you explain how EBITDA is computed for financial institutions?",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+tests {
+  test("Semantic query succeeds", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

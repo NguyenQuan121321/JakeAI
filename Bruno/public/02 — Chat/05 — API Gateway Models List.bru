@@ -1,0 +1,28 @@
+meta {
+  name: 05 — API Gateway Models List
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/v1/gateway/models
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("API gateway models list returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.object).to.equal("list");
+    expect(data.data).to.be.an("array");
+  });
+}

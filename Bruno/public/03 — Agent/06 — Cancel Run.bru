@@ -1,0 +1,25 @@
+meta {
+  name: 06 — Cancel Run
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/cancel
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Cancel run returns 200 OK or 404", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}

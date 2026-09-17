@@ -1,0 +1,23 @@
+meta {
+  name: 19 — FinOps Reconciliation
+  type: http
+  seq: 19
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/reconciliation
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("FinOps reconciliation report returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+  });
+}

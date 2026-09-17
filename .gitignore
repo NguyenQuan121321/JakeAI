@@ -93,3 +93,6 @@ logs/
 # Worktrees
 .worktrees/
 
+# Bruno Private Suite (Local & Staging Security/Negative Tests Only)
+Bruno/private/
+

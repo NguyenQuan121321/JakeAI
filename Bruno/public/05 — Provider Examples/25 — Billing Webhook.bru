@@ -1,0 +1,34 @@
+meta {
+  name: 25 — Billing Webhook
+  type: http
+  seq: 25
+}
+
+post {
+  url: {{base_url}}/api/v1/billing/webhook
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "code": "00",
+    "desc": "success",
+    "data": {
+      "orderCode": 123456,
+      "amount": 50000,
+      "description": "JakeAI Pro Tier Subscription Test"
+    },
+    "signature": "synthetic-test-signature-for-public-contract-verification"
+  }
+}
+
+tests {
+  test("Billing webhook contract verifies 200 on valid or 400 on test signature", function() {
+    expect([200, 400]).to.include(res.getStatus());
+  });
+}

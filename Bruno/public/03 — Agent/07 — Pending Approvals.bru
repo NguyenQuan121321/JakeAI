@@ -1,0 +1,35 @@
+meta {
+  name: 07 — Pending Approvals
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/approvals/pending
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const approvals = res.getBody();
+    if (Array.isArray(approvals) && approvals.length > 0) {
+      bru.setVar("approval_id", approvals[0].approval_id);
+    }
+  }
+}
+
+tests {
+  test("Pending approvals returns 200 OK array", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody()).to.be.an("array");
+  });
+}

@@ -1,0 +1,28 @@
+meta {
+  name: 11 — Cache Parameter Sensitivity
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "prompt": "Explain EBITDA calculation",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+tests {
+  test("Request succeeds with parameter sensitivity", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

@@ -1,0 +1,33 @@
+meta {
+  name: 24 — Coding Resume Bridge
+  type: http
+  seq: 24
+}
+
+post {
+  url: {{base_url}}/api/v1/coding/resume
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  x-forwarded-by: finnapigo
+  x-internal-secret: {{internal_gateway_secret}}
+}
+
+body:json {
+  {
+    "call_id": "tool-call-12345678",
+    "tenant_id": "default",
+    "result": {
+      "status": "resumed"
+    }
+  }
+}
+
+tests {
+  test("Coding resume with perimeter secret returns 200 or 404", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}

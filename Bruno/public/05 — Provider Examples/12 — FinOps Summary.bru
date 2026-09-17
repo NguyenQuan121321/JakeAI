@@ -1,0 +1,23 @@
+meta {
+  name: 12 — FinOps Summary
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("FinOps summary returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+  });
+}

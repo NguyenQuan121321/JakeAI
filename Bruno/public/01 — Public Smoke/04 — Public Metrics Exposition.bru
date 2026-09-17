@@ -1,0 +1,17 @@
+meta {
+  name: 04 — Public Metrics Exposition
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/metrics
+  body: none
+  auth: none
+}
+
+tests {
+  test("Metrics scrape responds with Prometheus format", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

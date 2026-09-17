@@ -759,11 +759,16 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
      - `PROV-001` (`CAT-134`): `tests/integration/test_real_provider_smoke.py` (10 items)
      - `FINN-001` (`CAT-135`): `tests/integration/test_real_finnapigo_integration.py` (5 items)
      - `VERIF-001` (`CAT-136`): `tests/unit/test_nightly_release_verification.py` (14 items)
-- **Verification Summary**:
-  - 1,923 total collected test items across 134 executable test files.
-  - 100% clean test execution (1,915 passed, 8 blocked in offline mode without live secrets, 0 failed).
-  - Ruff linter & formatter: 100% clean.
-  - Mypy static typing: 0 errors across 192 source files.
+- **TEST-14 Bruno API Reconciliation & 3-Tier Separation Gate**:
+  - **Audit Baseline**: OpenAPI 3.1.0 (51 operations across 47 paths) and Bruno Workspace (`Bruno/public/`, `Bruno/private/`).
+  - **Exposure Tier Model**:
+    - `PUBLIC_CLIENT_API`: 49 client-facing, perimeter health, and webhook operations. 100% covered in `Bruno/public/` (tracked in Git; zero credentials).
+    - `INTERNAL_SERVICE_API`: 2 internal service-to-service operations (`POST /internal/v1/coding/resume`, `POST /internal/v1/coding/tool-result`) protected by perimeter gateway authentication (`x-internal-secret` and `x-forwarded-by: finnapigo`). Tested locally via `Bruno/private/` and verified in CI via Pytest contract suites (`tests/contract/test_internal_mutual_auth.py`, `test_orchestration_contracts.py`).
+    - `PYTEST_ONLY`: 0 operations.
+  - **Contract Regression Test Suite (`CONTRACT-008` / `CAT-137`)**:
+    - `backend/tests/contract/test_bruno_reconciliation.py`: 9 contract regression tests enforcing 100% public coverage, zero internal leaks in public suites, zero obsolete requests, and zero method/path drift.
+  - **Automated CLI Gate**: `scripts/check_bruno_reconciliation.py` providing dual-environment audit support (detecting presence of `Bruno/private/` locally vs clean CI runner checkouts).
+
 
 
 

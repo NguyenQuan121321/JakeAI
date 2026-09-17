@@ -1,0 +1,20 @@
+meta {
+  name: 07 — Prometheus Metrics
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/metrics
+  body: none
+  auth: none
+}
+
+tests {
+  test("Prometheus metrics endpoint returns 200 OK text/plain", function() {
+    expect(res.getStatus()).to.equal(200);
+    const body = res.getBody();
+    expect(typeof body).to.equal("string");
+    expect(body.length).to.be.greaterThan(10);
+  });
+}

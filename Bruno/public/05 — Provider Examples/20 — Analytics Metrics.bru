@@ -1,0 +1,23 @@
+meta {
+  name: 20 — Analytics Metrics
+  type: http
+  seq: 20
+}
+
+get {
+  url: {{base_url}}/api/v1/analytics/metrics
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Runtime analytics metrics returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.uptime_seconds).to.be.a("number");
+  });
+}

@@ -1,0 +1,21 @@
+meta {
+  name: 06 — Revoke Provider Key
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/byok/keys/{{provider}}/revoke
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Revoke provider key returns 200 or 404", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}
