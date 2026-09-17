@@ -565,6 +565,8 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Performance Regression Smoke Gate (TEST-09 / PERF-003)
+        env:
+          QDRANT_OFFLINE: "1"
         run: |
           cd backend
           python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression

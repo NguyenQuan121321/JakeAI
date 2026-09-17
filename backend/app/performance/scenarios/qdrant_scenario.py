@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import time
 from urllib.parse import urlparse
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 def _is_qdrant_online(url: str | None = None, timeout: float = 0.05) -> bool:
     """Fast probe checking if Qdrant socket is reachable to avoid slow client timeouts."""
+    if os.environ.get("QDRANT_OFFLINE") == "1":
+        return False
     target_url = url or get_settings().QDRANT_URL
     parsed = urlparse(target_url)
     host = parsed.hostname or "localhost"

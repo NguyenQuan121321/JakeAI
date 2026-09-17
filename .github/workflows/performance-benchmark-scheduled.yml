@@ -89,7 +89,7 @@ jobs:
         if: always()
         run: |
           if [ -f backend/benchmark-results/performance-report.md ]; then
-            cat backend/benchmark-results/performance-report.md >> $GITHUB_STEP_SUMMARY
+            cat backend/benchmark-results/performance-report.md >> "$GITHUB_STEP_SUMMARY"
           fi
           python scripts/ci_failure_reporter.py --report-dirs backend/benchmark-results --output-dir backend/reports/summary
 

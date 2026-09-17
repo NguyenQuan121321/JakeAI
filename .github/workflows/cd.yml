@@ -61,9 +61,11 @@ jobs:
             CI_JWT_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
           fi
           echo "::add-mask::${CI_JWT_KEY}"
-          echo "JWT_SECRET_KEY=${CI_JWT_KEY}" >> $GITHUB_ENV
-          echo "FINNAPIGO_JWT_SECRET=${CI_JWT_KEY}" >> $GITHUB_ENV
-          echo "FINNAPIGO_SECRET_KEY=${CI_JWT_KEY}" >> $GITHUB_ENV
+          {
+            echo "JWT_SECRET_KEY=${CI_JWT_KEY}"
+            echo "FINNAPIGO_JWT_SECRET=${CI_JWT_KEY}"
+            echo "FINNAPIGO_SECRET_KEY=${CI_JWT_KEY}"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
@@ -117,6 +119,8 @@ jobs:
           python scripts/run_bruno_tests.py --suite smoke --auto-start
 
       - name: 6. Performance Smoke Regression Gate (Within Threshold)
+        env:
+          QDRANT_OFFLINE: "1"
         run: |
           cd backend
           python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
