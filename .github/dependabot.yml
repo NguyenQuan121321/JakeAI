@@ -18,9 +18,43 @@ updates:
       - "dependencies"
       - "backend"
     groups:
-      python-dependencies:
+      core-framework:
         patterns:
-          - "*"
+          - "fastapi*"
+          - "uvicorn*"
+          - "starlette*"
+      pydantic:
+        patterns:
+          - "pydantic*"
+      ai-orchestration:
+        patterns:
+          - "langchain*"
+          - "langgraph*"
+      storage-and-vector:
+        patterns:
+          - "redis*"
+          - "qdrant-client*"
+          - "fastembed*"
+          - "pypdf*"
+      security-and-auth:
+        patterns:
+          - "pyjwt*"
+          - "cryptography*"
+      http-client:
+        patterns:
+          - "httpx*"
+          - "httpcore*"
+      tokenization:
+        patterns:
+          - "tiktoken*"
+      test-and-dev-tooling:
+        patterns:
+          - "pytest*"
+          - "ruff*"
+          - "mypy*"
+          - "bandit*"
+          - "pip-audit*"
+          - "pip-licenses*"
 
   # ============================================================================
   # Frontend TypeScript Packages (npm & package.json)
