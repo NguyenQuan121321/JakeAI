@@ -172,6 +172,48 @@ jobs:
           path: frontend/dist/
           retention-days: 14
 
+  # 4b. Frontend Console Quality, Tests & Build Gate
+  frontend-console-quality:
+    name: Frontend Console - Quality, Tests & Build Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: frontend/apps/console/package-lock.json
+
+      - name: Install Frontend Console Dependencies
+        run: |
+          cd frontend/apps/console
+          npm ci
+
+      - name: TypeScript Static Type Checking
+        run: |
+          cd frontend/apps/console
+          npm run typecheck
+
+      - name: Run Vitest Unit Tests & Coverage Gate
+        run: |
+          cd frontend/apps/console
+          npm run test:coverage
+
+      - name: Build Production Console Application
+        run: |
+          cd frontend/apps/console
+          npm run build
+
+      - name: Publish & Archive Frontend Console Distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-console-dist
+          path: frontend/apps/console/dist/
+          retention-days: 14
+
   # 5. Fast In-Memory Unit Test Suite (Zero External Services, Zero Race Conditions)
   unit-tests:
     name: Unit Test Suite (In-Memory Isolation)
@@ -704,6 +746,7 @@ jobs:
       - static-and-quality
       - typecheck-backend
       - frontend-quality
+      - frontend-console-quality
       - unit-tests
       - contract-and-security
       - integration-tests
@@ -718,19 +761,20 @@ jobs:
           echo "================================================================================"
           echo "CI / MERGE GATE: SUCCESS"
           echo "================================================================================"
-          echo "All 12 upstream verification gates passed with zero regressions:"
+          echo "All 13 upstream verification gates passed with zero regressions:"
           echo "  1. DevSecOps - Secret & Key Leak Detection"
           echo "  2. Code Quality, SAST & License Compliance Gate"
           echo "  3. Backend Type Analysis (Mypy)"
           echo "  4. Frontend Widget Build & Quality Verification"
-          echo "  5. Unit Test Suite (In-Memory Isolation) [Python 3.11 & 3.12]"
-          echo "  6. Contract, Schema Drift & Runtime Security Gate"
-          echo "  7. Subsystem Integration Gate (Isolated Services)"
-          echo "  8. AI Quality, RAG & Evaluation Gate"
-          echo "  9. E2E Business Workflows & Bruno CLI Automation"
-          echo "  10. Performance Smoke & Dependency Regression Gate"
-          echo "  11. Coverage Gate, Forensic Failure Reporting & Flaky Audit"
-          echo "  12. Container Packaging & Vulnerability Scan"
+          echo "  5. Frontend Console - Quality, Tests & Build Gate"
+          echo "  6. Unit Test Suite (In-Memory Isolation) [Python 3.11 & 3.12]"
+          echo "  7. Contract, Schema Drift & Runtime Security Gate"
+          echo "  8. Subsystem Integration Gate (Isolated Services)"
+          echo "  9. AI Quality, RAG & Evaluation Gate"
+          echo "  10. E2E Business Workflows & Bruno CLI Automation"
+          echo "  11. Performance Smoke & Dependency Regression Gate"
+          echo "  12. Coverage Gate, Forensic Failure Reporting & Flaky Audit"
+          echo "  13. Container Packaging & Vulnerability Scan"
           echo "================================================================================"
           echo "Commit is certified safe for merge into main."
           echo "================================================================================"
