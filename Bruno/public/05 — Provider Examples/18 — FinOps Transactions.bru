@@ -1,0 +1,22 @@
+meta {
+  name: 18 — FinOps Transactions
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/transactions?limit=10&offset=0
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("FinOps transactions list returns 200 OK array", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody()).to.be.an("array");
+  });
+}

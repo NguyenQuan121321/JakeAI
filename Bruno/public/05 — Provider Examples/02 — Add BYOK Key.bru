@@ -1,0 +1,29 @@
+meta {
+  name: 02 — Add BYOK Key
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/byok/keys
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "provider": "gemini",
+    "api_key": "{{gemini_api_key}}",
+    "model_family": "gemini"
+  }
+}
+
+tests {
+  test("Add BYOK key returns 200 or 201", function() {
+    expect([200, 201]).to.include(res.getStatus());
+  });
+}

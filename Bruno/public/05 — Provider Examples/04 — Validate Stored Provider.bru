@@ -1,0 +1,21 @@
+meta {
+  name: 04 — Validate Stored Provider
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/v1/byok/keys/{{provider}}/validate
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Validate stored provider executes", function() {
+    expect([200, 400, 404]).to.include(res.getStatus());
+  });
+}

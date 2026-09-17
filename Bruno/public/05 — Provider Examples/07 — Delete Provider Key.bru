@@ -1,0 +1,21 @@
+meta {
+  name: 07 — Delete Provider Key
+  type: http
+  seq: 7
+}
+
+delete {
+  url: {{base_url}}/api/v1/byok/keys/{{provider}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Delete provider key returns 200 or 404", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}

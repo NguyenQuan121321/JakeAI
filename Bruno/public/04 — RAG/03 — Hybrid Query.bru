@@ -1,0 +1,33 @@
+meta {
+  name: 03 — Hybrid Query
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/query
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "revenue grew year-over-year",
+    "top_k": 3
+  }
+}
+
+tests {
+  test("RAG query returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().chunks).to.be.an("array");
+  });
+}

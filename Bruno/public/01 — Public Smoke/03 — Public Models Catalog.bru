@@ -1,0 +1,22 @@
+meta {
+  name: 03 — Public Models Catalog
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/v1/models
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Models catalog returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().data).to.be.an("array");
+  });
+}

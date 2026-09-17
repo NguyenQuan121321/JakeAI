@@ -1,0 +1,22 @@
+meta {
+  name: 06 — API Health Ready Probe
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/v1/health/ready
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("API v1 readiness probe returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().status).to.equal("healthy");
+  });
+}

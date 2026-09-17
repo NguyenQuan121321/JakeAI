@@ -1,0 +1,33 @@
+meta {
+  name: 08 — OpenAI Gateway Quotas Update
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/v1/quotas
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "new_limit": 5000000
+  }
+}
+
+tests {
+  test("OpenAI gateway quotas update returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.quota_limit).to.equal(5000000);
+  });
+}

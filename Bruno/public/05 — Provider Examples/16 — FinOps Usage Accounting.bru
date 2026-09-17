@@ -1,0 +1,21 @@
+meta {
+  name: 16 — FinOps Usage Accounting
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{base_url}}/api/v1/finops/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("FinOps accounting summary retrieved", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

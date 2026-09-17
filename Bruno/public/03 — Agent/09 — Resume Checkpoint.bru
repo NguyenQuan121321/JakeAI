@@ -1,0 +1,25 @@
+meta {
+  name: 09 — Resume Checkpoint
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Run status retrieved", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}

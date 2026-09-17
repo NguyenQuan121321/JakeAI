@@ -1,0 +1,23 @@
+meta {
+  name: 17 — Billing Subscription
+  type: http
+  seq: 17
+}
+
+get {
+  url: {{base_url}}/api/v1/billing/subscription
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Billing subscription returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+  });
+}

@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""JakeAI Bruno CLI Automated Test Runner (TEST-08).
+"""JakeAI Bruno CLI Automated Test Runner (TEST-08 / BRUNO-RECON-01).
 
 Orchestrates automated execution of the Bruno API/E2E test suite using
 `@usebruno/cli`. Implements:
-  - Suite selection (smoke, critical-e2e, full, live-release)
-  - Selective execution (single folder, single request)
-  - External dependency governance (FinnApiGo availability detection,
-    clean BLOCKED/SKIPPED reporting without false PASS)
+  - Explicit profiles:
+      * public-smoke (alias: smoke): Fast confidence smoke (<10s)
+      * public-full (alias: full): Complete public test suite
+      * private-security: Negative, security, and tenant isolation tests
+      * private-full: Complete private verification suite
+      * critical-e2e: End-to-end business workflows
+      * live-release: Mandatory live provider & upstream identity verification
+  - Clean dependency governance (BLOCKED reporting without false PASS or false FAIL)
   - Uvicorn backend server health verification and optional auto-start
   - Standardized reporting: JSON, JUnit XML, Markdown summary
-  - GitHub Actions CI step summary integration
+  - CI / GitHub Actions integration
 """
 
 from __future__ import annotations
@@ -38,48 +42,65 @@ if hasattr(sys.stderr, "reconfigure"):
 
 # Known requests targeting the external FinnApiGo identity authority
 EXTERNAL_FINNAPIGO_REQUESTS = {
-    "00 — Setup & Environment/03 — Authentication Dependency Check.bru",
-    "00 — Setup & Environment\\03 — Authentication Dependency Check.bru",
-    "01 — Authentication & Tenant/01 — FinnApiGo Login.bru",
-    "01 — Authentication & Tenant\\01 — FinnApiGo Login.bru",
+    "private/07 — Live FinnApiGo/01 — Healthz Probe.bru",
+    "private/07 — Live FinnApiGo/02 — FinnApiGo Login.bru",
+    "private/07 — Live FinnApiGo/03 — FinnApiGo OBO Token Exchange.bru",
+    "private\\07 — Live FinnApiGo\\01 — Healthz Probe.bru",
+    "private\\07 — Live FinnApiGo\\02 — FinnApiGo Login.bru",
+    "private\\07 — Live FinnApiGo\\03 — FinnApiGo OBO Token Exchange.bru",
 }
 
-ALL_FOLDERS = [
-    "00 — Setup & Environment",
-    "01 — Authentication & Tenant",
-    "02 — Chat & Gateway",
-    "03 — Agent",
-    "04 — RAG",
-    "05 — BYOK & Providers",
-    "06 — Cache",
-    "07 — FinOps & Billing",
-    "08 — Security & Negative",
-    "09 — Failure & Recovery",
-    "10 — Cross System E2E",
-    "99 — Final Smoke",
+PUBLIC_SMOKE_TARGETS = [
+    "public/00 — Setup/01 — Root Health Smoke.bru",
+    "public/00 — Setup/02 — API Health Smoke.bru",
+    "public/01 — Public Smoke/01 — Public Root Health.bru",
+    "public/01 — Public Smoke/02 — Public API Health.bru",
+    "public/01 — Public Smoke/03 — Public Models Catalog.bru",
+    "public/02 — Chat/01 — Chat Stream.bru",
+    "public/03 — Agent/01 — Create Task.bru",
+    "public/04 — RAG/01 — Ingest Document.bru",
+    "public/05 — Provider Examples/01 — List BYOK Keys.bru",
+    "public/99 — Public Final Smoke/01 — Production-like Smoke.bru",
 ]
 
-CRITICAL_E2E_FOLDERS = [
-    "00 — Setup & Environment",
-    "01 — Authentication & Tenant",
-    "02 — Chat & Gateway",
-    "03 — Agent",
-    "04 — RAG",
-    "05 — BYOK & Providers",
-    "06 — Cache",
-    "07 — FinOps & Billing",
-    "10 — Cross System E2E",
-    "99 — Final Smoke",
+PUBLIC_FOLDERS = [
+    "public/00 — Setup",
+    "public/01 — Public Smoke",
+    "public/02 — Chat",
+    "public/03 — Agent",
+    "public/04 — RAG",
+    "public/05 — Provider Examples",
+    "public/99 — Public Final Smoke",
 ]
 
-SMOKE_TARGETS = [
-    "99 — Final Smoke",
-    "00 — Setup & Environment/01 — Health Smoke.bru",
-    "00 — Setup & Environment/02 — Configuration Check.bru",
-    "01 — Authentication & Tenant/03 — JakeAI Authenticated Health.bru",
-    "02 — Chat & Gateway/01 — Basic Chat.bru",
-    "03 — Agent/01 — Create Task.bru",
-    "04 — RAG/01 — Ingest Document.bru",
+PRIVATE_SECURITY_FOLDERS = [
+    "private/01 — Authentication & Tenant Security",
+    "private/02 — Security & Negative",
+    "private/04 — Cross Tenant",
+    "private/05 — Tool Security",
+]
+
+PRIVATE_FULL_FOLDERS = [
+    "private/01 — Authentication & Tenant Security",
+    "private/02 — Security & Negative",
+    "private/03 — Failure & Recovery",
+    "private/04 — Cross Tenant",
+    "private/05 — Tool Security",
+    "private/08 — Production Verification",
+    "private/06 — Live Provider",
+    "private/07 — Live FinnApiGo",
+]
+
+CRITICAL_E2E_TARGETS = [
+    "public/01 — Public Smoke",
+    "public/02 — Chat",
+    "public/03 — Agent",
+    "public/04 — RAG",
+    "public/05 — Provider Examples/08 — Exact Cache Miss.bru",
+    "public/05 — Provider Examples/09 — Exact Cache Hit.bru",
+    "public/05 — Provider Examples/12 — FinOps Summary.bru",
+    "public/99 — Public Final Smoke",
+    "private/08 — Production Verification",
 ]
 
 
@@ -121,8 +142,6 @@ class SuiteSummary:
 
     @property
     def is_success(self) -> bool:
-        # Fails if any test failed.
-        # If live-release suite, any blocked external dependency also fails.
         if self.failed > 0:
             return False
         return not (self.suite == "live-release" and self.blocked > 0)
@@ -203,14 +222,13 @@ def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[
         stderr=subprocess.PIPE,
         text=True,
     )
-    # Wait up to 20 seconds for /health to answer
-    health_url = f"http://127.0.0.1:{port}/api/v1/health"
+    health_url = f"http://127.0.0.1:{port}/health"
     start_time = time.time()
     while time.time() - start_time < 20:
         ok, _, _ = check_http_endpoint(health_url, timeout_sec=1.0)
         if ok:
             print(
-                f"[✓] JakeAI backend server is ready on port {port} (PID: {proc.pid})"
+                f"[OK] JakeAI backend server is ready on port {port} (PID: {proc.pid})"
             )
             return proc
         time.sleep(0.5)
@@ -334,19 +352,26 @@ def run_bruno_cli_target(
     extra_env_vars: dict[str, str] | None = None,
 ) -> tuple[int, list[TestItemResult]]:
     """Execute Bruno CLI for a specific folder or request and parse output."""
+    is_dir = (bruno_dir / target).is_dir()
     cmd = [
         npx_bin,
         "--yes",
         "@usebruno/cli",
         "run",
         target,
+    ]
+    if is_dir:
+        cmd.append("-r")
+
+    cmd.extend([
         "--env",
         environment,
         "--reporter-json",
         str(temp_json_path),
         "--reporter-skip-headers",
         "Authorization",
-    ]
+    ])
+
     if extra_env_vars:
         for k, v in extra_env_vars.items():
             cmd.extend(["--env-var", f"{k}={v}"])
@@ -375,7 +400,6 @@ def run_bruno_cli_target(
         try:
             with open(temp_json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # data is a list of iterations
             for iteration in data:
                 for item in iteration.get("results", []):
                     rel_name = (
@@ -414,11 +438,8 @@ def run_bruno_cli_target(
                     )
         except Exception as exc:  # noqa: BLE001
             if verbose:
-                print(
-                    f"[WARN] Failed parsing Bruno JSON report {temp_json_path}: {exc}"
-                )
+                print(f"[WARN] Failed parsing Bruno JSON report {temp_json_path}: {exc}")
 
-    # Fallback if json report had 0 results but command exited with error
     if not results and res.returncode != 0:
         results.append(
             TestItemResult(
@@ -555,9 +576,7 @@ def print_console_summary(summary: SuiteSummary) -> None:
                 print(f"  - {item.name}: {item.error_message or 'Assertion failed'}")
 
     if summary.blocked > 0:
-        print(
-            "\n[i] Blocked Requests (Unverified external dependency; not falsely passed):"
-        )
+        print("\n[i] Blocked Requests (Unverified external dependency):")
         for item in summary.items:
             if item.status == "blocked":
                 print(f"  - {item.name}: {item.error_message}")
@@ -567,13 +586,22 @@ def print_console_summary(summary: SuiteSummary) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="JakeAI Bruno CLI Automated Test Runner (TEST-08)"
+        description="JakeAI Bruno CLI Automated Test Runner (TEST-08 / BRUNO-RECON-01)"
     )
     parser.add_argument(
         "--suite",
-        choices=["smoke", "critical-e2e", "full", "live-release"],
-        default="smoke",
-        help="Test suite execution profile (default: smoke)",
+        choices=[
+            "public-smoke",
+            "public-full",
+            "private-security",
+            "private-full",
+            "critical-e2e",
+            "live-release",
+            "smoke",
+            "full",
+        ],
+        default="public-smoke",
+        help="Test suite profile (default: public-smoke)",
     )
     parser.add_argument(
         "--folder", default=None, help="Execute only a specific Bruno folder"
@@ -602,20 +630,23 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    # Aliases
+    suite = args.suite
+    if suite == "smoke":
+        suite = "public-smoke"
+    elif suite == "full":
+        suite = "public-full"
+
     start_time = time.time()
     repo_root = find_workspace_root()
     bruno_dir = repo_root / "Bruno"
 
     if not bruno_dir.is_dir():
-        print(
-            f"[ERROR] Bruno collection directory not found at {bruno_dir}",
-            file=sys.stderr,
-        )
+        print(f"[ERROR] Bruno collection directory not found at {bruno_dir}", file=sys.stderr)
         return 1
 
     npx_bin = resolve_npx()
 
-    # Determine report directory
     if args.report_dir:
         report_dir = Path(args.report_dir).resolve()
     else:
@@ -625,7 +656,6 @@ def main() -> int:
     # 1. Health Verification
     jakeai_ok, _, _ = check_http_endpoint(f"{args.base_url}/health")
     if not jakeai_ok:
-        # Check /api/v1/health fallback
         jakeai_ok, _, _ = check_http_endpoint(f"{args.base_url}/api/v1/health")
 
     server_proc = None
@@ -650,123 +680,120 @@ def main() -> int:
     )
 
     summary = SuiteSummary(
-        suite=args.suite if not (args.folder or args.request) else "custom",
+        suite=suite if not (args.folder or args.request) else "custom",
         environment=args.env,
         finnapigo_online=finnapigo_ok,
         jakeai_online=jakeai_ok,
     )
 
     try:
-        # Determine targets
+        # Determine targets based on suite profile
         if args.request:
             targets = [args.request]
         elif args.folder:
-            matched = [f for f in ALL_FOLDERS if args.folder.lower() in f.lower()]
+            all_known = PUBLIC_FOLDERS + PRIVATE_SECURITY_FOLDERS + PRIVATE_FULL_FOLDERS
+            matched = [f for f in all_known if args.folder.lower() in f.lower()]
             targets = [matched[0]] if matched else [args.folder]
-        elif args.suite == "smoke":
-            targets = SMOKE_TARGETS
-        elif args.suite == "critical-e2e":
-            targets = CRITICAL_E2E_FOLDERS
-        elif args.suite in ("full", "live-release"):
-            targets = ALL_FOLDERS
+        elif suite == "public-smoke":
+            targets = PUBLIC_SMOKE_TARGETS
+        elif suite == "public-full":
+            targets = PUBLIC_FOLDERS
+        elif suite == "private-security":
+            targets = PRIVATE_SECURITY_FOLDERS
+        elif suite == "private-full":
+            targets = PRIVATE_FULL_FOLDERS
+        elif suite == "critical-e2e":
+            targets = CRITICAL_E2E_TARGETS
+        elif suite == "live-release":
+            targets = PUBLIC_FOLDERS + PRIVATE_FULL_FOLDERS
         else:
-            targets = ALL_FOLDERS
+            targets = PUBLIC_FOLDERS
 
         temp_json = report_dir / "temp_run.json"
         runtime_dev_jwts = generate_runtime_dev_jwts()
 
         for target in targets:
-            is_folder_target = (bruno_dir / target).is_dir()
-
-            if (
-                is_folder_target
-                and not finnapigo_ok
-                and ("00" in target or "01" in target)
-            ):
-                folder_path = bruno_dir / target
-                bru_files = sorted(folder_path.glob("*.bru"))
-                for bru_file in bru_files:
-                    rel_bru = str(bru_file.relative_to(bruno_dir))
-                    norm_rel = rel_bru.replace("\\", "/")
-                    if norm_rel in EXTERNAL_FINNAPIGO_REQUESTS or any(
-                        ext in norm_rel
-                        for ext in [
-                            "03 — Authentication Dependency Check",
-                            "01 — FinnApiGo Login",
-                        ]
-                    ):
-                        if args.suite == "live-release":
-                            summary.items.append(
-                                TestItemResult(
-                                    name=bru_file.stem,
-                                    target=rel_bru,
-                                    status="failed",
-                                    error_message=f"Live release mandates online FinnApiGo at {args.finnapigo_url}",
-                                    is_external=True,
-                                )
-                            )
-                        else:
-                            summary.items.append(
-                                TestItemResult(
-                                    name=bru_file.stem,
-                                    target=rel_bru,
-                                    status="blocked",
-                                    error_message=f"FinnApiGo identity authority is offline at {args.finnapigo_url} (dev tokens active)",
-                                    is_external=True,
-                                )
-                            )
-                    else:
-                        _, res_items = run_bruno_cli_target(
-                            npx_bin=npx_bin,
-                            bruno_dir=bruno_dir,
-                            target=rel_bru,
-                            environment=args.env,
-                            temp_json_path=temp_json,
-                            verbose=args.verbose,
-                            extra_env_vars=runtime_dev_jwts,
+            target_path = bruno_dir / target
+            if not target_path.exists():
+                # If target is private and gitignored/absent (e.g. in PR CI)
+                if "private" in target:
+                    summary.items.append(
+                        TestItemResult(
+                            name=Path(target).name,
+                            target=target,
+                            status="skipped",
+                            error_message="Private suite omitted in non-privileged environment",
                         )
-                        summary.items.extend(res_items)
-            else:
-                norm_target = target.replace("\\", "/")
-                if not finnapigo_ok and any(
-                    ext in norm_target
-                    for ext in [
-                        "03 — Authentication Dependency Check",
-                        "01 — FinnApiGo Login",
-                    ]
-                ):
-                    if args.suite == "live-release":
-                        summary.items.append(
-                            TestItemResult(
-                                name=target,
-                                target=target,
-                                status="failed",
-                                error_message=f"Live release mandates online FinnApiGo at {args.finnapigo_url}",
-                                is_external=True,
-                            )
-                        )
-                    else:
-                        summary.items.append(
-                            TestItemResult(
-                                name=target,
-                                target=target,
-                                status="blocked",
-                                error_message=f"FinnApiGo offline at {args.finnapigo_url} (dev tokens active)",
-                                is_external=True,
-                            )
-                        )
+                    )
+                    continue
+                else:
+                    print(f"[WARN] Target not found: {target}")
                     continue
 
-                _, res_items = run_bruno_cli_target(
-                    npx_bin=npx_bin,
-                    bruno_dir=bruno_dir,
-                    target=target,
-                    environment=args.env,
-                    temp_json_path=temp_json,
-                    verbose=args.verbose,
-                    extra_env_vars=runtime_dev_jwts,
-                )
-                summary.items.extend(res_items)
+            is_folder_target = target_path.is_dir()
+
+            # Dependency governance for FinnApiGo requests
+            norm_target = target.replace("\\", "/")
+            if not finnapigo_ok and (
+                norm_target in EXTERNAL_FINNAPIGO_REQUESTS
+                or "Live FinnApiGo" in norm_target
+            ):
+                if suite == "live-release":
+                    summary.items.append(
+                        TestItemResult(
+                            name=Path(target).name,
+                            target=target,
+                            status="failed",
+                            error_message=f"Live release mandates online FinnApiGo at {args.finnapigo_url}",
+                            is_external=True,
+                        )
+                    )
+                else:
+                    summary.items.append(
+                        TestItemResult(
+                            name=Path(target).name,
+                            target=target,
+                            status="blocked",
+                            error_message=f"FinnApiGo offline at {args.finnapigo_url} (dev fallback active)",
+                            is_external=True,
+                        )
+                    )
+                continue
+
+            # Governance for live third-party provider keys
+            if "Live Provider" in norm_target and not os.environ.get("GEMINI_API_KEY"):
+                if suite == "live-release":
+                    summary.items.append(
+                        TestItemResult(
+                            name=Path(target).name,
+                            target=target,
+                            status="failed",
+                            error_message="Live release mandates live provider credentials in environment",
+                            is_external=True,
+                        )
+                    )
+                else:
+                    summary.items.append(
+                        TestItemResult(
+                            name=Path(target).name,
+                            target=target,
+                            status="blocked",
+                            error_message="Live provider keys not configured in local environment (gated)",
+                            is_external=True,
+                        )
+                    )
+                continue
+
+            _, res_items = run_bruno_cli_target(
+                npx_bin=npx_bin,
+                bruno_dir=bruno_dir,
+                target=target,
+                environment=args.env,
+                temp_json_path=temp_json,
+                verbose=args.verbose,
+                extra_env_vars=runtime_dev_jwts,
+            )
+            summary.items.extend(res_items)
 
         if temp_json.is_file():
             temp_json.unlink(missing_ok=True)
@@ -804,7 +831,6 @@ def main() -> int:
                 "blocked": summary.blocked,
                 "skipped": summary.skipped,
                 "duration_seconds": summary.duration_seconds,
-                "finnapigo_online": summary.finnapigo_online,
                 "items": [
                     {
                         "name": i.name,
@@ -815,7 +841,6 @@ def main() -> int:
                         "tests_passed": i.tests_passed,
                         "tests_total": i.tests_total,
                         "error_message": i.error_message,
-                        "is_external": i.is_external,
                     }
                     for i in summary.items
                 ],
@@ -825,25 +850,11 @@ def main() -> int:
         )
 
     generate_junit_xml(summary, junit_path)
-
     md_content = generate_markdown_summary(summary)
-    with open(summary_md_path, "w", encoding="utf-8") as f:
-        f.write(md_content)
-
-    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if step_summary:
-        try:
-            with open(step_summary, "a", encoding="utf-8") as f:
-                f.write(md_content + "\n\n")
-        except Exception as err:  # noqa: BLE001
-            print(
-                f"[WARN] Failed writing to GITHUB_STEP_SUMMARY: {err}", file=sys.stderr
-            )
+    summary_md_path.write_text(md_content, encoding="utf-8")
 
     print_console_summary(summary)
-    print(
-        f"[✓] Reports written to:\n  - {json_path}\n  - {junit_path}\n  - {summary_md_path}\n"
-    )
+    print(f"[OK] Reports written to:\n  - {json_path}\n  - {junit_path}\n  - {summary_md_path}")
 
     return 0 if summary.is_success else 1
 

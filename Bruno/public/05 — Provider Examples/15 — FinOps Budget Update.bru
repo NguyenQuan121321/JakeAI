@@ -1,0 +1,34 @@
+meta {
+  name: 15 — FinOps Budget Update
+  type: http
+  seq: 15
+}
+
+post {
+  url: {{base_url}}/api/v1/finops/budget
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "token_quota": 8000000,
+    "warning_threshold": 0.85
+  }
+}
+
+tests {
+  test("FinOps budget update returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.token_quota).to.equal(8000000);
+  });
+}

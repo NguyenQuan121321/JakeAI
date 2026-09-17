@@ -1,0 +1,23 @@
+meta {
+  name: 01 — List BYOK Keys
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/byok/keys
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("List BYOK keys returns 200 OK array", function() {
+    expect(res.getStatus()).to.equal(200);
+    const body = res.getBody();
+    expect(body.keys).to.be.an("array");
+  });
+}

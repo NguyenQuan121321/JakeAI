@@ -1,0 +1,18 @@
+meta {
+  name: 02 — Public API Health
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/health
+  body: none
+  auth: none
+}
+
+tests {
+  test("API v1 probe responds healthy", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().status).to.equal("healthy");
+  });
+}

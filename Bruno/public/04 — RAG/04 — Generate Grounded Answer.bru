@@ -1,0 +1,32 @@
+meta {
+  name: 04 — Generate Grounded Answer
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "What was Acme Corp revenue growth in Q3 2026?"
+  }
+}
+
+tests {
+  test("Grounded generation returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().answer).to.be.a("string");
+  });
+}

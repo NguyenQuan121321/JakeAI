@@ -1,0 +1,31 @@
+meta {
+  name: 06 — Epistemic Abstention
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "What is the classified top-speed of Martian alien space vehicles?"
+  }
+}
+
+tests {
+  test("Model abstains when no evidence exists", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

@@ -1,0 +1,32 @@
+meta {
+  name: 22 — DevOps Changelog
+  type: http
+  seq: 22
+}
+
+post {
+  url: {{base_url}}/api/v1/devops/changelog
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+body:json {
+  {
+    "pr_titles": [
+      "feat: add cashflow and risk assessment module",
+      "fix: token accounting double count"
+    ]
+  }
+}
+
+tests {
+  test("DevOps changelog generator returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.changelog_markdown).to.be.a("string");
+  });
+}

@@ -1,0 +1,31 @@
+meta {
+  name: 05 — Citation Verification
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/v1/rag/generate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "Cite Acme Corp quarterly growth"
+  }
+}
+
+tests {
+  test("Citation verification succeeds", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

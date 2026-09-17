@@ -1,0 +1,34 @@
+meta {
+  name: 01 — Chat Stream
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/chat/stream
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-ID: {{correlation_id}}
+}
+
+body:json {
+  {
+    "prompt": "Hello JakeAI, summarize current platform capabilities",
+    "conversation_id": "{{conversation_id}}"
+  }
+}
+
+tests {
+  test("Chat stream returns 200 OK text/event-stream", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getHeader("content-type")).to.include("text/event-stream");
+  });
+}

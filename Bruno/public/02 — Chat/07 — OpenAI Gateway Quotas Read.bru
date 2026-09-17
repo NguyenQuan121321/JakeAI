@@ -1,0 +1,28 @@
+meta {
+  name: 07 — OpenAI Gateway Quotas Read
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/v1/quotas
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("OpenAI gateway quotas read returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+    expect(data.quota_limit).to.be.a("number");
+  });
+}

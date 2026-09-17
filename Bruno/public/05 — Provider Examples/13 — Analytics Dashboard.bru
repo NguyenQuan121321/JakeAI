@@ -1,0 +1,23 @@
+meta {
+  name: 13 — Analytics Dashboard
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{base_url}}/api/v1/analytics/dashboard
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Analytics dashboard returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.tenant_id).to.be.a("string");
+  });
+}

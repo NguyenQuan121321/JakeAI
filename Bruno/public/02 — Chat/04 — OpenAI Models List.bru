@@ -1,0 +1,29 @@
+meta {
+  name: 04 — OpenAI Models List
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/v1/models
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("OpenAI models list returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data.object).to.equal("list");
+    expect(data.data).to.be.an("array");
+    expect(data.data.length).to.be.greaterThan(0);
+  });
+}

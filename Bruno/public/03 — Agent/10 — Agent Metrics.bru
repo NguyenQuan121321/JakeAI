@@ -1,0 +1,27 @@
+meta {
+  name: 10 — Agent Metrics
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/metrics
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("Agent metrics snapshot returns 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+    const data = res.getBody();
+    expect(data).to.be.an("object");
+  });
+}
