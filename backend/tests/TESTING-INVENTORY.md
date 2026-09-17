@@ -672,11 +672,51 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
      - `DEP-001` (`CAT-129`): `tests/unit/test_dependency_categories.py` (8 tests)
      - `DEP-002` (`CAT-130`): `tests/unit/test_dependency_breakage_classifier.py` (12 tests)
      - `DEP-003` (`CAT-131`): `tests/unit/test_dependency_regression_runner.py` (15 tests)
+## 25. Phase TEST-11 — JakeAI CI Test Orchestration & Execution Architecture
+
+- **Phase**: `TEST-11` (CI Test Orchestration & Execution Architecture)
+- **Branch**: `chore/test-11-ci-test-orchestration`
+- **Scope**: Clean, decoupled, parallelized CI test execution architecture with a 4-tier testing hierarchy (Fast PR Gate, Strong Main Gate, Deep Nightly Verification, Strict Release Verification), central pytest markers, forensic failure reporting, safe dependency caching, and explicit flaky test tracking.
+- **Key Features**:
+  1. **4-Tier Testing Architecture**:
+     - **Fast PR Gate (< 5 min)**: Static analysis (Ruff, Hadolint, Actionlint, Bandit, Pip-audit, Pip-licenses, SBOM), Mypy type analysis, in-memory unit tests, critical integration, contract & schema drift, runtime security, critical AI regression, critical business E2E, Bruno smoke, and coverage gates (>=85% branch, >=85% line, >=80% patch).
+     - **Strong Main Gate**: Full regression on push to `main` (full unit, full integration, full contract, full security SEC-001..SEC-010, full AI eval portfolio benchmark, full E2E workflows, full Bruno CLI collection, load concurrency, dependency audit, and container vulnerability scanning).
+     - **Deep Nightly Verification**: Nightly statistical performance load profiling (`performance-benchmark-scheduled.yml`) and scheduled live provider AI evaluations (`ai-benchmark-scheduled.yml`).
+     - **Strict Release Verification**: Pre-release gate in `cd.yml` verifying OpenAPI zero-drift, CycloneDX release SBOM, Cosign keyless OIDC container signing, and container vulnerability scans before tagging or artifact publication.
+  2. **12 Decoupled Parallel CI Jobs**:
+     - `secret-scanning`: Gitleaks key leak detection.
+     - `static-and-quality`: Linters, SAST, license compliance, SBOM.
+     - `typecheck-backend`: Mypy static typing.
+     - `frontend-quality`: TypeScript typecheck, Vitest unit & coverage, widget build.
+     - `unit-tests`: In-memory isolated unit tests (zero external services).
+     - `contract-and-security`: API contract, OpenAPI drift, runtime security suite.
+     - `integration-tests`: Isolated Redis & Qdrant services.
+     - `ai-and-evals`: RAG regression, canary leakage, AI eval automation.
+     - `e2e-and-bruno`: Python E2E workflows and Bruno CLI automation.
+     - `perf-and-dependency-gate`: Performance smoke & dependency regression audit.
+     - `coverage-and-reporting`: Strict coverage enforcement (>=85%), forensic failure reporting, flaky test check.
+     - `container-build-and-scan`: Docker build integrity and Trivy vulnerability scan.
+  3. **Centralized Pytest Markers**:
+     - Centrally registered in `pyproject.toml`: `unit`, `integration`, `contract`, `security`, `ai`, `e2e`, `performance`, `slow`.
+     - Centrally assigned via `pytest_collection_modifyitems` hook in `tests/conftest.py` ensuring 100% consistent marker coverage across all 1,912 collected items.
+  4. **Forensic Failure Reporting**:
+     - Unified CLI reporter `scripts/ci_failure_reporter.py` consolidating JUnit XML, Bruno JSON, and benchmark outputs.
+     - Emits mandatory forensic fields: `layer`, `test`, `file`, `scenario`, `dependency`, `log`, `artifact`.
+     - Renders markdown matrix to GitHub Step Summary and saves JSON/Markdown reports.
+  5. **Flaky Test Elimination**:
+     - `scripts/ci_flaky_tracker.py` forbids infinite or silent retries (max 1 retry for designated tests).
+     - Tests passing on retry are explicitly classified as `FLAKY` (never a false `PASS`) in `reports/flaky/flaky-tests.json`.
+     - Main and Release gates strictly fail on flaky tests via `--fail-on-flaky`.
+  6. **2 Dedicated Test Suites**:
+     - `CI-001` (`CAT-132`): `tests/unit/test_ci_failure_reporter.py` (7 tests)
+     - `CI-002` (`CAT-133`): `tests/unit/test_ci_flaky_tracker.py` (4 tests)
 - **Verification Summary**:
-  - 35/35 dependency regression tests passing (100%).
-  - Bandit SAST: 0 issues identified, Exit Code 0.
-  - Ruff linter: 0 violations.
-  - Mypy: 0 errors across 192 source files.
+  - 11/11 CI orchestration unit tests passing (100%).
+  - Bandit SAST: 0 issues identified.
+  - Ruff linter & formatter: 100% clean.
+  - Mypy static typing: 0 errors across 192 source files.
+  - All CI workflows validated and aligned with 4-tier testing hierarchy.
+
 
 
 

@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 1. DevSecOps Secret Scanning
   secret-scanning:
     name: DevSecOps - Secret & Key Leak Detection
     runs-on: ubuntu-latest
@@ -33,24 +34,46 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: "true"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
 
-  dependency-and-sast:
-    name: DevSecOps - Vulnerability Audit, SAST & License Compliance
+  # 2. Static Analysis, Linters, SAST & License Compliance
+  static-and-quality:
+    name: Code Quality, SAST & License Compliance Gate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v7
+
+      - name: Hadolint Dockerfile Linter
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: backend/Dockerfile
+          config: .hadolint.yaml
+
+      - name: Actionlint GitHub Workflows Linter
+        uses: reviewdog/action-actionlint@v1
+        with:
+          fail_level: error
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
 
-      - name: Install Audit Dependencies
+      - name: Install Lint & Security Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+
+      - name: Ruff Linter Check
+        run: |
+          ruff check backend/
+
+      - name: Ruff Formatter Check
+        run: |
+          ruff format --check backend/
 
       - name: Pip-Audit Dependency Vulnerability Scan
         run: |
@@ -81,60 +104,34 @@ jobs:
           path: sbom-backend.cyclonedx.json
           retention-days: 30
 
-  infra-lint:
-    name: Infrastructure & Workflow Linting
+  # 3. Static Type Analysis
+  typecheck-backend:
+    name: Backend Type Analysis (Mypy)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v7
 
-      - name: Hadolint Dockerfile Linter
-        uses: hadolint/hadolint-action@v3.5.0
-        with:
-          dockerfile: backend/Dockerfile
-          config: .hadolint.yaml
-
-      - name: Actionlint GitHub Workflows Linter
-        uses: reviewdog/action-actionlint@v1
-        with:
-          fail_level: error
-
-  lint-and-typecheck:
-    name: Code Quality & Type Analysis
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v7
-
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Ruff Linter Check
-        run: |
-          ruff check backend/
-
-      - name: Ruff Formatter Check
-        run: |
-          ruff format --check backend/
-
       - name: Mypy Static Type Checking
         run: |
           mypy --config-file backend/mypy.ini backend/app
 
-  frontend-build-and-test:
+  # 4. Frontend Quality & Bundle Build
+  frontend-quality:
     name: Frontend Widget Build & Quality Verification
     runs-on: ubuntu-latest
     steps:
@@ -175,14 +172,126 @@ jobs:
           path: frontend/dist/
           retention-days: 14
 
-  unit-and-ai-tests:
-    name: Automated Tests & AI RAG Regression
+  # 5. Fast In-Memory Unit Test Suite (Zero External Services, Zero Race Conditions)
+  unit-tests:
+    name: Unit Test Suite (In-Memory Isolation)
     runs-on: ubuntu-latest
-    needs: [dependency-and-sast, infra-lint, lint-and-typecheck]
+    needs: [static-and-quality, typecheck-backend]
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
 
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Unit Tests with Flaky Test Tracker
+        run: |
+          cd backend
+          python scripts/ci_flaky_tracker.py --output-dir reports/flaky-unit -- tests/unit/ -v --junitxml=reports/junit/unit-results-${{ matrix.python-version }}.xml
+
+      - name: Archive Unit Test Results
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-results
+          path: |
+            backend/reports/junit/unit-results-*.xml
+            backend/reports/flaky-unit/
+          retention-days: 14
+
+  # 6. Contract & Runtime Security Suite
+  contract-and-security:
+    name: Contract, Schema Drift & Runtime Security Gate
+    runs-on: ubuntu-latest
+    needs: [static-and-quality, typecheck-backend]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Internal Mutual Auth Contract Gate (Invariant 4)
+        run: |
+          cd backend
+          pytest tests/contract/test_internal_mutual_auth.py -v
+
+      - name: Dedicated Runtime Security Regression Suite (TEST-05 / SEC-001..SEC-010)
+        run: |
+          cd backend
+          pytest tests/security/ -v --junitxml=reports/junit/security-results.xml
+
+      - name: API Breaking Change & Schema Drift Gate (OpenAPI Contract Verification)
+        run: |
+          cd backend
+          pytest tests/contract/test_api_contract.py -v --junitxml=reports/junit/contract-results.xml
+          python -m app.main --export-openapi openapi.json
+          git diff --exit-code openapi.json
+          python scripts/check_openapi_breaking_changes.py
+
+      - name: Publish OpenAPI Specification Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: openapi-specification
+          path: backend/openapi.json
+          retention-days: 14
+
+      - name: Archive Contract & Security Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-and-security-results
+          path: backend/reports/junit/
+          retention-days: 14
+
+  # 7. Isolated Integration Tests (PR: Critical / Main: Full)
+  integration-tests:
+    name: Subsystem Integration Gate (Isolated Services)
+    runs-on: ubuntu-latest
+    needs: [static-and-quality, typecheck-backend]
     services:
       redis:
         image: redis:7-alpine
@@ -206,20 +315,327 @@ jobs:
       QDRANT_PORT: 6333
       FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
       FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || '' }}
-      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY || '' }}
 
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v7
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Execute Critical Integration Tests (PR Gate)
+        if: github.event_name == 'pull_request'
+        run: |
+          cd backend
+          pytest -m "integration and not slow" -v --junitxml=reports/junit/integration-results.xml
+
+      - name: Execute Full Integration Test Suite (Main Gate)
+        if: github.event_name != 'pull_request'
+        run: |
+          cd backend
+          pytest -m integration -v --junitxml=reports/junit/integration-results.xml
+
+      - name: Archive Integration Test Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-test-results
+          path: backend/reports/junit/integration-results.xml
+          retention-days: 14
+
+  # 8. AI RAG & Evaluation Gate (PR: Critical / Main: Full)
+  ai-and-evals:
+    name: AI Quality, RAG & Evaluation Gate
+    runs-on: ubuntu-latest
+    needs: [static-and-quality, typecheck-backend]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: RAG Quality Gate & Anti-Hallucination Regression (Block 5)
+        run: |
+          cd backend
+          pytest tests/evals/test_rag_regression.py -v
+
+      - name: LLMOps Safety & Canary Data Leakage Gate (WORK-04)
+        run: |
+          cd backend
+          pytest tests/evals/test_canary_leakage.py tests/evals/test_rag_metrics.py tests/evals/test_llm_judge_and_generation.py tests/evals/test_baseline_and_regression_gate.py -v
+
+      - name: AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06 / AI-012..AI-014)
+        run: |
+          cd backend
+          pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py -v --junitxml=reports/junit/ai-results.xml
+
+      - name: Phase 00 AI Evaluation Benchmark Gate (Main Gate Full Verification)
+        if: github.event_name != 'pull_request'
+        run: |
+          cd backend
+          python scripts/run_ai_evaluation.py --output-dir benchmark-results
+          pytest tests/evals/test_portfolio_benchmark.py -v -s
+
+      - name: Archive AI Evaluation Benchmark Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai-evaluation-benchmark-results
+          path: |
+            backend/benchmark-results/
+            backend/reports/junit/ai-results.xml
+          retention-days: 30
+
+  # 9. End-to-End Workflow & Bruno CLI Automation Gate
+  e2e-and-bruno:
+    name: E2E Business Workflows & Bruno CLI Automation
+    runs-on: ubuntu-latest
+    needs: [static-and-quality, typecheck-backend]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Critical End-to-End Business Workflow Gate (PR Gate / TEST-07)
+        if: github.event_name == 'pull_request'
+        run: |
+          cd backend
+          pytest tests/e2e/test_e2e_business_workflows.py -v -m "critical_e2e and not live_external" --junitxml=reports/junit/e2e-results.xml
+
+      - name: Full End-to-End Business Workflows (Main Gate / TEST-07)
+        if: github.event_name != 'pull_request'
+        run: |
+          cd backend
+          pytest tests/e2e/ -v -m "not live_external" --junitxml=reports/junit/e2e-results.xml
+
+      - name: Critical Bruno API/E2E Smoke Gate (PR Gate / TEST-08)
+        if: github.event_name == 'pull_request'
+        run: |
+          python scripts/run_bruno_tests.py --suite smoke --auto-start
+
+      - name: Full Bruno API/E2E Test Suite (Main Gate / TEST-08)
+        if: github.event_name != 'pull_request'
+        run: |
+          python scripts/run_bruno_tests.py --suite full --auto-start
+
+      - name: Archive Bruno & E2E Test Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bruno-and-e2e-reports
+          path: |
+            backend/reports/bruno/
+            backend/reports/junit/e2e-results.xml
+          retention-days: 14
+
+  # 10. Performance Regression & Dependency Validation Gate
+  perf-and-dependency-gate:
+    name: Performance Smoke & Dependency Regression Gate
+    runs-on: ubuntu-latest
+    needs: [static-and-quality, typecheck-backend]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Performance Regression Smoke Gate (TEST-09 / PERF-003)
+        run: |
+          cd backend
+          python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py tests/performance/test_performance_exceptions.py -v
+
+      - name: Concurrency Stability Verification (Main Gate / PERF-004)
+        if: github.event_name != 'pull_request'
+        run: |
+          cd backend
+          pytest tests/performance/test_load_and_concurrency.py -v
+
+      - name: Dependency Regression Audit & Validation Gate (TEST-10)
+        run: |
+          cd backend
+          python scripts/run_dependency_regression.py --mode audit
+          python scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
+          pytest tests/unit/test_dependency_categories.py tests/unit/test_dependency_breakage_classifier.py tests/unit/test_dependency_regression_runner.py -v
+
+      - name: Archive Performance & Dependency Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-and-dependency-artifacts
+          path: |
+            backend/benchmark-results/
+            backend/reports/dependencies/
+          retention-days: 14
+
+  # 11. Consolidated Coverage Enforcement, Forensic Failure Summary & Flaky Audit
+  coverage-and-reporting:
+    name: Coverage Gate, Forensic Failure Reporting & Flaky Audit
+    runs-on: ubuntu-latest
+    needs:
+      - unit-tests
+      - contract-and-security
+      - integration-tests
+      - ai-and-evals
+      - e2e-and-bruno
+      - perf-and-dependency-gate
+    if: always()
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
 
       - name: Install Dependencies
         run: |
@@ -232,127 +648,40 @@ jobs:
           pytest --cov=app --cov-branch tests/ -v --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=85
 
       - name: Strict Coverage Gate & Patch Coverage Diff Analysis (>= 85% Line, >= 80% Patch)
-        if: always()
         run: |
           cd backend
           python scripts/check_coverage_diff.py --min-line 85 --min-patch 80
 
-      - name: Token Optimization Benchmark Gate (Phase 4 Empirical Validation >= 40%)
+      - name: Strict Flaky Test Verification Gate
         run: |
           cd backend
-          pytest tests/performance/test_token_benchmark.py -v -s
+          python scripts/ci_flaky_tracker.py --check-ledger reports/flaky-unit/flaky-tests.json ${{ github.event_name != 'pull_request' && '--fail-on-flaky' || '' }}
 
-      - name: Phase 00 AI Evaluation Benchmark Gate (Multi-Workload Portfolio >= 40%)
+      - name: Generate Consolidated CI Failure & Forensic Step Summary (TEST-11)
+        if: always()
         run: |
-          cd backend
-          python scripts/run_ai_evaluation.py --output-dir benchmark-results
-          pytest tests/evals/test_portfolio_benchmark.py -v -s
+          python scripts/ci_failure_reporter.py --report-dirs backend/reports backend/benchmark-results --output-dir backend/reports/summary ${{ github.event_name != 'pull_request' && '--fail-on-flaky' || '' }}
 
-      - name: Archive AI Evaluation Benchmark Artifacts
-        if: matrix.python-version == '3.12'
+      - name: Archive Coverage & Forensic Summary Artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ai-evaluation-benchmark-results
-          path: backend/benchmark-results/
+          name: ci-failure-and-coverage-summary
+          path: |
+            backend/coverage.xml
+            backend/reports/summary/
           retention-days: 30
 
-      - name: Internal Mutual Auth Contract Gate (Invariant 4 Perimeter Authentication)
-        run: |
-          cd backend
-          pytest tests/contract/test_internal_mutual_auth.py -v
-
-      - name: RAG Quality Gate & Anti-Hallucination Regression (Block 5)
-        run: |
-          cd backend
-          pytest tests/evals/test_rag_regression.py -v
-
-      - name: LLMOps Safety & Canary Data Leakage Gate (WORK-04)
-        run: |
-          cd backend
-          pytest tests/evals/test_canary_leakage.py tests/evals/test_rag_metrics.py tests/evals/test_llm_judge_and_generation.py tests/evals/test_baseline_and_regression_gate.py -v
-
-      - name: Dedicated Runtime Security Regression Suite (TEST-05 / SEC-006..SEC-010)
-        run: |
-          cd backend
-          pytest tests/security/ -v
-
-      - name: AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06 / AI-012..AI-014)
-        run: |
-          cd backend
-          pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py -v
-
-      - name: Critical End-to-End Business Workflow Gate (TEST-07 / E2E-003)
-        run: |
-          cd backend
-          pytest tests/e2e/test_e2e_business_workflows.py -v -m "not live_external"
-
-      - name: Critical Bruno API/E2E Smoke Gate (TEST-08 / PR Gate)
-        if: github.event_name == 'pull_request'
-        run: |
-          python scripts/run_bruno_tests.py --suite smoke --auto-start
-
-      - name: Full Bruno API/E2E Test Suite (TEST-08 / Main & Release Gate)
-        if: github.event_name != 'pull_request'
-        run: |
-          python scripts/run_bruno_tests.py --suite full --auto-start
-
-      - name: Archive Bruno Test Reports
-        if: always() && matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
-        with:
-          name: bruno-test-reports
-          path: backend/reports/bruno/
-          retention-days: 14
-
-      - name: Performance Regression Smoke Gate (TEST-09 / PERF-003)
-        run: |
-          cd backend
-          python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
-          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py tests/performance/test_performance_exceptions.py -v
-
-      - name: Archive Performance Benchmark Smoke Artifacts
-        if: always() && matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
-        with:
-          name: performance-benchmark-smoke-results
-          path: backend/benchmark-results/
-          retention-days: 14
-
-      - name: API Breaking Change & Schema Drift Gate (OpenAPI Contract Verification)
-        run: |
-          cd backend
-          pytest tests/contract/test_api_contract.py -v
-          python -m app.main --export-openapi openapi.json
-          git diff --exit-code openapi.json
-          python scripts/check_openapi_breaking_changes.py
-
-      - name: Publish OpenAPI Specification Artifact
-        if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
-        with:
-          name: openapi-specification
-          path: backend/openapi.json
-          retention-days: 14
-
-      - name: Dependency Regression Audit & Validation Gate (TEST-10)
-        run: |
-          cd backend
-          python scripts/run_dependency_regression.py --mode audit
-          python scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
-          pytest tests/unit/test_dependency_categories.py tests/unit/test_dependency_breakage_classifier.py tests/unit/test_dependency_regression_runner.py -v
-
-      - name: Archive Dependency Regression Artifacts
-        if: always() && matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
-        with:
-          name: dependency-regression-report
-          path: backend/reports/dependencies/
-          retention-days: 14
-
+  # 12. Final Container Packaging & Trivy Vulnerability Scan
   container-build-and-scan:
     name: Container Packaging & Vulnerability Scan
     runs-on: ubuntu-latest
-    needs: [secret-scanning, dependency-and-sast, infra-lint, unit-and-ai-tests, frontend-build-and-test]
+    needs:
+      - secret-scanning
+      - static-and-quality
+      - typecheck-backend
+      - frontend-quality
+      - coverage-and-reporting
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v7

@@ -57,15 +57,18 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
 markers = [
-    "unit: Unit tests (fast, in-memory, no external services)",
+    "unit: Pure in-memory unit tests (fast, isolated, zero external services)",
     "integration: Integration tests (component and ASGI HTTP with local services)",
-    "contract: API contract and schema drift tests",
-    "security: Security, guardrails, BYOK, and tenant isolation tests",
+    "contract: API contract, schema drift, and protocol consistency tests",
+    "security: Security, guardrails, BYOK, auth, and tenant isolation tests",
+    "ai: AI quality, evaluation benchmarks, RAG grounding, and canary tests",
     "e2e: End-to-end multi-tier pipeline and platform workflow tests",
-    "critical_e2e: Critical end-to-end business workflow tests running in PR gate",
+    "performance: Token, throughput, and latency performance benchmarks",
+    "slow: Tests with execution duration exceeding 2.0 seconds",
+    "critical_e2e: Critical end-to-end business workflows executed in PR gate",
     "live_external: Workflows requiring live external third-party API credentials",
-    "evals: AI quality, evaluation benchmark, and canary tests",
-    "performance: Token and latency performance benchmarks",
+    "evals: Backward-compatible alias for AI evaluation tests",
+    "flaky_retry: Tests permitted a single controlled retry attempt under strict tracking",
 ]
 
 [tool.coverage.run]
