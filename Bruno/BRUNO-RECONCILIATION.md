@@ -1,32 +1,55 @@
 # BRUNO-RECONCILIATION — Bruno Collection to JakeAI Application Audit
 
 **Audit Baseline**: Current `main` | Current FastAPI Runtime (`app.main:app`)  
-**Total Reconciled `.bru` Requests**: 117 (64 Public + 53 Private)  
-**Total OpenAPI Operations Required**: 51  
-**OpenAPI Operations Covered**: 51 / 51 (100% Complete)  
-**Missing Coverage**: 0  
+**Total Reconciled `.bru` Requests**: 118 (65 Public + 53 Private)  
+**Total OpenAPI Operations Required**: 51 (Dynamically Derived from OpenAPI 3.1.0)  
+  - **Public Client API Operations**: 49 (49 / 49 Covered in `Bruno/public/` — 100%)  
+  - **Internal Service API Operations**: 2 (2 / 2 Covered in `Bruno/private/` & Certified via Pytest)  
+  - **Pytest-Only Designated Operations**: 0  
+**Missing Public Operations**: 0  
+**Missing Internal Operations**: 0  
 **Reconciliation Date**: September 17, 2026  
 **Overall Reconciliation Status**: **🟢 PASS**  
 
 ---
 
-## 1. Classification Summary
+## 1. Architectural Exposure Tier Separation
+
+The JakeAI Bruno workspace follows a strict 3-tier exposure model:
+
+1. **PUBLIC_CLIENT_API (`Bruno/public/`)**: Client-facing, public perimeter, and webhook endpoints.
+   - Tracked in Git and guaranteed runnable in CI/CD without private cluster credentials.
+   - Contains synthetic safe examples with zero real secrets and zero production keys.
+   - **Coverage**: Exactly 49 operations (100% complete).
+
+2. **INTERNAL_SERVICE_API (`Bruno/private/` & Pytest Contract Layer)**: Service-to-service internal edge gateway endpoints.
+   - Strictly isolated behind `x-internal-secret` and `x-forwarded-by` gateway perimeter headers.
+   - Stored in `Bruno/private/` (local developer audits, gitignored) to prevent internal credential disclosure.
+   - Verified deterministically in CI via Pytest contract suites (`backend/tests/contract/test_internal_mutual_auth.py`, `backend/tests/contract/test_orchestration_contracts.py`).
+   - **Coverage**: Exactly 2 operations (`POST /internal/v1/coding/resume`, `POST /internal/v1/coding/tool-result`).
+
+3. **PYTEST_ONLY**: Operations deliberately and exclusively verified through Python tests.
+   - **Coverage**: 0 operations currently designated.
+
+---
+
+## 2. Classification Summary
 
 | Classification | Count | Description | Partition |
 |---|:---:|---|:---:|
-| **EXACT MATCH** | 64 | Safe public API examples, smoke checks, and OpenAPI operations. | `public/` |
+| **EXACT MATCH** | 65 | Safe public API examples, smoke checks, and OpenAPI operations. | `public/` |
 | **SECURITY-SENSITIVE** | 44 | Negative tests, attack payloads, chaos, tenant boundaries, and failure injection. | `private/` |
 | **LIVE-ONLY** | 9 | Live FinnApiGo authority and live third-party model providers (BLOCKED when offline). | `private/` |
 | **VALID BUT OUTDATED** | 0 | All outdated endpoints reconciled to current routes. | N/A |
 | **OBSOLETE** | 0 | All obsolete legacy endpoints removed. | N/A |
 | **DUPLICATE** | 0 | All requests consolidated with distinct documented purposes. | N/A |
 | **BROKEN** | 0 | All requests validated with correct schemas and status codes. | N/A |
-| **MISSING** | 0 | All 51 current OpenAPI operations covered. | N/A |
-| **TOTAL ACTIVE** | **117** | **Full reconciled workspace collection.** | **64 Pub / 53 Priv** |
+| **MISSING** | 0 | All OpenAPI operations fully accounted for and verified. | N/A |
+| **TOTAL ACTIVE** | **118** | **Full reconciled workspace collection.** | **65 Pub / 53 Priv** |
 
 ---
 
-## 2. Master Request-by-Request Reconciliation Table
+## 3. Master Request-by-Request Reconciliation Table
 
 | # | Collection Partition | Request File | Method | Target URL | Auth | Classification | Notes / Purpose |
 |:---:|:---:|---|:---:|---|:---:|---|---|
@@ -144,66 +167,81 @@
 | 112 | `public/` (Tracked) | `public/05 — Provider Examples/22 — DevOps Changelog.bru` | `POST` | `{{base_url}}/api/v1/devops/changelog` | `bearer` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
 | 113 | `public/` (Tracked) | `public/05 — Provider Examples/23 — Coding Tool Result.bru` | `POST` | `{{base_url}}/api/v1/coding/tool-result` | `bearer` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
 | 114 | `public/` (Tracked) | `public/05 — Provider Examples/24 — Coding Resume Bridge.bru` | `POST` | `{{base_url}}/api/v1/coding/resume` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
-| 115 | `public/` (Tracked) | `public/99 — Public Final Smoke/01 — Production-like Smoke.bru` | `GET` | `{{base_url}}/health` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
-| 116 | `public/` (Tracked) | `public/99 — Public Final Smoke/02 — Critical Security Smoke.bru` | `GET` | `{{base_url}}/api/v1/agent/metrics` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
-| 117 | `public/` (Tracked) | `public/99 — Public Final Smoke/03 — Critical E2E Smoke.bru` | `GET` | `{{base_url}}/api/v1/health` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
+| 115 | `public/` (Tracked) | `public/05 — Provider Examples/25 — Billing Webhook.bru` | `POST` | `{{base_url}}/api/v1/billing/webhook` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
+| 116 | `public/` (Tracked) | `public/99 — Public Final Smoke/01 — Production-like Smoke.bru` | `GET` | `{{base_url}}/health` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
+| 117 | `public/` (Tracked) | `public/99 — Public Final Smoke/02 — Critical Security Smoke.bru` | `GET` | `{{base_url}}/api/v1/agent/metrics` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
+| 118 | `public/` (Tracked) | `public/99 — Public Final Smoke/03 — Critical E2E Smoke.bru` | `GET` | `{{base_url}}/api/v1/health` | `none` | **EXACT MATCH** | Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract. |
 
 ---
 
-## 3. OpenAPI 51-Operation Full Coverage Verification
+## 4. OpenAPI Operation Coverage Verification Matrix
 
-Every single registered public HTTP operation in JakeAI is accounted for:
+Every single registered HTTP operation in JakeAI is verified across its designated tier:
 
-| # | Operation | Method | Path | Bruno Primary Coverage | Partition |
-|:---:|---|:---:|---|---|:---:|
-| 1 | `DELETE /api/v1/byok/keys/{provider}` | `DELETE` | `/api/v1/byok/keys/{provider}` | `public/05 — Provider Examples/07 — Delete Provider Key.bru` | Public |
-| 2 | `GET /api/v1/agent/approvals/pending` | `GET` | `/api/v1/agent/approvals/pending` | `public/03 — Agent/07 — Pending Approvals.bru` | Public |
-| 3 | `GET /api/v1/agent/metrics` | `GET` | `/api/v1/agent/metrics` | `public/03 — Agent/10 — Agent Metrics.bru` | Public |
-| 4 | `GET /api/v1/agent/tasks/{task_id}` | `GET` | `/api/v1/agent/tasks/{task_id}` | `public/03 — Agent/02 — Get Task.bru` | Public |
-| 5 | `GET /api/v1/agent/tasks/{task_id}/runs/{run_id}` | `GET` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}` | `public/03 — Agent/04 — Get Run.bru` | Public |
-| 6 | `GET /api/v1/agent/tasks/{task_id}/runs/{run_id}/events` | `GET` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}/events` | `public/03 — Agent/05 — Stream Run Events.bru` | Public |
-| 7 | `GET /api/v1/analytics/dashboard` | `GET` | `/api/v1/analytics/dashboard` | `public/05 — Provider Examples/13 — Analytics Dashboard.bru` | Public |
-| 8 | `GET /api/v1/analytics/metrics` | `GET` | `/api/v1/analytics/metrics` | `public/05 — Provider Examples/20 — Analytics Metrics.bru` | Public |
-| 9 | `GET /api/v1/billing/subscription` | `GET` | `/api/v1/billing/subscription` | `public/05 — Provider Examples/17 — Billing Subscription.bru` | Public |
-| 10 | `GET /api/v1/byok/keys` | `GET` | `/api/v1/byok/keys` | `public/05 — Provider Examples/01 — List BYOK Keys.bru` | Public |
-| 11 | `GET /api/v1/finops/budget` | `GET` | `/api/v1/finops/budget` | `public/05 — Provider Examples/14 — FinOps Budget Read.bru` | Public |
-| 12 | `GET /api/v1/finops/reconciliation` | `GET` | `/api/v1/finops/reconciliation` | `public/05 — Provider Examples/19 — FinOps Reconciliation.bru` | Public |
-| 13 | `GET /api/v1/finops/summary` | `GET` | `/api/v1/finops/summary` | `public/05 — Provider Examples/12 — FinOps Summary.bru` | Public |
-| 14 | `GET /api/v1/finops/transactions` | `GET` | `/api/v1/finops/transactions` | `public/05 — Provider Examples/18 — FinOps Transactions.bru` | Public |
-| 15 | `GET /api/v1/gateway/models` | `GET` | `/api/v1/gateway/models` | `public/02 — Chat/05 — API Gateway Models List.bru` | Public |
-| 16 | `GET /api/v1/gateway/quotas` | `GET` | `/api/v1/gateway/quotas` | `public/02 — Chat/09 — API Gateway Quotas Read.bru` | Public |
-| 17 | `GET /api/v1/health` | `GET` | `/api/v1/health` | `public/00 — Setup/02 — API Health Smoke.bru` | Public |
-| 18 | `GET /api/v1/health/live` | `GET` | `/api/v1/health/live` | `public/00 — Setup/05 — API Health Live Probe.bru` | Public |
-| 19 | `GET /api/v1/health/ready` | `GET` | `/api/v1/health/ready` | `public/00 — Setup/06 — API Health Ready Probe.bru` | Public |
-| 20 | `GET /api/v1/rag/tasks/{task_id}` | `GET` | `/api/v1/rag/tasks/{task_id}` | `public/04 — RAG/02 — Get RAG Ingestion Task.bru` | Public |
-| 21 | `GET /health` | `GET` | `/health` | `public/00 — Setup/01 — Root Health Smoke.bru` | Public |
-| 22 | `GET /health/live` | `GET` | `/health/live` | `public/00 — Setup/03 — Root Liveness Probe.bru` | Public |
-| 23 | `GET /health/ready` | `GET` | `/health/ready` | `public/00 — Setup/04 — Root Readiness Probe.bru` | Public |
-| 24 | `GET /metrics` | `GET` | `/metrics` | `public/00 — Setup/07 — Prometheus Metrics.bru` | Public |
-| 25 | `GET /v1/models` | `GET` | `/v1/models` | `public/01 — Public Smoke/03 — Public Models Catalog.bru` | Public |
-| 26 | `GET /v1/quotas` | `GET` | `/v1/quotas` | `public/02 — Chat/07 — OpenAI Gateway Quotas Read.bru` | Public |
-| 27 | `POST /api/v1/agent/tasks` | `POST` | `/api/v1/agent/tasks` | `public/03 — Agent/01 — Create Task.bru` | Public |
-| 28 | `POST /api/v1/agent/tasks/{task_id}/runs` | `POST` | `/api/v1/agent/tasks/{task_id}/runs` | `public/03 — Agent/03 — Start Run.bru` | Public |
-| 29 | `POST /api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}` | `POST` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}` | `public/03 — Agent/08 — Approval Decision.bru` | Public |
-| 30 | `POST /api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel` | `POST` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel` | `public/03 — Agent/06 — Cancel Run.bru` | Public |
-| 31 | `POST /api/v1/billing/webhook` | `POST` | `/api/v1/billing/webhook` | `private/01 — Authentication & Tenant Security/09 — Billing Webhook Signature.bru` | Private |
-| 32 | `POST /api/v1/byok/keys` | `POST` | `/api/v1/byok/keys` | `public/05 — Provider Examples/02 — Add BYOK Key.bru` | Public |
-| 33 | `POST /api/v1/byok/keys/validate` | `POST` | `/api/v1/byok/keys/validate` | `public/05 — Provider Examples/03 — Validate BYOK Key.bru` | Public |
-| 34 | `POST /api/v1/byok/keys/{provider}/revoke` | `POST` | `/api/v1/byok/keys/{provider}/revoke` | `public/05 — Provider Examples/06 — Revoke Provider Key.bru` | Public |
-| 35 | `POST /api/v1/byok/keys/{provider}/rotate` | `POST` | `/api/v1/byok/keys/{provider}/rotate` | `public/05 — Provider Examples/05 — Rotate Provider Key.bru` | Public |
-| 36 | `POST /api/v1/byok/keys/{provider}/validate` | `POST` | `/api/v1/byok/keys/{provider}/validate` | `public/05 — Provider Examples/04 — Validate Stored Provider.bru` | Public |
-| 37 | `POST /api/v1/chat/stream` | `POST` | `/api/v1/chat/stream` | `public/02 — Chat/01 — Chat Stream.bru` | Public |
-| 38 | `POST /api/v1/coding/resume` | `POST` | `/api/v1/coding/resume` | `public/05 — Provider Examples/24 — Coding Resume Bridge.bru` | Public |
-| 39 | `POST /api/v1/coding/tool-result` | `POST` | `/api/v1/coding/tool-result` | `public/05 — Provider Examples/23 — Coding Tool Result.bru` | Public |
-| 40 | `POST /api/v1/devops/audit-pr` | `POST` | `/api/v1/devops/audit-pr` | `public/05 — Provider Examples/21 — DevOps Audit PR.bru` | Public |
-| 41 | `POST /api/v1/devops/changelog` | `POST` | `/api/v1/devops/changelog` | `public/05 — Provider Examples/22 — DevOps Changelog.bru` | Public |
-| 42 | `POST /api/v1/finops/budget` | `POST` | `/api/v1/finops/budget` | `public/05 — Provider Examples/15 — FinOps Budget Update.bru` | Public |
-| 43 | `POST /api/v1/gateway/chat/completions` | `POST` | `/api/v1/gateway/chat/completions` | `public/02 — Chat/06 — API Gateway Chat Completions.bru` | Public |
-| 44 | `POST /api/v1/gateway/quotas` | `POST` | `/api/v1/gateway/quotas` | `public/02 — Chat/10 — API Gateway Quotas Update.bru` | Public |
-| 45 | `POST /api/v1/rag/generate` | `POST` | `/api/v1/rag/generate` | `public/04 — RAG/04 — Generate Grounded Answer.bru` | Public |
-| 46 | `POST /api/v1/rag/ingest` | `POST` | `/api/v1/rag/ingest` | `public/04 — RAG/01 — Ingest Document.bru` | Public |
-| 47 | `POST /api/v1/rag/query` | `POST` | `/api/v1/rag/query` | `public/04 — RAG/03 — Hybrid Query.bru` | Public |
-| 48 | `POST /internal/v1/coding/resume` | `POST` | `/internal/v1/coding/resume` | `private/01 — Authentication & Tenant Security/07 — Internal Perimeter Secret Rejection.bru` | Private |
-| 49 | `POST /internal/v1/coding/tool-result` | `POST` | `/internal/v1/coding/tool-result` | `private/05 — Tool Security/03 — Tool Result Internal Bridge.bru` | Private |
-| 50 | `POST /v1/chat/completions` | `POST` | `/v1/chat/completions` | `public/02 — Chat/03 — OpenAI Gateway Chat.bru` | Public |
-| 51 | `POST /v1/quotas` | `POST` | `/v1/quotas` | `public/02 — Chat/08 — OpenAI Gateway Quotas Update.bru` | Public |
+| # | Operation | Method | Path | Exposure Tier | Verification Mechanism | Status |
+|:---:|---|:---:|---|:---:|---|:---:|
+| 1 | `DELETE /api/v1/byok/keys/{provider}` | `DELETE` | `/api/v1/byok/keys/{provider}` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/07 — Delete Provider Key.bru` | 🟢 PASS (Public Bruno) |
+| 2 | `GET /api/v1/agent/approvals/pending` | `GET` | `/api/v1/agent/approvals/pending` | `PUBLIC_CLIENT_API` | `public/03 — Agent/07 — Pending Approvals.bru` | 🟢 PASS (Public Bruno) |
+| 3 | `GET /api/v1/agent/metrics` | `GET` | `/api/v1/agent/metrics` | `PUBLIC_CLIENT_API` | `public/03 — Agent/10 — Agent Metrics.bru` | 🟢 PASS (Public Bruno) |
+| 4 | `GET /api/v1/agent/tasks/{task_id}` | `GET` | `/api/v1/agent/tasks/{task_id}` | `PUBLIC_CLIENT_API` | `public/03 — Agent/02 — Get Task.bru` | 🟢 PASS (Public Bruno) |
+| 5 | `GET /api/v1/agent/tasks/{task_id}/runs/{run_id}` | `GET` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}` | `PUBLIC_CLIENT_API` | `public/03 — Agent/04 — Get Run.bru` | 🟢 PASS (Public Bruno) |
+| 6 | `GET /api/v1/agent/tasks/{task_id}/runs/{run_id}/events` | `GET` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}/events` | `PUBLIC_CLIENT_API` | `public/03 — Agent/05 — Stream Run Events.bru` | 🟢 PASS (Public Bruno) |
+| 7 | `GET /api/v1/analytics/dashboard` | `GET` | `/api/v1/analytics/dashboard` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/13 — Analytics Dashboard.bru` | 🟢 PASS (Public Bruno) |
+| 8 | `GET /api/v1/analytics/metrics` | `GET` | `/api/v1/analytics/metrics` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/20 — Analytics Metrics.bru` | 🟢 PASS (Public Bruno) |
+| 9 | `GET /api/v1/billing/subscription` | `GET` | `/api/v1/billing/subscription` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/17 — Billing Subscription.bru` | 🟢 PASS (Public Bruno) |
+| 10 | `GET /api/v1/byok/keys` | `GET` | `/api/v1/byok/keys` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/01 — List BYOK Keys.bru` | 🟢 PASS (Public Bruno) |
+| 11 | `GET /api/v1/finops/budget` | `GET` | `/api/v1/finops/budget` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/14 — FinOps Budget Read.bru` | 🟢 PASS (Public Bruno) |
+| 12 | `GET /api/v1/finops/reconciliation` | `GET` | `/api/v1/finops/reconciliation` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/19 — FinOps Reconciliation.bru` | 🟢 PASS (Public Bruno) |
+| 13 | `GET /api/v1/finops/summary` | `GET` | `/api/v1/finops/summary` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/12 — FinOps Summary.bru` | 🟢 PASS (Public Bruno) |
+| 14 | `GET /api/v1/finops/transactions` | `GET` | `/api/v1/finops/transactions` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/18 — FinOps Transactions.bru` | 🟢 PASS (Public Bruno) |
+| 15 | `GET /api/v1/gateway/models` | `GET` | `/api/v1/gateway/models` | `PUBLIC_CLIENT_API` | `public/02 — Chat/05 — API Gateway Models List.bru` | 🟢 PASS (Public Bruno) |
+| 16 | `GET /api/v1/gateway/quotas` | `GET` | `/api/v1/gateway/quotas` | `PUBLIC_CLIENT_API` | `public/02 — Chat/09 — API Gateway Quotas Read.bru` | 🟢 PASS (Public Bruno) |
+| 17 | `GET /api/v1/health` | `GET` | `/api/v1/health` | `PUBLIC_CLIENT_API` | `public/00 — Setup/02 — API Health Smoke.bru` | 🟢 PASS (Public Bruno) |
+| 18 | `GET /api/v1/health/live` | `GET` | `/api/v1/health/live` | `PUBLIC_CLIENT_API` | `public/00 — Setup/05 — API Health Live Probe.bru` | 🟢 PASS (Public Bruno) |
+| 19 | `GET /api/v1/health/ready` | `GET` | `/api/v1/health/ready` | `PUBLIC_CLIENT_API` | `public/00 — Setup/06 — API Health Ready Probe.bru` | 🟢 PASS (Public Bruno) |
+| 20 | `GET /api/v1/rag/tasks/{task_id}` | `GET` | `/api/v1/rag/tasks/{task_id}` | `PUBLIC_CLIENT_API` | `public/04 — RAG/02 — Get RAG Ingestion Task.bru` | 🟢 PASS (Public Bruno) |
+| 21 | `GET /health` | `GET` | `/health` | `PUBLIC_CLIENT_API` | `public/00 — Setup/01 — Root Health Smoke.bru` | 🟢 PASS (Public Bruno) |
+| 22 | `GET /health/live` | `GET` | `/health/live` | `PUBLIC_CLIENT_API` | `public/00 — Setup/03 — Root Liveness Probe.bru` | 🟢 PASS (Public Bruno) |
+| 23 | `GET /health/ready` | `GET` | `/health/ready` | `PUBLIC_CLIENT_API` | `public/00 — Setup/04 — Root Readiness Probe.bru` | 🟢 PASS (Public Bruno) |
+| 24 | `GET /metrics` | `GET` | `/metrics` | `PUBLIC_CLIENT_API` | `public/00 — Setup/07 — Prometheus Metrics.bru` | 🟢 PASS (Public Bruno) |
+| 25 | `GET /v1/models` | `GET` | `/v1/models` | `PUBLIC_CLIENT_API` | `public/01 — Public Smoke/03 — Public Models Catalog.bru` | 🟢 PASS (Public Bruno) |
+| 26 | `GET /v1/quotas` | `GET` | `/v1/quotas` | `PUBLIC_CLIENT_API` | `public/02 — Chat/07 — OpenAI Gateway Quotas Read.bru` | 🟢 PASS (Public Bruno) |
+| 27 | `POST /api/v1/agent/tasks` | `POST` | `/api/v1/agent/tasks` | `PUBLIC_CLIENT_API` | `public/03 — Agent/01 — Create Task.bru` | 🟢 PASS (Public Bruno) |
+| 28 | `POST /api/v1/agent/tasks/{task_id}/runs` | `POST` | `/api/v1/agent/tasks/{task_id}/runs` | `PUBLIC_CLIENT_API` | `public/03 — Agent/03 — Start Run.bru` | 🟢 PASS (Public Bruno) |
+| 29 | `POST /api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}` | `POST` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}` | `PUBLIC_CLIENT_API` | `public/03 — Agent/08 — Approval Decision.bru` | 🟢 PASS (Public Bruno) |
+| 30 | `POST /api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel` | `POST` | `/api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel` | `PUBLIC_CLIENT_API` | `public/03 — Agent/06 — Cancel Run.bru` | 🟢 PASS (Public Bruno) |
+| 31 | `POST /api/v1/billing/webhook` | `POST` | `/api/v1/billing/webhook` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/25 — Billing Webhook.bru` | 🟢 PASS (Public Bruno) |
+| 32 | `POST /api/v1/byok/keys` | `POST` | `/api/v1/byok/keys` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/02 — Add BYOK Key.bru` | 🟢 PASS (Public Bruno) |
+| 33 | `POST /api/v1/byok/keys/validate` | `POST` | `/api/v1/byok/keys/validate` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/03 — Validate BYOK Key.bru` | 🟢 PASS (Public Bruno) |
+| 34 | `POST /api/v1/byok/keys/{provider}/revoke` | `POST` | `/api/v1/byok/keys/{provider}/revoke` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/06 — Revoke Provider Key.bru` | 🟢 PASS (Public Bruno) |
+| 35 | `POST /api/v1/byok/keys/{provider}/rotate` | `POST` | `/api/v1/byok/keys/{provider}/rotate` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/05 — Rotate Provider Key.bru` | 🟢 PASS (Public Bruno) |
+| 36 | `POST /api/v1/byok/keys/{provider}/validate` | `POST` | `/api/v1/byok/keys/{provider}/validate` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/04 — Validate Stored Provider.bru` | 🟢 PASS (Public Bruno) |
+| 37 | `POST /api/v1/chat/stream` | `POST` | `/api/v1/chat/stream` | `PUBLIC_CLIENT_API` | `public/02 — Chat/01 — Chat Stream.bru` | 🟢 PASS (Public Bruno) |
+| 38 | `POST /api/v1/coding/resume` | `POST` | `/api/v1/coding/resume` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/24 — Coding Resume Bridge.bru` | 🟢 PASS (Public Bruno) |
+| 39 | `POST /api/v1/coding/tool-result` | `POST` | `/api/v1/coding/tool-result` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/23 — Coding Tool Result.bru` | 🟢 PASS (Public Bruno) |
+| 40 | `POST /api/v1/devops/audit-pr` | `POST` | `/api/v1/devops/audit-pr` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/21 — DevOps Audit PR.bru` | 🟢 PASS (Public Bruno) |
+| 41 | `POST /api/v1/devops/changelog` | `POST` | `/api/v1/devops/changelog` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/22 — DevOps Changelog.bru` | 🟢 PASS (Public Bruno) |
+| 42 | `POST /api/v1/finops/budget` | `POST` | `/api/v1/finops/budget` | `PUBLIC_CLIENT_API` | `public/05 — Provider Examples/15 — FinOps Budget Update.bru` | 🟢 PASS (Public Bruno) |
+| 43 | `POST /api/v1/gateway/chat/completions` | `POST` | `/api/v1/gateway/chat/completions` | `PUBLIC_CLIENT_API` | `public/02 — Chat/06 — API Gateway Chat Completions.bru` | 🟢 PASS (Public Bruno) |
+| 44 | `POST /api/v1/gateway/quotas` | `POST` | `/api/v1/gateway/quotas` | `PUBLIC_CLIENT_API` | `public/02 — Chat/10 — API Gateway Quotas Update.bru` | 🟢 PASS (Public Bruno) |
+| 45 | `POST /api/v1/rag/generate` | `POST` | `/api/v1/rag/generate` | `PUBLIC_CLIENT_API` | `public/04 — RAG/04 — Generate Grounded Answer.bru` | 🟢 PASS (Public Bruno) |
+| 46 | `POST /api/v1/rag/ingest` | `POST` | `/api/v1/rag/ingest` | `PUBLIC_CLIENT_API` | `public/04 — RAG/01 — Ingest Document.bru` | 🟢 PASS (Public Bruno) |
+| 47 | `POST /api/v1/rag/query` | `POST` | `/api/v1/rag/query` | `PUBLIC_CLIENT_API` | `public/04 — RAG/03 — Hybrid Query.bru` | 🟢 PASS (Public Bruno) |
+| 48 | `POST /internal/v1/coding/resume` | `POST` | `/internal/v1/coding/resume` | `INTERNAL_SERVICE_API` | `Bruno/private/` + Pytest (`test_internal_mutual_auth.py`) | 🟢 PASS (Contract Certified) |
+| 49 | `POST /internal/v1/coding/tool-result` | `POST` | `/internal/v1/coding/tool-result` | `INTERNAL_SERVICE_API` | `Bruno/private/` + Pytest (`test_internal_mutual_auth.py`) | 🟢 PASS (Contract Certified) |
+| 50 | `POST /v1/chat/completions` | `POST` | `/v1/chat/completions` | `PUBLIC_CLIENT_API` | `public/02 — Chat/03 — OpenAI Gateway Chat.bru` | 🟢 PASS (Public Bruno) |
+| 51 | `POST /v1/quotas` | `POST` | `/v1/quotas` | `PUBLIC_CLIENT_API` | `public/02 — Chat/08 — OpenAI Gateway Quotas Update.bru` | 🟢 PASS (Public Bruno) |
+
+---
+
+## 5. Automated CI Contract Gate Invariant
+
+To prevent regression or schema drift, the following automated gates run on every commit:
+1. **`backend/tests/contract/test_bruno_reconciliation.py` (CONTRACT-008)**:
+   - Validates that all public OpenAPI operations exist in `Bruno/public/`.
+   - Validates that internal service endpoints are never exposed in `Bruno/public/`.
+   - Validates zero obsolete requests and correct HTTP method/path matching.
+   - Scans all public `.bru` files for accidental hardcoded secrets or internal credentials.
+2. **`scripts/check_bruno_reconciliation.py`**:
+   - Standalone CLI drift audit tool returning non-zero exit code on missing or obsolete endpoints.
+

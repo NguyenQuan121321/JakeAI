@@ -5,13 +5,13 @@
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 135 tracked in catalog (133 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 133
-- **Total Test Functions / Methods**: 1,443 (collected by Pytest as 1,923 test items across 134 executable modules)
+- **Total Tracked Test Files**: 136 tracked in catalog (134 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 134
+- **Total Test Functions / Methods**: 1,452 (collected by Pytest across 135 executable modules)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 41 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131` + 2 CI Orchestration in TEST-11: `CAT-132`..`CAT-133` + 3 Nightly & Release Verification in TEST-12: `CAT-134`..`CAT-136`)
+  - `CREATED`: 42 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131` + 2 CI Orchestration in TEST-11: `CAT-132`..`CAT-133` + 3 Nightly & Release Verification in TEST-12: `CAT-134`..`CAT-136` + 1 Bruno Reconciliation in TEST-14: `CAT-137`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
@@ -20,7 +20,7 @@
   - `VERIF-*`: 1 file (`VERIF-001`, 14 tests)
   - `CI-*`: 2 files (`CI-001` through `CI-002`, 12 tests)
   - `DEP-*`: 3 files (`DEP-001` through `DEP-003`, 35 tests)
-  - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
+  - `CONTRACT-*`: 8 files (`CONTRACT-001` through `CONTRACT-008`, 173 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
   - `PERF-*`: 6 files (`PERF-001` through `PERF-006`, 24 tests)
   - `E2E-*`: 3 files (`E2E-001` through `E2E-003`, 39 tests)
@@ -170,6 +170,7 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `PROV-001` | `CAT-134` | [`tests/integration/test_real_provider_smoke.py`](file:///e:/JakeAI/backend/tests/integration/test_real_provider_smoke.py) | 9 functions (10 items: `test_mocked_provider_completion_returns_valid_response`, `test_live_gemini_provider_smoke` ...) | Core / Platform | Integration | Real Provider Smoke & Triad Verification Suite enforcing strict MOCKED / LOCAL / LIVE separation and BLOCKED outcome when credentials are absent. | HTTP / ASGI, Mocks / Monkeypatch | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated | `UNIQUE` | R-FUNC-04 | Bruno/05 — BYOK & Providers (01-07) | **`CREATED`** | New TEST-12 real provider smoke suite verifying Gemini, OpenAI, Anthropic, DeepSeek, Groq, OpenRouter with BLOCKED credential gating. |
 | `FINN-001` | `CAT-135` | [`tests/integration/test_real_finnapigo_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_real_finnapigo_integration.py) | 5 functions (`test_local_jwt_verification_fallback_contract`, `test_live_finnapigo_healthz_check` ...) | Security & Governance | Integration | Real upstream FinnApiGo Identity Authority integration suite verifying JWKS discovery, mutual auth perimeter headers, and BLOCKED state when offline. | HTTP / ASGI, Mocks / Monkeypatch | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated | `UNIQUE` | R-ARCH-04 / R-LOGIC-02 | Bruno/00 — Setup & Environment (03-Auth Dependency) | **`CREATED`** | New TEST-12 real FinnApiGo integration suite verifying JWKS discovery and perimeter mutual auth. |
 | `VERIF-001` | `CAT-136` | [`tests/unit/test_nightly_release_verification.py`](file:///e:/JakeAI/backend/tests/unit/test_nightly_release_verification.py) | 5 functions (14 items: `test_release_verification_all_10_criteria_pass` ...) | Core / Platform | Unit | Unit tests verifying the 10-point release verification gate evaluator, provider triad classification, BLOCKED state assertion, artifact completeness, and bounded failure forensics. | None (Pure In-Memory) | unit-tests | PR / Push (main) | `UNIQUE` | R-ARCH-00 / R-LOGIC-00 | NONE | **`CREATED`** | New TEST-12 verification engine tests auditing 10 release criteria and artifact archiving completeness. |
+| `CONTRACT-008` | `CAT-137` | [`tests/contract/test_bruno_reconciliation.py`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py) | 9 functions (`test_public_bruno_collection_covers_all_client_endpoints` ...) | Contract & Schema | Contract | Authoritative Bruno collection reconciliation suite enforcing 3-tier API separation (PUBLIC_CLIENT_API, INTERNAL_SERVICE_API, PYTEST_ONLY) and zero drift against OpenAPI 3.1.0. | None (Pure In-Memory) | contract-and-security | PR / Push (main) | `UNIQUE` | R-ARCH-04 / R-FUNC-00 | Bruno Collections (All Public & Private) | **`CREATED`** | New TEST-14 contract test suite reconciling Bruno collections with OpenAPI 3.1.0 operations across public and internal tiers. |
 
 ---
 
@@ -3127,6 +3128,37 @@ Both Nightly and Release verification archive all 8 mandatory artifact categorie
 | `PROV-001` | `CAT-134` | [`tests/integration/test_real_provider_smoke.py`](file:///e:/JakeAI/backend/tests/integration/test_real_provider_smoke.py) | Comprehensive provider smoke suite verifying MOCKED, LOCAL, and LIVE provider execution with BLOCKED credential enforcement | Core / Platform | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated |
 | `FINN-001` | `CAT-135` | [`tests/integration/test_real_finnapigo_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_real_finnapigo_integration.py) | Comprehensive integration suite verifying live upstream FinnApiGo identity authority, JWKS discovery, and mutual auth headers | Security & Governance | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated |
 | `VERIF-001` | `CAT-136` | [`tests/unit/test_nightly_release_verification.py`](file:///e:/JakeAI/backend/tests/unit/test_nightly_release_verification.py) | Unit tests verifying the 10-point release verification gate evaluator, provider triad classification, BLOCKED state assertion, artifact completeness, and bounded failure forensics | Core / Platform | unit-tests | PR / Push (main) |
+| `CONTRACT-008` | `CAT-137` | [`tests/contract/test_bruno_reconciliation.py`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py) | Authoritative Bruno collection reconciliation suite enforcing 3-tier API separation (PUBLIC_CLIENT_API, INTERNAL_SERVICE_API, PYTEST_ONLY) and zero drift against OpenAPI 3.1.0 | Contract & Schema | contract-and-security | PR / Push (main) |
+
+---
+
+## 11. Bruno API Reconciliation & 3-Tier Separation Gate (TEST-14 / CONTRACT-008)
+
+### 11.1 Subsystem Overview & Exposure Tiers
+- **Test File**: `backend/tests/contract/test_bruno_reconciliation.py` (`CAT-137`, `CONTRACT-008`)
+- **Subsystem**: `Contract & Schema`
+- **Exposure Architecture**:
+  1. **PUBLIC_CLIENT_API**: 49 operations. Tracked in `Bruno/public/`, verified runnable in CI without private cluster secrets.
+  2. **INTERNAL_SERVICE_API**: 2 operations (`POST /internal/v1/coding/resume`, `POST /internal/v1/coding/tool-result`). Edge perimeter routes protected by `x-internal-secret` and `x-forwarded-by: finnapigo`. Stored in `Bruno/private/` (gitignored) and verified on CI via automated Pytest contract suites (`test_internal_mutual_auth.py`, `test_orchestration_contracts.py`).
+  3. **PYTEST_ONLY**: 0 operations currently designated.
+- **Total Registered OpenAPI Operations**: 51 operations across 47 paths (dynamically derived from FastAPI `app.openapi()`).
+- **Drift Invariants Enforced**:
+  - `0` missing public endpoints from `Bruno/public/`
+  - `0` internal endpoints exposed in `Bruno/public/`
+  - `0` obsolete Bruno requests
+  - `0` HTTP method or template parameter mismatches
+  - `0` hardcoded secrets or internal credentials in public Bruno requests
+
+### 11.2 Discovered Test Functions (9)
+- [`test_public_bruno_collection_covers_all_client_endpoints`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L32): Validates that all 49 public OpenAPI operations are present in `Bruno/public/`.
+- [`test_internal_endpoints_are_verified_by_dedicated_contract_or_private_suite`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L48): Verifies that internal service endpoints are covered either by local private suite or by dedicated Pytest contract tests.
+- [`test_internal_endpoints_not_in_public_bruno`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L75): Verifies internal service endpoints are strictly absent from `Bruno/public/`.
+- [`test_no_obsolete_endpoints_in_public_bruno`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L98): Enforces that `Bruno/public/` contains zero obsolete requests targeting removed routes.
+- [`test_missing_endpoint_fails_contract`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L117): Synthetic test verifying the contract gate fails if a public endpoint is omitted.
+- [`test_obsolete_endpoint_fails_contract`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L133): Synthetic test verifying the contract gate fails if an obsolete request exists.
+- [`test_wrong_method_fails`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L147): Verifies that an incorrect HTTP method causes the gate to fail.
+- [`test_wrong_normalized_path_fails`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L162): Verifies that an unnormalized path template causes the gate to fail.
+- [`test_public_bruno_has_zero_secrets_and_no_internal_secrets`](file:///e:/JakeAI/backend/tests/contract/test_bruno_reconciliation.py#L177): Scans all public `.bru` files to ensure zero hardcoded secrets and zero internal gateway secrets.
 
 
 

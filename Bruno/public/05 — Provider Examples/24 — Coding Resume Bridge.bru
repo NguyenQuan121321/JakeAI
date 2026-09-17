@@ -13,7 +13,7 @@ post {
 headers {
   Content-Type: application/json
   x-forwarded-by: finnapigo
-  x-internal-secret: jakeai-finnapigo-shared-internal-secret-32b
+  x-internal-secret: {{internal_gateway_secret}}
 }
 
 body:json {
