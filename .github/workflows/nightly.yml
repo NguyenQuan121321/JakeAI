@@ -1,0 +1,677 @@
+name: Nightly Verification
+
+on:
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Execution Mode (nightly-full / nightly-smoke)"
+        required: false
+        default: "nightly-full"
+        type: choice
+        options:
+          - nightly-full
+          - nightly-smoke
+      run_live_smoke:
+        description: "Execute real provider smoke and FinnApiGo integration if CI secrets exist"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: nightly-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # 1. DevSecOps, Linters, SAST & License Compliance Gate
+  nightly-security-and-static:
+    name: Nightly DevSecOps, SAST & License Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Hadolint Dockerfile Linter
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: backend/Dockerfile
+          config: .hadolint.yaml
+
+      - name: Actionlint GitHub Workflows Linter
+        uses: reviewdog/action-actionlint@v1
+        with:
+          fail_level: error
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Ruff Linter & Formatter Check
+        run: |
+          ruff check backend/
+          ruff format --check backend/
+
+      - name: Pip-Audit Vulnerability Scan
+        run: |
+          cd backend
+          mkdir -p reports/security
+          pip-audit -r requirements.txt -f json -o reports/security/pip-audit.json || true
+          pip-audit -r requirements.txt
+
+      - name: Bandit Static Application Security Testing (SAST)
+        run: |
+          cd backend
+          mkdir -p reports/security
+          bandit -c pyproject.toml -r app/ -f json -o reports/security/bandit-report.json || true
+          bandit -c pyproject.toml -r app/
+
+      - name: Pip-Licenses License Compliance Gate (Reject Copyleft)
+        run: |
+          cd backend
+          pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
+
+      - name: Generate CycloneDX SBOM (Backend)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./backend
+          format: "cyclonedx-json"
+          output-file: "sbom-backend.cyclonedx.json"
+
+      - name: Archive Security & SBOM Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-security-and-sbom
+          path: |
+            backend/reports/security/
+            sbom-backend.cyclonedx.json
+          retention-days: 30
+
+  # 2. Full Pytest Regression & Contract Gate
+  nightly-pytest-regression:
+    name: Nightly Full Pytest Regression & Contract Gate
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Full Unit Regression with Flaky Test Tracker
+        run: |
+          cd backend
+          mkdir -p reports/junit reports/flaky-unit
+          python scripts/ci_flaky_tracker.py --output-dir reports/flaky-unit -- tests/unit/ -v --junitxml=reports/junit/unit-results.xml
+
+      - name: API Contract & Schema Drift Verification
+        run: |
+          cd backend
+          pytest tests/contract/ -v --junitxml=reports/junit/contract-results.xml
+          python -m app.main --export-openapi openapi.json
+          git diff --exit-code openapi.json
+          python scripts/check_openapi_breaking_changes.py
+
+      - name: Archive Unit & Contract Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-unit-and-contract-reports
+          path: |
+            backend/reports/junit/unit-results.xml
+            backend/reports/junit/contract-results.xml
+            backend/reports/flaky-unit/
+            backend/openapi.json
+          retention-days: 30
+
+  # 3. Full Integration & Security Regression Suite
+  nightly-integration-regression:
+    name: Nightly Subsystem Integration & Security Regression
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Full Integration Suite
+        run: |
+          cd backend
+          mkdir -p reports/junit
+          pytest -m integration -v --junitxml=reports/junit/integration-results.xml
+
+      - name: Dedicated Runtime Security Regression Suite (SEC-001..SEC-010)
+        run: |
+          cd backend
+          pytest tests/security/ -v --junitxml=reports/junit/security-results.xml
+
+      - name: Archive Integration & Security Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-integration-and-security-reports
+          path: |
+            backend/reports/junit/integration-results.xml
+            backend/reports/junit/security-results.xml
+          retention-days: 30
+
+  # 4. Full AI Evaluation & Benchmark Suite
+  nightly-ai-evaluation:
+    name: Nightly AI Evaluation & Portfolio Benchmark
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: AI Behavior, Agent, RAG & Hallucination Gates
+        run: |
+          cd backend
+          mkdir -p reports/junit
+          pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py -v --junitxml=reports/junit/ai-results.xml
+
+      - name: RAG Quality Gate & Canary Safety
+        run: |
+          cd backend
+          pytest tests/evals/test_rag_regression.py tests/evals/test_canary_leakage.py tests/evals/test_rag_metrics.py tests/evals/test_llm_judge_and_generation.py tests/evals/test_baseline_and_regression_gate.py -v
+
+      - name: Phase 00 AI Evaluation Benchmark
+        run: |
+          cd backend
+          python scripts/run_ai_evaluation.py --output-dir benchmark-results
+          pytest tests/evals/test_portfolio_benchmark.py -v -s
+
+      - name: Archive AI Evaluation Benchmark Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-ai-evaluation-reports
+          path: |
+            backend/benchmark-results/
+            backend/reports/junit/ai-results.xml
+          retention-days: 30
+
+  # 5. Full End-to-End Workflow & Bruno Collection
+  nightly-e2e-and-bruno:
+    name: Nightly E2E Workflows & Bruno Collection
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Full End-to-End Business Workflows (TEST-07)
+        run: |
+          cd backend
+          mkdir -p reports/junit
+          pytest tests/e2e/ -v -m "not live_external" --junitxml=reports/junit/e2e-results.xml
+
+      - name: Full Bruno API & E2E Collection (TEST-08)
+        run: |
+          python scripts/run_bruno_tests.py --suite full --auto-start
+
+      - name: Archive E2E & Bruno Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-e2e-and-bruno-reports
+          path: |
+            backend/reports/bruno/
+            backend/reports/junit/e2e-results.xml
+          retention-days: 30
+
+  # 6. Full Performance Benchmark & Statistical Concurrency Audit
+  nightly-performance-regression:
+    name: Nightly Performance Regression & Load Audit (TEST-09)
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Full Statistical Performance Benchmark
+        run: |
+          cd backend
+          python scripts/run_performance_benchmark.py --mode full --fail-on-regression
+
+      - name: Concurrency Stability & Load Suite (PERF-004)
+        run: |
+          cd backend
+          pytest tests/performance/test_load_and_concurrency.py -v
+
+      - name: Performance Regression Gate Assertions (PERF-003, PERF-005, PERF-006)
+        run: |
+          cd backend
+          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py tests/performance/test_performance_exceptions.py -v
+
+      - name: Archive Performance Benchmark Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-performance-reports
+          path: backend/benchmark-results/
+          retention-days: 30
+
+  # 7. Dependency Governance & Regression Checks
+  nightly-dependency-checks:
+    name: Nightly Architectural Dependency Checks (TEST-10)
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Audit All 11 Architectural Categories
+        run: |
+          cd backend
+          python scripts/run_dependency_regression.py --mode audit
+
+      - name: Dependency Validation Suite Gate
+        run: |
+          cd backend
+          python scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
+
+      - name: Dependency Regression Unit Tests (DEP-001..DEP-003)
+        run: |
+          cd backend
+          pytest tests/unit/test_dependency_categories.py tests/unit/test_dependency_breakage_classifier.py tests/unit/test_dependency_regression_runner.py -v
+
+      - name: Archive Dependency Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-dependency-reports
+          path: backend/reports/dependencies/
+          retention-days: 30
+
+  # 8. Real Provider Smoke & Real FinnApiGo Integration Gate
+  nightly-real-provider-and-finnapigo-smoke:
+    name: Nightly Live Provider Smoke & FinnApiGo Integration
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      OPENAI_API_KEY: ${{ secrets.BENCHMARK_OPENAI_API_KEY || secrets.OPENAI_API_KEY || '' }}
+      GEMINI_API_KEY: ${{ secrets.BENCHMARK_GEMINI_API_KEY || secrets.GEMINI_API_KEY || '' }}
+      FINNAPIGO_LIVE_URL: ${{ secrets.FINNAPIGO_LIVE_URL || '' }}
+      FINNAPIGO_LIVE_TESTS: ${{ secrets.FINNAPIGO_LIVE_URL && '1' || '' }}
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Real Provider Smoke & Triad Verification (PROV-001)
+        run: |
+          cd backend
+          mkdir -p reports/junit
+          pytest tests/integration/test_real_provider_smoke.py -v --junitxml=reports/junit/live-provider-results.xml
+
+      - name: Real Upstream FinnApiGo Integration (FINN-001)
+        run: |
+          cd backend
+          mkdir -p reports/junit
+          pytest tests/integration/test_real_finnapigo_integration.py -v --junitxml=reports/junit/live-finnapigo-results.xml
+
+      - name: Archive Real Provider and FinnApiGo Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-live-smoke-reports
+          path: |
+            backend/reports/junit/live-provider-results.xml
+            backend/reports/junit/live-finnapigo-results.xml
+          retention-days: 30
+
+  # 9. Container Checks (Dockerfile Build & Trivy Scan)
+  nightly-container-checks:
+    name: Nightly Container Packaging & Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Test Dockerfile Build Integrity
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          load: true
+          tags: jakeai-backend:nightly
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy Container Image Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: jakeai-backend:nightly
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+  # 10. Consolidated Reporting & Comprehensive Artifact Archiving
+  nightly-reporting-and-artifacts:
+    name: Nightly Forensic Reporting & Master Artifact Archive
+    runs-on: ubuntu-latest
+    needs:
+      - nightly-security-and-static
+      - nightly-pytest-regression
+      - nightly-integration-regression
+      - nightly-ai-evaluation
+      - nightly-e2e-and-bruno
+      - nightly-performance-regression
+      - nightly-dependency-checks
+      - nightly-real-provider-and-finnapigo-smoke
+      - nightly-container-checks
+    if: always()
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/pyproject.toml
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Download All Step Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: backend/reports/collected-artifacts
+
+      - name: Enforce Strict Code Coverage Floor (>= 85% Branch Coverage)
+        run: |
+          cd backend
+          pytest --cov=app --cov-branch tests/ -v --cov-report=xml:coverage.xml --cov-report=term-missing --cov-fail-under=85
+
+      - name: Strict Coverage Gate & Patch Analysis (>= 85% Line, >= 80% Patch)
+        run: |
+          cd backend
+          python scripts/check_coverage_diff.py --min-line 85 --min-patch 80
+
+      - name: Generate Consolidated CI Failure & Forensic Summary (TEST-12)
+        run: |
+          python scripts/ci_failure_reporter.py \
+            --report-dirs backend/reports backend/benchmark-results backend/reports/collected-artifacts \
+            --output-dir backend/reports/summary \
+            --fail-on-flaky
+
+      - name: Export Verified Static OpenAPI Specification
+        run: |
+          cd backend
+          python -m app.main --export-openapi openapi.json
+
+      - name: Master Archive All 8 Required Verification Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-master-verification-artifacts
+          path: |
+            backend/reports/junit/
+            backend/coverage.xml
+            backend/benchmark-results/
+            backend/reports/security/
+            backend/openapi.json
+            sbom-backend.cyclonedx.json
+            backend/reports/bruno/
+            backend/reports/summary/
+          retention-days: 90

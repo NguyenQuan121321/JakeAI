@@ -69,6 +69,10 @@ markers = [
     "live_external: Workflows requiring live external third-party API credentials",
     "evals: Backward-compatible alias for AI evaluation tests",
     "flaky_retry: Tests permitted a single controlled retry attempt under strict tracking",
+    "mocked: Tests utilizing simulated or mocked providers and synthetic responses",
+    "local_provider: Tests executing against local models or in-process local adapters",
+    "live_provider: Tests executing against real external upstream providers requiring credentials",
+    "live_finnapigo: Tests executing against real upstream FinnApiGo identity authority",
 ]
 
 [tool.coverage.run]

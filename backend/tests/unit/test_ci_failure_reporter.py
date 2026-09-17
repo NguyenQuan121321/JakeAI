@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 from scripts.ci_failure_reporter import (
     classify_layer_from_path,
     collect_all_ci_failures,
@@ -168,3 +170,33 @@ def test_collect_all_ci_failures_and_markdown(tmp_path: Path) -> None:
     assert "CI FAILURES DETECTED" in md2
     assert "Security" in md2
     assert "test_byok_decrypt" in md2
+
+
+def test_main_exit_code_blocked_with_fail_on_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_failure_reporter import main
+
+    xml_content = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="live" tests="1" skipped="1">
+    <testcase classname="tests.integration.test_real_provider_smoke" name="test_live_openai_smoke" file="tests/integration/test_real_provider_smoke.py">
+      <skipped message="BLOCKED: Missing OPENAI_API_KEY"/>
+    </testcase>
+  </testsuite>
+</testsuites>
+"""
+    (tmp_path / "report.xml").write_text(xml_content, encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    test_args = [
+        "ci_failure_reporter.py",
+        "--report-dirs",
+        str(tmp_path),
+        "--output-dir",
+        str(out_dir),
+        "--fail-on-blocked",
+    ]
+    monkeypatch.setattr("sys.argv", test_args)
+    code = main()
+    assert code == 3

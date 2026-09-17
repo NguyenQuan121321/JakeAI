@@ -833,9 +833,10 @@ async def test_e2e_workflow_07b_human_in_the_loop_approval_rejection(
 @pytest.mark.asyncio
 @pytest.mark.e2e
 @pytest.mark.live_external
+@pytest.mark.live_provider(provider="gemini")
 @pytest.mark.skipif(
     not os.getenv("LIVE_EXTERNAL_TESTS"),
-    reason="Workflow requires live external third-party provider API credentials (LIVE_EXTERNAL_TESTS=1)",
+    reason="BLOCKED: Workflow requires live external third-party provider API credentials (LIVE_EXTERNAL_TESTS=1)",
 )
 async def test_e2e_workflow_live_external_provider_call(
     async_client: AsyncClient,

@@ -58,21 +58,21 @@ class FailureSummaryReport:
 
 
 def classify_layer_from_path(file_path: str) -> str:
-    """Classify testing layer based on path."""
+    """Classify testing layer based on path or dotted test module."""
     norm = file_path.replace("\\", "/").lower()
-    if "tests/unit/" in norm:
+    if "tests/unit/" in norm or "tests.unit." in norm:
         return "Unit"
-    if "tests/integration/" in norm:
+    if "tests/integration/" in norm or "tests.integration." in norm:
         return "Integration"
-    if "tests/contract/" in norm:
+    if "tests/contract/" in norm or "tests.contract." in norm:
         return "Contract"
-    if "tests/security/" in norm:
+    if "tests/security/" in norm or "tests.security." in norm:
         return "Security"
-    if "tests/evals/" in norm or "benchmark" in norm:
+    if "tests/evals/" in norm or "tests.evals." in norm or "benchmark" in norm:
         return "AI / Evaluation"
-    if "tests/e2e/" in norm:
+    if "tests/e2e/" in norm or "tests.e2e." in norm:
         return "E2E Workflow"
-    if "tests/performance/" in norm:
+    if "tests/performance/" in norm or "tests.performance." in norm:
         return "Performance"
     if "bruno" in norm:
         return "Bruno CLI"
@@ -289,7 +289,7 @@ def generate_markdown_report(report: FailureSummaryReport) -> str:
         else "🔴 **CI FAILURES DETECTED**"
     )
     lines = [
-        "## 🛡️ JakeAI CI Test Failure & Forensic Analysis Summary (TEST-11)",
+        "## 🛡️ JakeAI CI Test Failure & Forensic Analysis Summary (TEST-12)",
         "",
         f"- **Overall CI Status**: {status_badge}",
         f"- **Total Issues Classified**: `{len(report.failures)}`",
@@ -334,7 +334,7 @@ def generate_markdown_report(report: FailureSummaryReport) -> str:
 def print_console_matrix(report: FailureSummaryReport) -> None:
     """Print high-contrast console matrix."""
     print("\n" + "=" * 90)
-    print("         JAKEAI CI TEST FORENSIC FAILURE SUMMARY (TEST-11)")
+    print("         JAKEAI CI TEST FORENSIC FAILURE SUMMARY (TEST-12)")
     print("=" * 90)
     print(
         f" Status         : {'✓ GREEN (All Passed)' if report.is_green else '✗ RED (Issues Detected)'}"
@@ -385,6 +385,12 @@ def main() -> int:
         default=False,
         help="Fail with exit code 2 if any flaky test is observed",
     )
+    parser.add_argument(
+        "--fail-on-blocked",
+        action="store_true",
+        default=False,
+        help="Fail with exit code 3 if any test is blocked (for strict release pipelines)",
+    )
 
     args = parser.parse_args()
 
@@ -423,6 +429,8 @@ def main() -> int:
         return 1
     if args.fail_on_flaky and report.total_flaky > 0:
         return 2
+    if args.fail_on_blocked and report.total_blocked > 0:
+        return 3
     return 0
 
 

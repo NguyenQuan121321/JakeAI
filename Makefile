@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live dep-audit dep-diff dep-validate ci-pr ci-main ci-report flaky-check
+.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live dep-audit dep-diff dep-validate ci-pr ci-main ci-nightly ci-release ci-report flaky-check
 
 PYTHON ?= python
 UV ?= uv
@@ -129,6 +129,47 @@ ci-main:
 
 ci-report:
 	$(PYTHON) scripts/ci_failure_reporter.py --report-dirs backend/reports backend/benchmark-results --output-dir backend/reports/summary
+
+ci-nightly:
+	cd backend && $(RUFF) check .
+	cd backend && $(RUFF) format --check .
+	cd backend && $(MYPY) app
+	cd backend && $(PIP_AUDIT) -r requirements.txt
+	cd backend && $(BANDIT) -c pyproject.toml -r app/
+	cd backend && pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
+	cd backend && $(PYTEST) -m unit -v
+	cd backend && $(PYTEST) -m contract -v
+	cd backend && $(PYTEST) -m security -v
+	cd backend && $(PYTEST) -m integration -v
+	cd backend && $(PYTEST) -m ai -v
+	cd backend && $(PYTEST) -m "e2e and not live_external" -v
+	$(PYTHON) scripts/run_bruno_tests.py --suite full --auto-start
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode full --fail-on-regression
+	cd backend && $(PYTEST) tests/performance/test_load_and_concurrency.py -v
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode audit
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
+	cd backend && $(PYTEST) tests/integration/test_real_provider_smoke.py tests/integration/test_real_finnapigo_integration.py -v
+	cd backend && $(PYTEST) --cov=app --cov-branch tests/ -v --cov-report=xml:coverage.xml --cov-fail-under=85
+	cd backend && $(PYTHON) scripts/check_coverage_diff.py --min-line 85 --min-patch 80
+
+ci-release:
+	cd backend && $(PYTEST) -m unit -v
+	cd backend && $(PYTEST) -m "integration and not slow" -v
+	cd backend && $(PYTEST) -m security -v
+	cd backend && $(PIP_AUDIT) -r requirements.txt
+	cd backend && $(BANDIT) -c pyproject.toml -r app/
+	cd backend && pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
+	cd backend && $(PYTEST) -m contract -v
+	cd backend && $(PYTHON) -m app.main --export-openapi openapi.json
+	cd backend && git diff --exit-code openapi.json
+	cd backend && $(PYTHON) scripts/check_openapi_breaking_changes.py
+	cd backend && $(PYTEST) tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py tests/evals/test_canary_leakage.py tests/evals/test_rag_regression.py -v
+	cd backend && $(PYTEST) tests/e2e/test_e2e_business_workflows.py -v -m "critical_e2e and not live_external"
+	$(PYTHON) scripts/run_bruno_tests.py --suite smoke --auto-start
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode audit
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
+
 
 flaky-check:
 	cd backend && $(PYTHON) scripts/ci_flaky_tracker.py --check-ledger reports/flaky/flaky-tests.json
