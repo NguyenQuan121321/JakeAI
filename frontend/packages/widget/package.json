@@ -1,0 +1,36 @@
+{
+  "name": "@jakeai/widget",
+  "version": "0.1.0",
+  "description": "Enterprise embedded AI companion widget with Shadow DOM and animated Corgi mascot",
+  "type": "module",
+  "main": "./dist/jake-ai-widget.umd.js",
+  "module": "./dist/jake-ai-widget.es.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.11",
+    "happy-dom": "^20.13.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "ai",
+    "widget",
+    "embedded",
+    "web-component",
+    "shadow-dom",
+    "mascot"
+  ],
+  "author": "JakeAI Architecture Team",
+  "license": "MIT"
+}
