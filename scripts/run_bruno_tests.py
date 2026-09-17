@@ -251,6 +251,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
     try:
         from tests.fixtures.auth import create_test_jwt
 
+        now = int(time.time())
         return {
             "token_a": create_test_jwt(
                 sub="16",
@@ -259,6 +260,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 permissions=["*"],
                 expires_in=3600,
                 secret_key=secret,
+                jti=f"test-token-16-{now}",
             ),
             "token_b": create_test_jwt(
                 sub="user-beta",
@@ -267,6 +269,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 permissions=["read"],
                 expires_in=3600,
                 secret_key=secret,
+                jti=f"test-token-user-beta-{now}",
             ),
             "token_expired": create_test_jwt(
                 sub="16",
@@ -275,6 +278,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 permissions=["*"],
                 expires_in=-3600,
                 secret_key=secret,
+                jti=f"test-token-16-{now}",
             ),
         }
     except Exception:
@@ -283,7 +287,9 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
         def _b64url(b: bytes) -> str:
             return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
 
-        def _make_jwt(sub: str, tenant_id: str, exp_offset: int, role: str = "admin") -> str:
+        def _make_jwt(
+            sub: str, tenant_id: str, exp_offset: int, role: str = "admin"
+        ) -> str:
             kid = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:8]
             header = {"alg": "HS256", "typ": "JWT", "kid": kid}
             payload = {
@@ -302,12 +308,18 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
             }
             h_str = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
             p_str = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-            sig = hmac.new(secret.encode("utf-8"), f"{h_str}.{p_str}".encode("utf-8"), hashlib.sha256).digest()
+            sig = hmac.new(
+                secret.encode("utf-8"),
+                f"{h_str}.{p_str}".encode("utf-8"),
+                hashlib.sha256,
+            ).digest()
             return f"{h_str}.{p_str}.{_b64url(sig)}"
 
         return {
             "token_a": _make_jwt("16", "default", exp_offset=3600, role="admin"),
-            "token_b": _make_jwt("user-beta", "tenant_beta", exp_offset=3600, role="user"),
+            "token_b": _make_jwt(
+                "user-beta", "tenant_beta", exp_offset=3600, role="user"
+            ),
             "token_expired": _make_jwt("16", "default", exp_offset=-3600, role="admin"),
         }
 

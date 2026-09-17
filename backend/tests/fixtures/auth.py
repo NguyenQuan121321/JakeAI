@@ -42,8 +42,9 @@ def create_test_jwt(
         "permissions": effective_perms,
         "perms": effective_perms,
         "type": token_type,
-        "jti": f"test-token-{sub}-{now}",
     }
+    if "jti" in extra_claims:
+        payload["jti"] = extra_claims.pop("jti")
     payload.update(extra_claims)
 
     jwt_headers = dict(headers or {})
