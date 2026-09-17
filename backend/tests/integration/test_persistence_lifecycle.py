@@ -39,6 +39,7 @@ from app.agent.memory.short_term import ShortTermMemory
 from app.agent.runtime.manager import AgentRuntimeManager
 from app.agent.state.checkpoint import CheckpointManager, CheckpointRecord
 from app.agent.state.models import RunState, RunStatus, TaskStatus
+from app.core.config import get_settings
 from app.finops.budget import FinOpsBudgetManager
 from app.optimizer.semantic_cache import SemanticCacheManager
 from app.rag.bm25 import BM25Retriever
@@ -48,7 +49,7 @@ from app.rag.models import DocumentChunk
 
 @pytest.fixture
 def fake_embedding_provider() -> TestOnlyFakeEmbeddingProvider:
-    return TestOnlyFakeEmbeddingProvider(dimension=64)
+    return TestOnlyFakeEmbeddingProvider(dimension=get_settings().EMBEDDING_DIMENSION)
 
 
 class TestStatePersistenceLifecycle:
@@ -331,6 +332,7 @@ class TestStatePersistenceLifecycle:
             similarity_threshold=0.85,
             default_ttl=120,
             embedding_provider=fake_embedding_provider,
+            collection_name=f"test_cache_lifecycle_{uuid.uuid4().hex[:8]}",
         )
         tenant_id = f"tenant-cache-lc-{uuid.uuid4().hex[:8]}"
         prompt = "What is EBITDA?"

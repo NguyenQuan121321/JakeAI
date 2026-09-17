@@ -191,9 +191,14 @@ def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[
     ]
     backend_dir = repo_root / "backend"
     print(f"[*] Starting JakeAI backend server on 127.0.0.1:{port}...")
+    secret = resolve_authoritative_jwt_secret(repo_root)
+    env = os.environ.copy()
+    env["JWT_SECRET_KEY"] = secret
+
     proc = subprocess.Popen(
         cmd,
         cwd=str(backend_dir),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -216,44 +221,95 @@ def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[
     )
 
 
-def generate_runtime_dev_jwts() -> dict[str, str]:
-    """Dynamically generate deterministic test JWTs at runtime so no secrets are committed."""
-    secret = (
-        os.environ.get("FINNAPIGO_JWT_SECRET")
-        or os.environ.get("JWT_SECRET_KEY")
-        or "insecure-development-secret-change-in-production"
-    )
-    now = int(time.time())
+def resolve_authoritative_jwt_secret(repo_root: Path | None = None) -> str:
+    """Resolve authoritative JWT_SECRET_KEY across CI environment, .env, or defaults."""
+    if os.environ.get("JWT_SECRET_KEY"):
+        return os.environ["JWT_SECRET_KEY"]
+    if os.environ.get("FINNAPIGO_JWT_SECRET"):
+        return os.environ["FINNAPIGO_JWT_SECRET"]
+    root = repo_root or find_workspace_root()
+    backend_dir = root / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    try:
+        from app.core.config import get_settings
 
-    def _b64url(b: bytes) -> str:
-        return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+        return get_settings().JWT_SECRET_KEY
+    except Exception:
+        return "insecure-development-secret-change-in-production"
 
-    def _make_jwt(sub: str, tenant_id: str, exp_offset: int, role: str = "admin") -> str:
-        header = {"alg": "HS256", "typ": "JWT", "kid": "012139cc"}
-        payload = {
-            "sub": sub,
-            "uid": sub,
-            "tenant_id": tenant_id,
-            "tid": tenant_id,
-            "role": role,
-            "roles": [role],
-            "permissions": ["*"] if role == "admin" else ["read"],
-            "perms": ["*"] if role == "admin" else ["read"],
-            "type": "access",
-            "iat": now,
-            "exp": now + exp_offset,
-            "jti": f"dev-token-{sub}",
+
+def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
+    """Dynamically generate deterministic test JWTs at runtime using authoritative test generator."""
+    root = repo_root or find_workspace_root()
+    backend_dir = root / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+
+    secret = resolve_authoritative_jwt_secret(root)
+
+    try:
+        from tests.fixtures.auth import create_test_jwt
+
+        return {
+            "token_a": create_test_jwt(
+                sub="16",
+                tenant_id="default",
+                roles=["admin"],
+                permissions=["*"],
+                expires_in=3600,
+                secret_key=secret,
+            ),
+            "token_b": create_test_jwt(
+                sub="user-beta",
+                tenant_id="tenant_beta",
+                roles=["user"],
+                permissions=["read"],
+                expires_in=3600,
+                secret_key=secret,
+            ),
+            "token_expired": create_test_jwt(
+                sub="16",
+                tenant_id="default",
+                roles=["admin"],
+                permissions=["*"],
+                expires_in=-3600,
+                secret_key=secret,
+            ),
         }
-        h_str = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-        p_str = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-        sig = hmac.new(secret.encode("utf-8"), f"{h_str}.{p_str}".encode("utf-8"), hashlib.sha256).digest()
-        return f"{h_str}.{p_str}.{_b64url(sig)}"
+    except Exception:
+        now = int(time.time())
 
-    return {
-        "token_a": _make_jwt("16", "default", exp_offset=86400 * 30, role="admin"),
-        "token_b": _make_jwt("user-beta", "tenant_beta", exp_offset=86400 * 30, role="user"),
-        "token_expired": _make_jwt("16", "default", exp_offset=-3600, role="admin"),
-    }
+        def _b64url(b: bytes) -> str:
+            return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+
+        def _make_jwt(sub: str, tenant_id: str, exp_offset: int, role: str = "admin") -> str:
+            kid = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:8]
+            header = {"alg": "HS256", "typ": "JWT", "kid": kid}
+            payload = {
+                "sub": sub,
+                "uid": sub,
+                "tenant_id": tenant_id,
+                "tid": tenant_id,
+                "role": role,
+                "roles": [role],
+                "permissions": ["*"] if role == "admin" else ["read"],
+                "perms": ["*"] if role == "admin" else ["read"],
+                "type": "access",
+                "iat": now,
+                "exp": now + exp_offset,
+                "jti": f"dev-token-{sub}-{now}",
+            }
+            h_str = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+            p_str = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+            sig = hmac.new(secret.encode("utf-8"), f"{h_str}.{p_str}".encode("utf-8"), hashlib.sha256).digest()
+            return f"{h_str}.{p_str}.{_b64url(sig)}"
+
+        return {
+            "token_a": _make_jwt("16", "default", exp_offset=3600, role="admin"),
+            "token_b": _make_jwt("user-beta", "tenant_beta", exp_offset=3600, role="user"),
+            "token_expired": _make_jwt("16", "default", exp_offset=-3600, role="admin"),
+        }
 
 
 def run_bruno_cli_target(

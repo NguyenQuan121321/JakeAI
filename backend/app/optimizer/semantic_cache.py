@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.core.redis_client import acquire_redis_client
+from app.rag.embedding import DimensionMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +411,8 @@ class SemanticCacheManager:
                     "Embedding provider embed_text error: %s; using fallback vector.",
                     exc,
                 )
-        return _generate_synthetic_embedding(text, dim=128)
+        dim = getattr(get_settings(), "EMBEDDING_DIMENSION", 384)
+        return _generate_synthetic_embedding(text, dim=dim)
 
     async def _get_qdrant(self) -> Any | None:
         """Lazily initialize Qdrant client connection if available with auto-collection provisioning."""
@@ -429,8 +431,6 @@ class SemanticCacheManager:
             from qdrant_client import AsyncQdrantClient
             from qdrant_client.http import models
 
-            from app.core.config import get_settings
-
             settings = get_settings()
             dim = (
                 self.embedding_provider.dimension
@@ -442,7 +442,17 @@ class SemanticCacheManager:
                 timeout=1,
                 check_compatibility=False,
             )
-            if not await client.collection_exists(self.collection_name):
+            if await client.collection_exists(self.collection_name):
+                col_info = await client.get_collection(self.collection_name)
+                existing_dim = getattr(
+                    getattr(col_info.config.params, "vectors", None), "size", None
+                )
+                if existing_dim is not None and existing_dim != dim:
+                    raise DimensionMismatchError(
+                        f"Qdrant collection '{self.collection_name}' has dimension {existing_dim}, "
+                        f"which does not match embedding provider dimension {dim}"
+                    )
+            else:
                 await client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=models.VectorParams(
@@ -456,6 +466,8 @@ class SemanticCacheManager:
             _qdrant_global_available = True
             _qdrant_global_retry_after = 0.0
             return self.qdrant_client
+        except DimensionMismatchError:
+            raise
         except Exception as exc:
             logger.debug(
                 "Qdrant unavailable for semantic cache (%s); using in-memory store",
@@ -664,8 +676,6 @@ class SemanticCacheManager:
                     self.metrics.cost_avoided_usd += entry.cost_avoided_usd
                     return entry
             except Exception:
-                from app.core.config import get_settings
-
                 settings = get_settings()
                 self._redis_available = False
                 self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
@@ -691,6 +701,15 @@ class SemanticCacheManager:
 
         # 2. Tier 2: Semantic Vector Cosine Similarity Search
         query_vec = self._embed_text(prompt)
+        dim = (
+            self.embedding_provider.dimension
+            if self.embedding_provider is not None
+            else getattr(get_settings(), "EMBEDDING_DIMENSION", 384)
+        )
+        if len(query_vec) != dim:
+            raise DimensionMismatchError(
+                f"Query vector dimension {len(query_vec)} does not match semantic cache dimension {dim}"
+            )
 
         # 2a. Query Qdrant if available
         qdrant = await self._get_qdrant()
@@ -764,6 +783,8 @@ class SemanticCacheManager:
                         self.metrics.tokens_avoided += candidate.tokens_avoided
                         self.metrics.cost_avoided_usd += candidate.cost_avoided_usd
                         return candidate
+            except DimensionMismatchError:
+                raise
             except Exception as exc:
                 logger.debug(
                     "Qdrant semantic search error: %s; falling back to in-memory store",
@@ -908,6 +929,15 @@ class SemanticCacheManager:
             version=version,
         )
         vector = self._embed_text(prompt)
+        dim = (
+            self.embedding_provider.dimension
+            if self.embedding_provider is not None
+            else getattr(get_settings(), "EMBEDDING_DIMENSION", 384)
+        )
+        if len(vector) != dim:
+            raise DimensionMismatchError(
+                f"Cache entry vector dimension {len(vector)} does not match semantic cache dimension {dim}"
+            )
 
         entry = SemanticCacheEntry(
             prompt=prompt,
@@ -946,8 +976,6 @@ class SemanticCacheManager:
                     ex=ttl,
                 )
             except Exception:
-                from app.core.config import get_settings
-
                 settings = get_settings()
                 self._redis_available = False
                 self._redis_retry_after = time.time() + settings.REDIS_COOLDOWN_SECONDS
@@ -974,6 +1002,8 @@ class SemanticCacheManager:
                         )
                     ],
                 )
+            except DimensionMismatchError:
+                raise
             except Exception as exc:
                 logger.debug("Failed to upsert semantic entry to Qdrant: %s", exc)
                 if self.qdrant_client is None:

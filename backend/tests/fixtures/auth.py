@@ -1,5 +1,4 @@
-"""Shared authentication fixtures and JWT helpers for test execution."""
-
+import hashlib
 import time
 from typing import Any
 
@@ -16,21 +15,42 @@ def create_test_jwt(
     expires_in: int = 3600,
     secret_key: str | None = None,
     algorithm: str = "HS256",
+    token_type: str = "access",
+    headers: dict[str, Any] | None = None,
+    **extra_claims: Any,
 ) -> str:
-    """Generate a test JWT token for test assertions."""
+    """Generate an authoritative test JWT token matching JakeAI and FinnApiGo contracts."""
     settings = get_settings()
     key = secret_key or settings.JWT_SECRET_KEY
     now = int(time.time())
 
+    effective_roles = roles if roles is not None else ["user"]
+    primary_role = effective_roles[0] if effective_roles else "user"
+    effective_perms = (
+        permissions if permissions is not None else ["chat:read", "chat:write"]
+    )
+
     payload: dict[str, Any] = {
         "sub": sub,
+        "uid": sub,
         "tenant_id": tenant_id,
+        "tid": tenant_id,
         "iat": now,
         "exp": now + expires_in,
-        "roles": roles or ["user"],
-        "permissions": permissions or ["chat:read", "chat:write"],
+        "roles": effective_roles,
+        "role": primary_role,
+        "permissions": effective_perms,
+        "perms": effective_perms,
+        "type": token_type,
+        "jti": f"test-token-{sub}-{now}",
     }
-    return jwt.encode(payload, key, algorithm=algorithm)
+    payload.update(extra_claims)
+
+    jwt_headers = dict(headers or {})
+    if "kid" not in jwt_headers and isinstance(key, str):
+        jwt_headers["kid"] = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+    return jwt.encode(payload, key, algorithm=algorithm, headers=jwt_headers)
 
 
 def generate_agent_jwt(
@@ -41,14 +61,10 @@ def generate_agent_jwt(
     expires_in: int = 3600,
 ) -> str:
     """Generate HS256 JWT context for Agent API tests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin", "developer"],
-        "permissions": permissions or ["agent:write", "agent:read"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    return create_test_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles or ["admin", "developer"],
+        permissions=permissions or ["agent:write", "agent:read"],
+        expires_in=expires_in,
+    )

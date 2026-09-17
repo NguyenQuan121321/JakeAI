@@ -66,7 +66,7 @@ REDIS_AVAILABLE = _check_redis_reachable()
 
 @pytest.fixture
 def fake_embedding_provider() -> TestOnlyFakeEmbeddingProvider:
-    return TestOnlyFakeEmbeddingProvider(dimension=64)
+    return TestOnlyFakeEmbeddingProvider(dimension=get_settings().EMBEDDING_DIMENSION)
 
 
 @pytest.mark.asyncio
@@ -240,6 +240,7 @@ class TestRedisIntegrationAuthorities:
             similarity_threshold=0.90,
             default_ttl=120,
             embedding_provider=fake_embedding_provider,
+            collection_name=f"test_redis_cache_{uuid.uuid4().hex[:8]}",
         )
         tenant_id = f"tenant-cache-{uuid.uuid4().hex[:8]}"
         prompt = "What is the capital of Vietnam?"

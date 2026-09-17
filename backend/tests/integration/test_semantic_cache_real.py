@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.config import get_settings
 from app.optimizer.semantic_cache import (
     CACHE_VERSION,
     SemanticCacheManager,
@@ -39,7 +40,7 @@ class MockQdrantHit:
 
 @pytest.fixture
 def fake_embedding_provider() -> TestOnlyFakeEmbeddingProvider:
-    return TestOnlyFakeEmbeddingProvider(dimension=64)
+    return TestOnlyFakeEmbeddingProvider(dimension=get_settings().EMBEDDING_DIMENSION)
 
 
 @pytest.fixture
@@ -48,6 +49,7 @@ def mock_qdrant_client() -> AsyncMock:
     client.collection_exists.return_value = True
     client.create_collection = AsyncMock()
     client.upsert = AsyncMock()
+    client.query_points = AsyncMock(return_value=SimpleNamespace(points=[]))
     client.search = AsyncMock(return_value=[])
     client.delete = AsyncMock()
     return client

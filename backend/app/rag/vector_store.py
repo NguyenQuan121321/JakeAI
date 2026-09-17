@@ -109,6 +109,13 @@ class QdrantVectorStore:
         texts = [c.content for c in chunks]
         embeddings = self.embedding_provider.embed_batch(texts)
 
+        # Validate embedding dimensions at vector boundary
+        for emb in embeddings:
+            if len(emb) != self.dimension:
+                raise DimensionMismatchError(
+                    f"Generated embedding dimension {len(emb)} does not match vector store dimension {self.dimension}"
+                )
+
         # Attach embedding metadata
         for chunk in chunks:
             chunk.metadata["embedding_model"] = self.embedding_provider.model_name
@@ -164,6 +171,13 @@ class QdrantVectorStore:
     ) -> list[DocumentChunk]:
         """Query dense embeddings with strict tenant boundary filtering."""
         query_emb = self.embedding_provider.embed_text(query)
+
+        # Validate embedding dimensions at vector boundary
+        if len(query_emb) != self.dimension:
+            raise DimensionMismatchError(
+                f"Query embedding dimension {len(query_emb)} does not match vector store dimension {self.dimension}"
+            )
+
         client = await self._get_client()
 
         if client and self._is_qdrant_available:
@@ -178,14 +192,26 @@ class QdrantVectorStore:
                         )
                     ]
                 )
-                search_res = await client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_emb,
-                    query_filter=tenant_filter,
-                    limit=top_k,
-                )
+                # qdrant-client >= 1.10.0 deprecated/removed AsyncQdrantClient.search
+                # query_points is the supported API
+                if hasattr(client, "query_points"):
+                    query_res = await client.query_points(
+                        collection_name=self.collection_name,
+                        query=query_emb,
+                        query_filter=tenant_filter,
+                        limit=top_k,
+                    )
+                    points = getattr(query_res, "points", query_res)
+                else:
+                    points = await client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_emb,
+                        query_filter=tenant_filter,
+                        limit=top_k,
+                    )
+
                 chunks: list[DocumentChunk] = []
-                for hit in search_res:
+                for hit in points:
                     payload = hit.payload or {}
                     # Defense-in-depth tenant boundary check
                     if str(payload.get("tenant_id")) != tenant_id:
@@ -203,6 +229,8 @@ class QdrantVectorStore:
                 # Sort by score descending, tie-break by chunk_id
                 chunks.sort(key=lambda x: (-x.score, x.chunk_id))
                 return chunks
+            except DimensionMismatchError:
+                raise
             except Exception as exc:
                 logger.warning(
                     "Qdrant search failed (%s), falling back to in-memory store", exc
