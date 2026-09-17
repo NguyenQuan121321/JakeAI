@@ -1,13 +1,11 @@
 name: Continuous Deployment
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types: [completed]
     branches:
       - main
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - ".gitignore"
   workflow_dispatch:
 
 permissions:
@@ -19,53 +17,17 @@ concurrency:
 
 jobs:
   release-verification:
-    name: Strict Pre-Release Verification Gate (TEST-12)
+    name: Release Packaging & Verification Gate
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     permissions:
       contents: read
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      qdrant:
-        image: qdrant/qdrant:v1.12.1
-        ports:
-          - 6333:6333
-          - 6334:6334
-
-    env:
-      REDIS_HOST: localhost
-      REDIS_PORT: 6379
-      QDRANT_HOST: localhost
-      QDRANT_PORT: 6333
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || 'ci-release-verification-token-secret-min-32b' }}
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || secrets.JWT_SECRET_KEY || 'ci-release-verification-token-secret-min-32b' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.JWT_SECRET_KEY || 'ci-release-verification-token-secret-min-32b' }}
-
     steps:
-      - name: Checkout Complete Repository History
+      - name: Checkout Verified Commit
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
-
-      - name: Configure Authoritative Ephemeral CI Secret
-        run: |
-          CI_JWT_KEY="${{ secrets.JWT_SECRET_KEY || secrets.FINNAPIGO_JWT_SECRET || '' }}"
-          if [ -z "$CI_JWT_KEY" ]; then
-            CI_JWT_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-          fi
-          echo "::add-mask::${CI_JWT_KEY}"
-          {
-            echo "JWT_SECRET_KEY=${CI_JWT_KEY}"
-            echo "FINNAPIGO_JWT_SECRET=${CI_JWT_KEY}"
-            echo "FINNAPIGO_SECRET_KEY=${CI_JWT_KEY}"
-          } >> "$GITHUB_ENV"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
@@ -81,61 +43,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: 1. Required Unit and Integration Tests Gate
+      - name: Verify API Contract & Zero Schema Drift Gate
         run: |
           cd backend
-          mkdir -p reports/junit
-          pytest -m unit -v --junitxml=reports/junit/unit-results.xml
-          pytest -m "integration and not slow" -v --junitxml=reports/junit/integration-results.xml
-
-      - name: 2. Security Regression, SAST & License Compliance Gate
-        run: |
-          cd backend
-          mkdir -p reports/security
-          pytest tests/security/ -v --junitxml=reports/junit/security-results.xml
-          bandit -c pyproject.toml -r app/ -f json -o reports/security/bandit-report.json || true
-          bandit -c pyproject.toml -r app/
-          pip-audit -r requirements.txt -f json -o reports/security/pip-audit.json || true
-          pip-audit -r requirements.txt
-          pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
-
-      - name: 3. Contract, Internal Mutual Auth & Zero Schema Drift Gate
-        run: |
-          cd backend
-          pytest tests/contract/test_api_contract.py tests/contract/test_internal_mutual_auth.py -v --junitxml=reports/junit/contract-results.xml
           python -m app.main --export-openapi openapi.json
           git diff --exit-code openapi.json
           python scripts/check_openapi_breaking_changes.py
 
-      - name: 4. Critical AI Regression & Canary Safety Gate
-        run: |
-          cd backend
-          pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py tests/evals/test_canary_leakage.py tests/evals/test_rag_regression.py -v --junitxml=reports/junit/ai-results.xml
-
-      - name: 5. Critical E2E Business Workflows & Bruno Smoke Gate
-        run: |
-          cd backend
-          pytest tests/e2e/test_e2e_business_workflows.py -v -m "critical_e2e and not live_external" --junitxml=reports/junit/e2e-results.xml
-          python scripts/run_bruno_tests.py --suite smoke --auto-start
-
-      - name: 6. Performance Smoke Regression Gate (Within Threshold)
-        env:
-          QDRANT_OFFLINE: "1"
-        run: |
-          cd backend
-          python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
-          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py -v
-
-      - name: 7. Dependency Audit & Blocking Breakage Validation Gate
-        run: |
-          cd backend
-          python scripts/run_dependency_regression.py --mode audit
-          python scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: 8. Container Packaging Integrity & Trivy Vulnerability Scan
+      - name: Container Packaging Integrity & Trivy Vulnerability Scan
         uses: docker/build-push-action@v7
         with:
           context: ./backend
@@ -155,25 +73,12 @@ jobs:
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
 
-      - name: Generate Consolidated Release Verification Summary
-        if: always()
-        run: |
-          python scripts/ci_failure_reporter.py \
-            --report-dirs backend/reports backend/benchmark-results \
-            --output-dir backend/reports/summary \
-            --fail-on-flaky
-
-      - name: Archive Pre-Release Verification Reports
+      - name: Archive Pre-Release Packaging Artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: pre-release-verification-reports
+          name: pre-release-packaging-artifacts
           path: |
-            backend/reports/junit/
-            backend/reports/security/
-            backend/reports/bruno/
-            backend/benchmark-results/
-            backend/reports/summary/
             backend/openapi.json
           retention-days: 90
 
@@ -190,6 +95,7 @@ jobs:
       - name: Checkout Complete Repository History
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Bump Version and Generate SemVer Tag
@@ -221,6 +127,8 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v7
@@ -291,6 +199,8 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Install Sigstore Cosign
         uses: sigstore/cosign-installer@v4.1.2
@@ -371,6 +281,7 @@ jobs:
         env:
           DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
           SEMVER_TAG: ${{ needs.semver-release.outputs.new_version }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
             echo "DEPLOY_WEBHOOK_URL secret not configured. Skipping external webhook dispatch."
@@ -378,13 +289,13 @@ jobs:
           fi
 
           NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "Dispatching deployment webhook with SemVer release $SEMVER_TAG..."
+          echo "Dispatching deployment webhook with SemVer release $SEMVER_TAG (commit $VERIFIED_SHA)..."
           STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$DEPLOY_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
               \"repository\": \"${GITHUB_REPOSITORY}\",
               \"tag\": \"${SEMVER_TAG}\",
-              \"commit\": \"${GITHUB_SHA}\",
+              \"commit\": \"${VERIFIED_SHA}\",
               \"timestamp\": \"${NOW}\"
             }")
 
@@ -403,8 +314,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout Source Code
+      - name: Checkout Verified Commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7

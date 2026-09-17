@@ -49,8 +49,11 @@ JakeAI is designed as an end-to-end multi-agent conversational AI service with z
 .
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml            # Automated linting, typing, testing & OpenAPI validation
-│       └── cd.yml            # Multi-stage Docker container build & GHCR publishing
+│       ├── ci.yml            # Unified CI & canonical 'CI / Merge Gate' (12 decoupled jobs, zero PR/main divergence)
+│       ├── cd.yml            # Continuous Deployment triggered via workflow_run (Docker Buildx, Cosign OIDC, GHCR)
+│       ├── nightly.yml       # Scheduled deep verification, provider triad tests & live wire smokes
+│       ├── ai-benchmark-scheduled.yml          # Weekly scheduled live LLM quality & cost evaluation
+│       └── performance-benchmark-scheduled.yml # Scheduled statistical load and concurrency benchmark
 ├── backend/
 │   ├── app/
 │   │   ├── api/              # API router and versioned endpoints (v1)

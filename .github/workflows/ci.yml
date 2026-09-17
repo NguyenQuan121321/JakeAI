@@ -336,14 +336,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Execute Critical Integration Tests (PR Gate)
-        if: github.event_name == 'pull_request'
-        run: |
-          cd backend
-          pytest -m "integration and not slow" -v --junitxml=reports/junit/integration-results.xml
-
-      - name: Execute Full Integration Test Suite (Main Gate)
-        if: github.event_name != 'pull_request'
+      - name: Execute Subsystem Integration Test Suite (Full Parity Gate)
         run: |
           cd backend
           pytest -m integration -v --junitxml=reports/junit/integration-results.xml
@@ -419,8 +412,7 @@ jobs:
           cd backend
           pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py -v --junitxml=reports/junit/ai-results.xml
 
-      - name: Phase 00 AI Evaluation Benchmark Gate (Main Gate Full Verification)
-        if: github.event_name != 'pull_request'
+      - name: Phase 00 AI Evaluation Benchmark Gate (Full Parity Verification)
         run: |
           cd backend
           python scripts/run_ai_evaluation.py --output-dir benchmark-results
@@ -484,25 +476,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Critical End-to-End Business Workflow Gate (PR Gate / TEST-07)
-        if: github.event_name == 'pull_request'
-        run: |
-          cd backend
-          pytest tests/e2e/test_e2e_business_workflows.py -v -m "critical_e2e and not live_external" --junitxml=reports/junit/e2e-results.xml
-
-      - name: Full End-to-End Business Workflows (Main Gate / TEST-07)
-        if: github.event_name != 'pull_request'
+      - name: Full End-to-End Business Workflows (TEST-07)
         run: |
           cd backend
           pytest tests/e2e/ -v -m "not live_external" --junitxml=reports/junit/e2e-results.xml
 
-      - name: Critical Bruno API/E2E Smoke Gate (PR Gate / TEST-08)
-        if: github.event_name == 'pull_request'
-        run: |
-          python scripts/run_bruno_tests.py --suite smoke --auto-start
-
-      - name: Full Bruno API/E2E Test Suite (Main Gate / TEST-08)
-        if: github.event_name != 'pull_request'
+      - name: Full Bruno API & E2E Test Suite (TEST-08)
         run: |
           python scripts/run_bruno_tests.py --suite full --auto-start
 
@@ -572,8 +551,7 @@ jobs:
           python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
           pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py tests/performance/test_performance_exceptions.py -v
 
-      - name: Concurrency Stability Verification (Main Gate / PERF-004)
-        if: github.event_name != 'pull_request'
+      - name: Concurrency Stability Verification (Full Parity / PERF-004)
         run: |
           cd backend
           pytest tests/performance/test_load_and_concurrency.py -v
@@ -663,12 +641,12 @@ jobs:
       - name: Strict Flaky Test Verification Gate
         run: |
           cd backend
-          python scripts/ci_flaky_tracker.py --check-ledger reports/flaky-unit/flaky-tests.json ${{ github.event_name != 'pull_request' && '--fail-on-flaky' || '' }}
+          python scripts/ci_flaky_tracker.py --check-ledger reports/flaky-unit/flaky-tests.json --fail-on-flaky
 
       - name: Generate Consolidated CI Failure & Forensic Step Summary (TEST-11)
         if: always()
         run: |
-          python scripts/ci_failure_reporter.py --report-dirs backend/reports backend/benchmark-results --output-dir backend/reports/summary ${{ github.event_name != 'pull_request' && '--fail-on-flaky' || '' }}
+          python scripts/ci_failure_reporter.py --report-dirs backend/reports backend/benchmark-results --output-dir backend/reports/summary --fail-on-flaky
 
       - name: Archive Coverage & Forensic Summary Artifacts
         if: always()
@@ -716,3 +694,44 @@ jobs:
           ignore-unfixed: true
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
+
+  # 13. Canonical Aggregate Merge Gate (Principal Branch Protection Status Check)
+  merge-gate:
+    name: CI / Merge Gate
+    runs-on: ubuntu-latest
+    needs:
+      - secret-scanning
+      - static-and-quality
+      - typecheck-backend
+      - frontend-quality
+      - unit-tests
+      - contract-and-security
+      - integration-tests
+      - ai-and-evals
+      - e2e-and-bruno
+      - perf-and-dependency-gate
+      - coverage-and-reporting
+      - container-build-and-scan
+    steps:
+      - name: Validate All Upstream Gates Passed
+        run: |
+          echo "================================================================================"
+          echo "CI / MERGE GATE: SUCCESS"
+          echo "================================================================================"
+          echo "All 12 upstream verification gates passed with zero regressions:"
+          echo "  1. DevSecOps - Secret & Key Leak Detection"
+          echo "  2. Code Quality, SAST & License Compliance Gate"
+          echo "  3. Backend Type Analysis (Mypy)"
+          echo "  4. Frontend Widget Build & Quality Verification"
+          echo "  5. Unit Test Suite (In-Memory Isolation) [Python 3.11 & 3.12]"
+          echo "  6. Contract, Schema Drift & Runtime Security Gate"
+          echo "  7. Subsystem Integration Gate (Isolated Services)"
+          echo "  8. AI Quality, RAG & Evaluation Gate"
+          echo "  9. E2E Business Workflows & Bruno CLI Automation"
+          echo "  10. Performance Smoke & Dependency Regression Gate"
+          echo "  11. Coverage Gate, Forensic Failure Reporting & Flaky Audit"
+          echo "  12. Container Packaging & Vulnerability Scan"
+          echo "================================================================================"
+          echo "Commit is certified safe for merge into main."
+          echo "================================================================================"
+
