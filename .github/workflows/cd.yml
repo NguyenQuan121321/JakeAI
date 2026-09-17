@@ -21,8 +21,32 @@ concurrency:
 
 jobs:
   release-verification:
-    name: Strict Pre-Release Verification Gate (TEST-11)
+    name: Strict Pre-Release Verification Gate (TEST-12)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
+
     steps:
       - name: Checkout Complete Repository History
         uses: actions/checkout@v7
@@ -43,30 +67,96 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Verify OpenAPI 3.1.0 Contract & Zero Schema Drift
+      - name: 1. Required Unit and Integration Tests Gate
         run: |
           cd backend
-          pytest tests/contract/test_api_contract.py -v
+          mkdir -p reports/junit
+          pytest -m unit -v --junitxml=reports/junit/unit-results.xml
+          pytest -m "integration and not slow" -v --junitxml=reports/junit/integration-results.xml
+
+      - name: 2. Security Regression, SAST & License Compliance Gate
+        run: |
+          cd backend
+          mkdir -p reports/security
+          pytest tests/security/ -v --junitxml=reports/junit/security-results.xml
+          bandit -c pyproject.toml -r app/ -f json -o reports/security/bandit-report.json || true
+          bandit -c pyproject.toml -r app/
+          pip-audit -r requirements.txt -f json -o reports/security/pip-audit.json || true
+          pip-audit -r requirements.txt
+          pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
+
+      - name: 3. Contract, Internal Mutual Auth & Zero Schema Drift Gate
+        run: |
+          cd backend
+          pytest tests/contract/test_api_contract.py tests/contract/test_internal_mutual_auth.py -v --junitxml=reports/junit/contract-results.xml
           python -m app.main --export-openapi openapi.json
           git diff --exit-code openapi.json
           python scripts/check_openapi_breaking_changes.py
 
-      - name: Dependency Audit & Manifest Integrity Check
+      - name: 4. Critical AI Regression & Canary Safety Gate
+        run: |
+          cd backend
+          pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py tests/evals/test_canary_leakage.py tests/evals/test_rag_regression.py -v --junitxml=reports/junit/ai-results.xml
+
+      - name: 5. Critical E2E Business Workflows & Bruno Smoke Gate
+        run: |
+          cd backend
+          pytest tests/e2e/test_e2e_business_workflows.py -v -m "critical_e2e and not live_external" --junitxml=reports/junit/e2e-results.xml
+          python scripts/run_bruno_tests.py --suite smoke --auto-start
+
+      - name: 6. Performance Smoke Regression Gate (Within Threshold)
+        run: |
+          cd backend
+          python scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+          pytest tests/performance/test_performance_smoke.py tests/performance/test_performance_regression_gate.py -v
+
+      - name: 7. Dependency Audit & Blocking Breakage Validation Gate
         run: |
           cd backend
           python scripts/run_dependency_regression.py --mode audit
           python scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
 
-      - name: DevSecOps Vulnerability & License Compliance Audit
-        run: |
-          cd backend
-          pip-audit -r requirements.txt
-          bandit -c pyproject.toml -r app/
-          pip-licenses --fail-on "GPL;AGPL;LGPL" --summary
+      - name: 8. Container Packaging Integrity & Trivy Vulnerability Scan
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          load: true
+          tags: jakeai-backend:release-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Bruno Release Verification (Smoke Gate)
+      - name: Trivy Container Image Vulnerability Scanner Gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: jakeai-backend:release-scan
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+      - name: Generate Consolidated Release Verification Summary
+        if: always()
         run: |
-          python scripts/run_bruno_tests.py --suite smoke --auto-start
+          python scripts/ci_failure_reporter.py \
+            --report-dirs backend/reports backend/benchmark-results \
+            --output-dir backend/reports/summary \
+            --fail-on-flaky
+
+      - name: Archive Pre-Release Verification Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pre-release-verification-reports
+          path: |
+            backend/reports/junit/
+            backend/reports/security/
+            backend/reports/bruno/
+            backend/benchmark-results/
+            backend/reports/summary/
+            backend/openapi.json
+          retention-days: 90
 
   semver-release:
     name: Automated SemVer Tag & GitHub Release

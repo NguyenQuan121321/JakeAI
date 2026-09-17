@@ -717,6 +717,55 @@ All 20 canonical RIGHT verification test suites (`test_r_*`, 401 tests) and all 
   - Mypy static typing: 0 errors across 192 source files.
   - All CI workflows validated and aligned with 4-tier testing hierarchy.
 
+---
+
+## 12. TEST-12 — Nightly & Release Verification Architecture
+
+- **Scope**: Established reliable scheduled nightly and production release verification across the JakeAI platform.
+- **Key Features**:
+  1. **Master Nightly Verification Workflow (`.github/workflows/nightly.yml`)**:
+     - Daily off-peak verification at 02:00 UTC running 10 decoupled jobs with ephemeral Redis and Qdrant container services:
+       - `nightly-security-and-static`: DevSecOps, linters, SAST, license compliance, SBOM.
+       - `nightly-pytest-regression`: Full unit regression with flaky tracker and API contract / schema drift checks.
+       - `nightly-integration-regression`: Full integration suite and dedicated runtime security (SEC-001..SEC-010).
+       - `nightly-ai-evaluation`: Automated AI evaluations (agent, RAG, hallucination), canary data leakage, and Phase 00 multi-workload portfolio benchmark.
+       - `nightly-e2e-and-bruno`: Full business workflows and complete Bruno CLI collection.
+       - `nightly-performance-regression`: Full statistical performance benchmark, concurrency load stability (PERF-004), and regression gate assertions.
+       - `nightly-dependency-checks`: Architectural dependency audit and validation runner.
+       - `nightly-real-provider-and-finnapigo-smoke`: Live provider smoke and real FinnApiGo integration with secure CI secrets.
+       - `nightly-container-checks`: Dockerfile build integrity check and Trivy container vulnerability scan.
+       - `nightly-reporting-and-artifacts`: Consolidated CI failure forensics (`scripts/ci_failure_reporter.py`), strict coverage floor (>= 85%), and master archive of all 8 required verification artifacts.
+  2. **Provider Triad Separation & BLOCKED Credential Enforcement**:
+     - Strictly separates MOCKED, LOCAL, and LIVE provider execution:
+       - `MOCKED` (`@pytest.mark.mocked`): Pure in-memory/mocked provider adapters yielding PASS.
+       - `LOCAL` (`@pytest.mark.local_provider`): In-process local models (LocalModelAdapter, FastEmbed) yielding PASS.
+       - `LIVE` (`@pytest.mark.live_provider`, `@pytest.mark.live_finnapigo`): Real external upstream providers (OpenAI, Gemini, Anthropic, DeepSeek, Groq, OpenRouter) and real FinnApiGo identity authority.
+     - **Strict Credential Enforcement**: A live test lacking credentials transitions strictly to **`BLOCKED`** via `pytest_runtest_setup` in `conftest.py`. It is forbidden from returning a false `PASS`.
+  3. **Strict 10-Point Release Verification Gate (`.github/workflows/cd.yml`)**:
+     - Evaluates 10 mandatory criteria in `release-verification` prior to SemVer release, container publishing, or deployment dispatch:
+       1. All required unit and integration tests PASS
+       2. Runtime security regression (SEC-001..SEC-010), Bandit SAST, pip-audit, pip-licenses PASS
+       3. API contract (51 operations), internal mutual auth (Invariant 4), OpenAPI 3.1.0 zero schema drift PASS
+       4. Critical AI regression and canary leakage PASS
+       5. Critical E2E business workflows and Bruno smoke PASS
+       6. Performance smoke regression within threshold PASS
+       7. Docker container image Trivy vulnerability scan PASS
+       8. CycloneDX release SBOM generation PASS
+       9. Cryptographic signing, attestation, and signature verification (Sigstore Cosign keyless OIDC) PASS
+       10. No known blocking dependency issue (validate --fail-on-breakage) PASS
+  4. **Master Artifact Archiving (8 Mandatory Categories)**:
+     - Archives: test result (`reports/junit/`), coverage (`coverage.xml`), AI evaluation (`benchmark-results/`), performance report (`benchmark-results/`), security report (`reports/security/`), OpenAPI (`openapi.json`), SBOM (`sbom-*.cyclonedx.json`), Bruno results (`reports/bruno/`).
+  5. **3 Dedicated Test Suites**:
+     - `PROV-001` (`CAT-134`): `tests/integration/test_real_provider_smoke.py` (10 items)
+     - `FINN-001` (`CAT-135`): `tests/integration/test_real_finnapigo_integration.py` (5 items)
+     - `VERIF-001` (`CAT-136`): `tests/unit/test_nightly_release_verification.py` (14 items)
+- **Verification Summary**:
+  - 1,923 total collected test items across 134 executable test files.
+  - 100% clean test execution (1,915 passed, 8 blocked in offline mode without live secrets, 0 failed).
+  - Ruff linter & formatter: 100% clean.
+  - Mypy static typing: 0 errors across 192 source files.
+
+
 
 
 

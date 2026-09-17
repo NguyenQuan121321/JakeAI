@@ -1,21 +1,24 @@
 # TEST-CATALOG — JakeAI Automated Test Suite Catalog
-**Audit Baseline**: `main` (`92e745a`) | **Status**: TEST-11 CI TEST ORCHESTRATION COMPLETED
+**Audit Baseline**: `main` (`0df3728`) | **Status**: TEST-12 NIGHTLY & RELEASE VERIFICATION COMPLETED
 **Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/` and automated Bruno collection under `Bruno/`
 
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 132 tracked in catalog (130 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 130
-- **Total Test Functions / Methods**: 1,414 (collected by Pytest as 1,888 test items)
+- **Total Tracked Test Files**: 135 tracked in catalog (133 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 133
+- **Total Test Functions / Methods**: 1,443 (collected by Pytest as 1,923 test items across 134 executable modules)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 38 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131` + 2 CI Orchestration in TEST-11: `CAT-132`..`CAT-133`)
+  - `CREATED`: 41 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131` + 2 CI Orchestration in TEST-11: `CAT-132`..`CAT-133` + 3 Nightly & Release Verification in TEST-12: `CAT-134`..`CAT-136`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
-  - `CI-*`: 2 files (`CI-001` through `CI-002`, 11 tests)
+  - `PROV-*`: 1 file (`PROV-001`, 10 tests)
+  - `FINN-*`: 1 file (`FINN-001`, 5 tests)
+  - `VERIF-*`: 1 file (`VERIF-001`, 14 tests)
+  - `CI-*`: 2 files (`CI-001` through `CI-002`, 12 tests)
   - `DEP-*`: 3 files (`DEP-001` through `DEP-003`, 35 tests)
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
@@ -26,10 +29,10 @@
   - `UNIT-*`: 63 files (`UNIT-001` through `UNIT-063`, 1,022 tests)
 - **Duplicate / Overlap Status Breakdown**:
   - `COMPLEMENTARY`: 77 files
-  - `UNIQUE`: 38 files
+  - `UNIQUE`: 41 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,760 passed, 3 skipped in offline mode, 0 failed)
+- **Test Suite Pass Rate**: **100%** (1,915 passed, 8 blocked in offline mode without live secrets, 0 failed)
 - **Code Coverage**: Branch: **88%+** (>=85% gate), Line: **91%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
@@ -164,6 +167,9 @@ This master catalog indexes every test family under `backend/tests/`. All 14 req
 | `AI-013` | `CAT-122` | [`tests/evals/test_eval_rag_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_rag_automation.py) | 11 functions (20 items: `test_eval_rag_01_retrieval_relevance_ranking` ...) | RAG Pipeline | AI Eval / Benchmark | Comprehensive automated evaluation for 10 RAG dimensions (MRR/NDCG retrieval relevance, multi-tenant isolation, 6-stage context construction, grounding entailment, citation integrity, unsupported claim detection, contradiction detection, epistemic abstention, prompt injection resistance, context budget load shedding) plus versioned regression fixtures. | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-FUNC-02 / R-AI-01 / R-AI-04 | Bruno/04 — RAG (01-07) | **`CREATED`** | New TEST-06 automated evaluation layer for 10 RAG pipeline dimensions, retrieval math, and versioned regression fixtures. |
 | `AI-014` | `CAT-123` | [`tests/evals/test_eval_hallucination_automation.py`](file:///e:/JakeAI/backend/tests/evals/test_eval_hallucination_automation.py) | 9 functions (14 items: `test_eval_hallucination_01_supported_claims` ...) | AI Evaluation & Benchmarking | AI Eval / Benchmark | Controlled dataset evaluation covering 4 mandatory categories (SUPPORTED, UNSUPPORTED, CONTRADICTORY, INSUFFICIENT EVIDENCE) and edge cases via deterministic assertions (metric canonicalization, antonym polarity matrix, entity divergence, epistemic abstention). | None (Pure In-Memory) | AI Behavior, Agent, RAG & Hallucination Evaluation Gate (TEST-06) | PR / Push (main) | `UNIQUE` | R-AI-01 / R-AI-02 / R-AI-04 | Bruno/08 — Security & Negative (01-11) | **`CREATED`** | New TEST-06 automated evaluation layer for deterministic hallucination categories, metric normalizer, and polarity matrix. |
 | `E2E-003` | `CAT-124` | [`tests/e2e/test_e2e_business_workflows.py`](file:///e:/JakeAI/backend/tests/e2e/test_e2e_business_workflows.py) | 9 functions (9 items: `test_e2e_workflow_01_auth_to_chat_lifecycle` ...) | Business Workflows | E2E | High-value full business workflow E2E test suite covering 7 mandatory business lifecycles: AUTH -> CHAT, AUTH -> AGENT, AGENT -> TOOL -> VERIFY, RAG, BYOK / PROVIDER, FAILURE / RECOVERY, and APPROVAL (with rejection and live-external hooks). | HTTP / ASGI, Redis, Qdrant, Mocks / Monkeypatch | Critical End-to-End Business Workflow Gate (TEST-07) | PR / Push (main) | `UNIQUE` | R-FUNC-00 / R-FUNC-01 / R-FUNC-02 / R-FUNC-04 | Bruno Collections (02, 03, 04, 05, 07, 08) | **`CREATED`** | New TEST-07 authoritative business workflow E2E test suite verifying state transitions, telemetry, tenant isolation, and failure recovery. |
+| `PROV-001` | `CAT-134` | [`tests/integration/test_real_provider_smoke.py`](file:///e:/JakeAI/backend/tests/integration/test_real_provider_smoke.py) | 9 functions (10 items: `test_mocked_provider_completion_returns_valid_response`, `test_live_gemini_provider_smoke` ...) | Core / Platform | Integration | Real Provider Smoke & Triad Verification Suite enforcing strict MOCKED / LOCAL / LIVE separation and BLOCKED outcome when credentials are absent. | HTTP / ASGI, Mocks / Monkeypatch | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated | `UNIQUE` | R-FUNC-04 | Bruno/05 — BYOK & Providers (01-07) | **`CREATED`** | New TEST-12 real provider smoke suite verifying Gemini, OpenAI, Anthropic, DeepSeek, Groq, OpenRouter with BLOCKED credential gating. |
+| `FINN-001` | `CAT-135` | [`tests/integration/test_real_finnapigo_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_real_finnapigo_integration.py) | 5 functions (`test_local_jwt_verification_fallback_contract`, `test_live_finnapigo_healthz_check` ...) | Security & Governance | Integration | Real upstream FinnApiGo Identity Authority integration suite verifying JWKS discovery, mutual auth perimeter headers, and BLOCKED state when offline. | HTTP / ASGI, Mocks / Monkeypatch | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated | `UNIQUE` | R-ARCH-04 / R-LOGIC-02 | Bruno/00 — Setup & Environment (03-Auth Dependency) | **`CREATED`** | New TEST-12 real FinnApiGo integration suite verifying JWKS discovery and perimeter mutual auth. |
+| `VERIF-001` | `CAT-136` | [`tests/unit/test_nightly_release_verification.py`](file:///e:/JakeAI/backend/tests/unit/test_nightly_release_verification.py) | 5 functions (14 items: `test_release_verification_all_10_criteria_pass` ...) | Core / Platform | Unit | Unit tests verifying the 10-point release verification gate evaluator, provider triad classification, BLOCKED state assertion, artifact completeness, and bounded failure forensics. | None (Pure In-Memory) | unit-tests | PR / Push (main) | `UNIQUE` | R-ARCH-00 / R-LOGIC-00 | NONE | **`CREATED`** | New TEST-12 verification engine tests auditing 10 release criteria and artifact archiving completeness. |
 
 ---
 
@@ -3058,6 +3064,70 @@ TEST-11 introduces a 4-tier testing hierarchy that completely eliminates monolit
 |---|---|---|---|---|---|---|
 | `CI-001` | `CAT-132` | [`tests/unit/test_ci_failure_reporter.py`](file:///e:/JakeAI/backend/tests/unit/test_ci_failure_reporter.py) | Unit tests verifying layer classification, dependency inference, JUnit XML parsing, Bruno JSON ingestion, flaky ledger parsing, and Markdown reporting | Core / Platform | unit-tests | PR / Push (main) |
 | `CI-002` | `CAT-133` | [`tests/unit/test_ci_flaky_tracker.py`](file:///e:/JakeAI/backend/tests/unit/test_ci_flaky_tracker.py) | Unit tests verifying retry bounding, explicit FLAKY classification, JSON ledger serialization, and --fail-on-flaky gate blocking | Core / Platform | unit-tests | PR / Push (main) |
+
+---
+
+## 10. TEST-12 — JakeAI Nightly & Release Verification Architecture
+
+### 10.1 Architecture Overview
+TEST-12 establishes reliable scheduled nightly and production release verification across the JakeAI platform:
+- **Nightly Verification Workflow (`.github/workflows/nightly.yml`)**:
+  Executes daily off-peak (02:00 UTC) verification across 10 decoupled jobs on dedicated runner VMs with ephemeral Redis and Qdrant services:
+  1. `nightly-security-and-static`: Hadolint, Actionlint, Ruff, Mypy, Pip-Audit, Bandit, Pip-Licenses, and CycloneDX backend SBOM.
+  2. `nightly-pytest-regression`: Full unit test regression with bounded flaky tracker and API contract / schema drift checks.
+  3. `nightly-integration-regression`: Full integration suite (`pytest -m integration`) and dedicated runtime security suite (SEC-001..SEC-010).
+  4. `nightly-ai-evaluation`: Automated AI evaluation (agent, RAG, hallucination), canary data leakage safety, and Phase 00 multi-workload portfolio benchmark.
+  5. `nightly-e2e-and-bruno`: Full E2E business workflows (TEST-07) and full Bruno API/E2E collection (TEST-08).
+  6. `nightly-performance-regression`: Full statistical performance benchmark (`run_performance_benchmark.py --mode full --fail-on-regression`), concurrency load stability (PERF-004), and regression detector assertions.
+  7. `nightly-dependency-checks`: Architectural dependency audit across 11 categories and regression validation (`run_dependency_regression.py --mode validate --fail-on-breakage`).
+  8. `nightly-real-provider-and-finnapigo-smoke`: Live provider smoke (Gemini, OpenAI, Anthropic, DeepSeek, Groq, OpenRouter) and real upstream FinnApiGo identity integration.
+  9. `nightly-container-checks`: Dockerfile build integrity check and Trivy container vulnerability scan.
+  10. `nightly-reporting-and-artifacts`: Consolidated CI failure forensics (`scripts/ci_failure_reporter.py`), strict coverage floor (>= 85%), and master archive of all 8 required verification artifacts.
+
+### 10.2 Provider Triad Separation & BLOCKED Credential Enforcement
+JakeAI strictly separates provider testing into three distinct execution modes:
+1. **MOCKED (`@pytest.mark.mocked`)**: Simulated/mocked provider adapters using synthetic payloads and in-memory responses. Always executes in CI without network dependencies and yields `PASS`.
+2. **LOCAL (`@pytest.mark.local_provider`)**: Local in-process or on-device model adapters (`LocalModelAdapter`, FastEmbed ONNX embeddings). Operates without external cloud dependencies and yields `PASS`.
+3. **LIVE (`@pytest.mark.live_provider`, `@pytest.mark.live_finnapigo`)**: Real upstream external cloud APIs (OpenAI, Gemini, Anthropic, DeepSeek, Groq, OpenRouter) and real FinnApiGo identity authority.
+   - **Credential Policy**: Executed ONLY when credentials or endpoints are deliberately supplied through secure CI secrets (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `FINNAPIGO_LIVE_URL`).
+   - **Strict BLOCKED Invariant**: A live test lacking credentials transitions explicitly to **`BLOCKED`** via `pytest_runtest_setup` in `conftest.py`. It is forbidden from returning a false `PASS`.
+   - **Forensic Visibility**: `scripts/ci_failure_reporter.py` parses JUnit XML and Bruno JSON `status="BLOCKED"`, surfacing them in the Forensic Failure Matrix with clear dependency attribution.
+
+### 10.3 Release Verification Gate: 10 Mandatory Criteria
+The release verification gate in `.github/workflows/cd.yml` (`release-verification` job) evaluates 10 strict criteria prior to SemVer tagging, container publishing, or cloud deployment:
+1. **All Required Tests PASS**: Full unit tests and integration tests execute and pass cleanly.
+2. **Security PASS**: Runtime security regression (SEC-001..SEC-010), Bandit SAST, pip-audit CVE scan, and pip-licenses (zero copyleft) pass.
+3. **Contract PASS**: API contract (51 operations), internal mutual auth (Invariant 4), and OpenAPI 3.1.0 zero schema drift pass.
+4. **Critical AI Regression PASS**: Agent, RAG, hallucination automation, and canary leakage suites pass.
+5. **Critical E2E PASS**: End-to-end business workflows (`critical_e2e`) and Bruno CLI smoke suite pass.
+6. **Performance Within Threshold**: Performance regression smoke benchmark and detector assertions pass with 0% error rate.
+7. **Container Scan PASS**: Built Docker container passes Trivy vulnerability scan with zero CRITICAL/HIGH unpatched CVEs.
+8. **SBOM Generation PASS**: CycloneDX backend and container SBOMs generated and verified.
+9. **Signing & Attestation PASS**: Sigstore Cosign keyless OIDC signing, SBOM attestation, and signature verification succeed.
+10. **No Known Blocking Dependency Issue**: Dependency audit and validation runner pass with zero breaking changes (`--fail-on-breakage`).
+
+### 10.4 Master Artifact Archiving Matrix (8 Mandatory Categories)
+Both Nightly and Release verification archive all 8 mandatory artifact categories:
+
+| ARTIFACT CATEGORY | SOURCE PATH | RETENTION | PURPOSE |
+|---|---|---|---|
+| **Test Result** | `backend/reports/junit/*.xml` | 30–90 days | Machine-readable JUnit XML test outcomes across all layers |
+| **Coverage** | `backend/coverage.xml` | 30–90 days | Line and branch coverage floor enforcement (>= 85%) |
+| **AI Evaluation** | `backend/benchmark-results/` | 30–90 days | Multi-workload token reduction, quality score, and cost truth JSONs |
+| **Performance Report** | `backend/benchmark-results/performance-report.*` | 30–90 days | Monotonic latency, throughput, memory, and concurrency statistical benchmarks |
+| **Security Report** | `backend/reports/security/` | 30–90 days | Bandit SAST, Pip-Audit CVE scan, and Gitleaks secret scan reports |
+| **OpenAPI** | `backend/openapi.json` | 90 days | Authoritative OpenAPI 3.1.0 specification with zero schema drift |
+| **SBOM** | `sbom-backend.cyclonedx.json`, `sbom-container.cyclonedx.json` | 90 days | CycloneDX Software Bill of Materials for compliance and governance |
+| **Bruno Results** | `backend/reports/bruno/bruno-results.json` | 30–90 days | Automated Bruno CLI API and E2E collection execution outcomes |
+
+### 10.5 Nightly & Release Verification Test Suites Table
+
+| LOGICAL ID | LEGACY ID | FILE | PURPOSE | SUBSYSTEM | CI JOB | RUN FREQUENCY |
+|---|---|---|---|---|---|---|
+| `PROV-001` | `CAT-134` | [`tests/integration/test_real_provider_smoke.py`](file:///e:/JakeAI/backend/tests/integration/test_real_provider_smoke.py) | Comprehensive provider smoke suite verifying MOCKED, LOCAL, and LIVE provider execution with BLOCKED credential enforcement | Core / Platform | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated |
+| `FINN-001` | `CAT-135` | [`tests/integration/test_real_finnapigo_integration.py`](file:///e:/JakeAI/backend/tests/integration/test_real_finnapigo_integration.py) | Comprehensive integration suite verifying live upstream FinnApiGo identity authority, JWKS discovery, and mutual auth headers | Security & Governance | nightly-real-provider-and-finnapigo-smoke | Nightly / Gated |
+| `VERIF-001` | `CAT-136` | [`tests/unit/test_nightly_release_verification.py`](file:///e:/JakeAI/backend/tests/unit/test_nightly_release_verification.py) | Unit tests verifying the 10-point release verification gate evaluator, provider triad classification, BLOCKED state assertion, artifact completeness, and bounded failure forensics | Core / Platform | unit-tests | PR / Push (main) |
+
 
 
 
