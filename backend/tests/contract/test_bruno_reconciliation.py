@@ -14,10 +14,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-from app.main import app
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BRUNO_DIR = REPO_ROOT / "Bruno"
@@ -25,11 +21,12 @@ BRUNO_DIR = REPO_ROOT / "Bruno"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from check_bruno_reconciliation import check_reconciliation
-
 
 def test_bruno_collection_zero_drift():
     """Verify that Bruno collection has 100% operation coverage with 0 missing and 0 obsolete requests."""
+    # Intentional runtime/environment-specific import: scripts/ is dynamically resolved from REPO_ROOT
+    from check_bruno_reconciliation import check_reconciliation
+
     is_pass, summary = check_reconciliation(repo_root=REPO_ROOT)
 
     assert is_pass, (
@@ -39,8 +36,12 @@ def test_bruno_collection_zero_drift():
         f"Obsolete: {summary['obsolete_requests']}\n"
         f"Run: python scripts/check_bruno_reconciliation.py for diagnostics."
     )
-    assert summary["missing_count"] == 0, f"Missing operations in Bruno: {summary['missing_operations']}"
-    assert summary["obsolete_count"] == 0, f"Obsolete requests in Bruno: {summary['obsolete_requests']}"
+    assert summary["missing_count"] == 0, (
+        f"Missing operations in Bruno: {summary['missing_operations']}"
+    )
+    assert summary["obsolete_count"] == 0, (
+        f"Obsolete requests in Bruno: {summary['obsolete_requests']}"
+    )
     assert summary["status"] == "PASS"
 
 
@@ -53,7 +54,9 @@ def test_bruno_private_git_isolation():
         text=True,
         check=False,
     )
-    tracked_files = [line.strip() for line in res.stdout.strip().splitlines() if line.strip()]
+    tracked_files = [
+        line.strip() for line in res.stdout.strip().splitlines() if line.strip()
+    ]
     assert len(tracked_files) == 0, (
         f"Security violation: Bruno/private/ contains tracked files: {tracked_files}"
     )
@@ -65,9 +68,9 @@ def test_bruno_public_has_zero_secrets():
 
     public_dir = BRUNO_DIR / "public"
     patterns = [
-        re.compile(r'ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*'),
-        re.compile(r'(?i)sk-[a-zA-Z0-9]{20,}'),
-        re.compile(r'(?i)AIza[0-9A-Za-z-_]{35}'),
+        re.compile(r"ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*"),
+        re.compile(r"(?i)sk-[a-zA-Z0-9]{20,}"),
+        re.compile(r"(?i)AIza[0-9A-Za-z-_]{35}"),
     ]
 
     for bru_file in public_dir.glob("**/*.bru"):

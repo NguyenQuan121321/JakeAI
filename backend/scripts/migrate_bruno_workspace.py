@@ -1,6 +1,5 @@
 """Complete migration and synthesis of Bruno public and private suites with 100% 51-operation coverage."""
 
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -43,17 +42,22 @@ for pf in public_folders:
 for prf in private_folders:
     (private_dir / prf).mkdir(parents=True, exist_ok=True)
 
+
 # Helper to write bru files
 def write_bru(folder_path: Path, filename: str, content: str):
     file_path = folder_path / filename
     file_path.write_text(content.strip() + "\n", encoding="utf-8")
     print(f"  [+] Wrote {file_path.relative_to(bruno_dir)}")
 
+
 # ==============================================================================
 # PUBLIC: 00 — Setup
 # ==============================================================================
 f00 = public_dir / "00 — Setup"
-write_bru(f00, "01 — Root Health Smoke.bru", """meta {
+write_bru(
+    f00,
+    "01 — Root Health Smoke.bru",
+    """meta {
   name: 01 — Root Health Smoke
   type: http
   seq: 1
@@ -79,9 +83,13 @@ tests {
     expect(data.uptime_seconds).to.be.a("number");
   });
 }
-""")
+""",
+)
 
-write_bru(f00, "02 — API Health Smoke.bru", """meta {
+write_bru(
+    f00,
+    "02 — API Health Smoke.bru",
+    """meta {
   name: 02 — API Health Smoke
   type: http
   seq: 2
@@ -107,9 +115,13 @@ tests {
     expect(data.version).to.equal("0.1.0");
   });
 }
-""")
+""",
+)
 
-write_bru(f00, "03 — Root Liveness Probe.bru", """meta {
+write_bru(
+    f00,
+    "03 — Root Liveness Probe.bru",
+    """meta {
   name: 03 — Root Liveness Probe
   type: http
   seq: 3
@@ -131,9 +143,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f00, "04 — Root Readiness Probe.bru", """meta {
+write_bru(
+    f00,
+    "04 — Root Readiness Probe.bru",
+    """meta {
   name: 04 — Root Readiness Probe
   type: http
   seq: 4
@@ -155,9 +171,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f00, "05 — API Health Live Probe.bru", """meta {
+write_bru(
+    f00,
+    "05 — API Health Live Probe.bru",
+    """meta {
   name: 05 — API Health Live Probe
   type: http
   seq: 5
@@ -179,9 +199,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f00, "06 — API Health Ready Probe.bru", """meta {
+write_bru(
+    f00,
+    "06 — API Health Ready Probe.bru",
+    """meta {
   name: 06 — API Health Ready Probe
   type: http
   seq: 6
@@ -203,9 +227,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f00, "07 — Prometheus Metrics.bru", """meta {
+write_bru(
+    f00,
+    "07 — Prometheus Metrics.bru",
+    """meta {
   name: 07 — Prometheus Metrics
   type: http
   seq: 7
@@ -225,13 +253,17 @@ tests {
     expect(body.length).to.be.greaterThan(10);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PUBLIC: 01 — Public Smoke
 # ==============================================================================
 f01 = public_dir / "01 — Public Smoke"
-write_bru(f01, "01 — Public Root Health.bru", """meta {
+write_bru(
+    f01,
+    "01 — Public Root Health.bru",
+    """meta {
   name: 01 — Public Root Health
   type: http
   seq: 1
@@ -249,9 +281,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f01, "02 — Public API Health.bru", """meta {
+write_bru(
+    f01,
+    "02 — Public API Health.bru",
+    """meta {
   name: 02 — Public API Health
   type: http
   seq: 2
@@ -269,9 +305,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f01, "03 — Public Models Catalog.bru", """meta {
+write_bru(
+    f01,
+    "03 — Public Models Catalog.bru",
+    """meta {
   name: 03 — Public Models Catalog
   type: http
   seq: 3
@@ -293,9 +333,13 @@ tests {
     expect(res.getBody().data).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f01, "04 — Public Metrics Exposition.bru", """meta {
+write_bru(
+    f01,
+    "04 — Public Metrics Exposition.bru",
+    """meta {
   name: 04 — Public Metrics Exposition
   type: http
   seq: 4
@@ -312,13 +356,17 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PUBLIC: 02 — Chat
 # ==============================================================================
 f02 = public_dir / "02 — Chat"
-write_bru(f02, "01 — Chat Stream.bru", """meta {
+write_bru(
+    f02,
+    "01 — Chat Stream.bru",
+    """meta {
   name: 01 — Chat Stream
   type: http
   seq: 1
@@ -352,9 +400,13 @@ tests {
     expect(res.getHeader("content-type")).to.include("text/event-stream");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "02 — Chat SSE Stream Event Frames.bru", """meta {
+write_bru(
+    f02,
+    "02 — Chat SSE Stream Event Frames.bru",
+    """meta {
   name: 02 — Chat SSE Stream Event Frames
   type: http
   seq: 2
@@ -389,9 +441,13 @@ tests {
     expect(typeof body).to.equal("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "03 — OpenAI Gateway Chat.bru", """meta {
+write_bru(
+    f02,
+    "03 — OpenAI Gateway Chat.bru",
+    """meta {
   name: 03 — OpenAI Gateway Chat
   type: http
   seq: 3
@@ -433,9 +489,13 @@ tests {
     expect(data.choices[0].message.content).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "04 — OpenAI Models List.bru", """meta {
+write_bru(
+    f02,
+    "04 — OpenAI Models List.bru",
+    """meta {
   name: 04 — OpenAI Models List
   type: http
   seq: 4
@@ -464,9 +524,13 @@ tests {
     expect(data.data.length).to.be.greaterThan(0);
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "05 — API Gateway Models List.bru", """meta {
+write_bru(
+    f02,
+    "05 — API Gateway Models List.bru",
+    """meta {
   name: 05 — API Gateway Models List
   type: http
   seq: 5
@@ -494,9 +558,13 @@ tests {
     expect(data.data).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "06 — API Gateway Chat Completions.bru", """meta {
+write_bru(
+    f02,
+    "06 — API Gateway Chat Completions.bru",
+    """meta {
   name: 06 — API Gateway Chat Completions
   type: http
   seq: 6
@@ -537,9 +605,13 @@ tests {
     expect(data.choices).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "07 — OpenAI Gateway Quotas Read.bru", """meta {
+write_bru(
+    f02,
+    "07 — OpenAI Gateway Quotas Read.bru",
+    """meta {
   name: 07 — OpenAI Gateway Quotas Read
   type: http
   seq: 7
@@ -567,9 +639,13 @@ tests {
     expect(data.quota_limit).to.be.a("number");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "08 — OpenAI Gateway Quotas Update.bru", """meta {
+write_bru(
+    f02,
+    "08 — OpenAI Gateway Quotas Update.bru",
+    """meta {
   name: 08 — OpenAI Gateway Quotas Update
   type: http
   seq: 8
@@ -602,9 +678,13 @@ tests {
     expect(data.quota_limit).to.equal(5000000);
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "09 — API Gateway Quotas Read.bru", """meta {
+write_bru(
+    f02,
+    "09 — API Gateway Quotas Read.bru",
+    """meta {
   name: 09 — API Gateway Quotas Read
   type: http
   seq: 9
@@ -631,9 +711,13 @@ tests {
     expect(data.tenant_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f02, "10 — API Gateway Quotas Update.bru", """meta {
+write_bru(
+    f02,
+    "10 — API Gateway Quotas Update.bru",
+    """meta {
   name: 10 — API Gateway Quotas Update
   type: http
   seq: 10
@@ -666,13 +750,17 @@ tests {
     expect(data.quota_limit).to.equal(5000000);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PUBLIC: 03 — Agent
 # ==============================================================================
 f03 = public_dir / "03 — Agent"
-write_bru(f03, "01 — Create Task.bru", """meta {
+write_bru(
+    f03,
+    "01 — Create Task.bru",
+    """meta {
   name: 01 — Create Task
   type: http
   seq: 1
@@ -723,9 +811,13 @@ tests {
     expect(["pending", "created"]).to.include(data.status);
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "02 — Get Task.bru", """meta {
+write_bru(
+    f03,
+    "02 — Get Task.bru",
+    """meta {
   name: 02 — Get Task
   type: http
   seq: 2
@@ -754,9 +846,13 @@ tests {
     expect(data.task_id).to.equal(bru.getVar("task_id") || bru.getEnvVar("task_id"));
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "03 — Start Run.bru", """meta {
+write_bru(
+    f03,
+    "03 — Start Run.bru",
+    """meta {
   name: 03 — Start Run
   type: http
   seq: 3
@@ -804,9 +900,13 @@ tests {
     expect(data.run_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "04 — Get Run.bru", """meta {
+write_bru(
+    f03,
+    "04 — Get Run.bru",
+    """meta {
   name: 04 — Get Run
   type: http
   seq: 4
@@ -831,9 +931,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "05 — Stream Run Events.bru", """meta {
+write_bru(
+    f03,
+    "05 — Stream Run Events.bru",
+    """meta {
   name: 05 — Stream Run Events
   type: http
   seq: 5
@@ -859,9 +963,13 @@ tests {
     expect(res.getHeader("content-type")).to.include("text/event-stream");
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "06 — Cancel Run.bru", """meta {
+write_bru(
+    f03,
+    "06 — Cancel Run.bru",
+    """meta {
   name: 06 — Cancel Run
   type: http
   seq: 6
@@ -886,9 +994,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "07 — Pending Approvals.bru", """meta {
+write_bru(
+    f03,
+    "07 — Pending Approvals.bru",
+    """meta {
   name: 07 — Pending Approvals
   type: http
   seq: 7
@@ -923,9 +1035,13 @@ tests {
     expect(res.getBody()).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "08 — Approval Decision.bru", """meta {
+write_bru(
+    f03,
+    "08 — Approval Decision.bru",
+    """meta {
   name: 08 — Approval Decision
   type: http
   seq: 8
@@ -957,9 +1073,13 @@ tests {
     expect([200, 404, 409]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "09 — Resume Checkpoint.bru", """meta {
+write_bru(
+    f03,
+    "09 — Resume Checkpoint.bru",
+    """meta {
   name: 09 — Resume Checkpoint
   type: http
   seq: 9
@@ -984,9 +1104,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f03, "10 — Agent Metrics.bru", """meta {
+write_bru(
+    f03,
+    "10 — Agent Metrics.bru",
+    """meta {
   name: 10 — Agent Metrics
   type: http
   seq: 10
@@ -1013,13 +1137,17 @@ tests {
     expect(data).to.be.an("object");
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PUBLIC: 04 — RAG
 # ==============================================================================
 f04 = public_dir / "04 — RAG"
-write_bru(f04, "01 — Ingest Document.bru", """meta {
+write_bru(
+    f04,
+    "01 — Ingest Document.bru",
+    """meta {
   name: 01 — Ingest Document
   type: http
   seq: 1
@@ -1064,9 +1192,13 @@ tests {
     expect(res.getBody().task_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f04, "02 — Get RAG Ingestion Task.bru", """meta {
+write_bru(
+    f04,
+    "02 — Get RAG Ingestion Task.bru",
+    """meta {
   name: 02 — Get RAG Ingestion Task
   type: http
   seq: 2
@@ -1091,9 +1223,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f04, "03 — Hybrid Query.bru", """meta {
+write_bru(
+    f04,
+    "03 — Hybrid Query.bru",
+    """meta {
   name: 03 — Hybrid Query
   type: http
   seq: 3
@@ -1126,9 +1262,13 @@ tests {
     expect(res.getBody().results).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f04, "04 — Generate Grounded Answer.bru", """meta {
+write_bru(
+    f04,
+    "04 — Generate Grounded Answer.bru",
+    """meta {
   name: 04 — Generate Grounded Answer
   type: http
   seq: 4
@@ -1160,9 +1300,13 @@ tests {
     expect(res.getBody().answer).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f04, "05 — Citation Verification.bru", """meta {
+write_bru(
+    f04,
+    "05 — Citation Verification.bru",
+    """meta {
   name: 05 — Citation Verification
   type: http
   seq: 5
@@ -1193,9 +1337,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f04, "06 — Epistemic Abstention.bru", """meta {
+write_bru(
+    f04,
+    "06 — Epistemic Abstention.bru",
+    """meta {
   name: 06 — Epistemic Abstention
   type: http
   seq: 6
@@ -1226,13 +1374,17 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PUBLIC: 05 — Provider Examples
 # ==============================================================================
 f05 = public_dir / "05 — Provider Examples"
-write_bru(f05, "01 — List BYOK Keys.bru", """meta {
+write_bru(
+    f05,
+    "01 — List BYOK Keys.bru",
+    """meta {
   name: 01 — List BYOK Keys
   type: http
   seq: 1
@@ -1254,9 +1406,13 @@ tests {
     expect(res.getBody()).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "02 — Add BYOK Key.bru", """meta {
+write_bru(
+    f05,
+    "02 — Add BYOK Key.bru",
+    """meta {
   name: 02 — Add BYOK Key
   type: http
   seq: 2
@@ -1285,9 +1441,13 @@ tests {
     expect([200, 201]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "03 — Validate BYOK Key.bru", """meta {
+write_bru(
+    f05,
+    "03 — Validate BYOK Key.bru",
+    """meta {
   name: 03 — Validate BYOK Key
   type: http
   seq: 3
@@ -1315,9 +1475,13 @@ tests {
     expect([200, 400]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "04 — Validate Stored Provider.bru", """meta {
+write_bru(
+    f05,
+    "04 — Validate Stored Provider.bru",
+    """meta {
   name: 04 — Validate Stored Provider
   type: http
   seq: 4
@@ -1338,9 +1502,13 @@ tests {
     expect([200, 400, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "05 — Rotate Provider Key.bru", """meta {
+write_bru(
+    f05,
+    "05 — Rotate Provider Key.bru",
+    """meta {
   name: 05 — Rotate Provider Key
   type: http
   seq: 5
@@ -1367,9 +1535,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "06 — Revoke Provider Key.bru", """meta {
+write_bru(
+    f05,
+    "06 — Revoke Provider Key.bru",
+    """meta {
   name: 06 — Revoke Provider Key
   type: http
   seq: 6
@@ -1390,9 +1562,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "07 — Delete Provider Key.bru", """meta {
+write_bru(
+    f05,
+    "07 — Delete Provider Key.bru",
+    """meta {
   name: 07 — Delete Provider Key
   type: http
   seq: 7
@@ -1413,9 +1589,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "08 — Exact Cache Miss.bru", """meta {
+write_bru(
+    f05,
+    "08 — Exact Cache Miss.bru",
+    """meta {
   name: 08 — Exact Cache Miss
   type: http
   seq: 8
@@ -1443,9 +1623,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "09 — Exact Cache Hit.bru", """meta {
+write_bru(
+    f05,
+    "09 — Exact Cache Hit.bru",
+    """meta {
   name: 09 — Exact Cache Hit
   type: http
   seq: 9
@@ -1473,9 +1657,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "10 — Semantic Cache Hit.bru", """meta {
+write_bru(
+    f05,
+    "10 — Semantic Cache Hit.bru",
+    """meta {
   name: 10 — Semantic Cache Hit
   type: http
   seq: 10
@@ -1503,9 +1691,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "11 — Cache Parameter Sensitivity.bru", """meta {
+write_bru(
+    f05,
+    "11 — Cache Parameter Sensitivity.bru",
+    """meta {
   name: 11 — Cache Parameter Sensitivity
   type: http
   seq: 11
@@ -1533,9 +1725,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "12 — FinOps Summary.bru", """meta {
+write_bru(
+    f05,
+    "12 — FinOps Summary.bru",
+    """meta {
   name: 12 — FinOps Summary
   type: http
   seq: 12
@@ -1558,9 +1754,13 @@ tests {
     expect(data.tenant_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "13 — Analytics Dashboard.bru", """meta {
+write_bru(
+    f05,
+    "13 — Analytics Dashboard.bru",
+    """meta {
   name: 13 — Analytics Dashboard
   type: http
   seq: 13
@@ -1583,9 +1783,13 @@ tests {
     expect(data.tenant_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "14 — FinOps Budget Read.bru", """meta {
+write_bru(
+    f05,
+    "14 — FinOps Budget Read.bru",
+    """meta {
   name: 14 — FinOps Budget Read
   type: http
   seq: 14
@@ -1608,9 +1812,13 @@ tests {
     expect(data.tenant_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "15 — FinOps Budget Update.bru", """meta {
+write_bru(
+    f05,
+    "15 — FinOps Budget Update.bru",
+    """meta {
   name: 15 — FinOps Budget Update
   type: http
   seq: 15
@@ -1640,9 +1848,13 @@ tests {
     expect(data.monthly_token_quota).to.equal(8000000);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "16 — FinOps Usage Accounting.bru", """meta {
+write_bru(
+    f05,
+    "16 — FinOps Usage Accounting.bru",
+    """meta {
   name: 16 — FinOps Usage Accounting
   type: http
   seq: 16
@@ -1663,9 +1875,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "17 — Billing Subscription.bru", """meta {
+write_bru(
+    f05,
+    "17 — Billing Subscription.bru",
+    """meta {
   name: 17 — Billing Subscription
   type: http
   seq: 17
@@ -1688,9 +1904,13 @@ tests {
     expect(data.tenant_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "18 — FinOps Transactions.bru", """meta {
+write_bru(
+    f05,
+    "18 — FinOps Transactions.bru",
+    """meta {
   name: 18 — FinOps Transactions
   type: http
   seq: 18
@@ -1712,9 +1932,13 @@ tests {
     expect(res.getBody()).to.be.an("array");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "19 — FinOps Reconciliation.bru", """meta {
+write_bru(
+    f05,
+    "19 — FinOps Reconciliation.bru",
+    """meta {
   name: 19 — FinOps Reconciliation
   type: http
   seq: 19
@@ -1737,9 +1961,13 @@ tests {
     expect(data.tenant_id).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "20 — Analytics Metrics.bru", """meta {
+write_bru(
+    f05,
+    "20 — Analytics Metrics.bru",
+    """meta {
   name: 20 — Analytics Metrics
   type: http
   seq: 20
@@ -1762,9 +1990,13 @@ tests {
     expect(data.total_requests).to.be.a("number");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "21 — DevOps Audit PR.bru", """meta {
+write_bru(
+    f05,
+    "21 — DevOps Audit PR.bru",
+    """meta {
   name: 21 — DevOps Audit PR
   type: http
   seq: 21
@@ -1796,9 +2028,13 @@ tests {
     expect(data.pr_number).to.equal(101);
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "22 — DevOps Changelog.bru", """meta {
+write_bru(
+    f05,
+    "22 — DevOps Changelog.bru",
+    """meta {
   name: 22 — DevOps Changelog
   type: http
   seq: 22
@@ -1830,9 +2066,13 @@ tests {
     expect(data.changelog_markdown).to.be.a("string");
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "23 — Coding Tool Result.bru", """meta {
+write_bru(
+    f05,
+    "23 — Coding Tool Result.bru",
+    """meta {
   name: 23 — Coding Tool Result
   type: http
   seq: 23
@@ -1863,9 +2103,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(f05, "24 — Coding Resume Bridge.bru", """meta {
+write_bru(
+    f05,
+    "24 — Coding Resume Bridge.bru",
+    """meta {
   name: 24 — Coding Resume Bridge
   type: http
   seq: 24
@@ -1897,13 +2141,17 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PUBLIC: 99 — Public Final Smoke
 # ==============================================================================
 f99 = public_dir / "99 — Public Final Smoke"
-write_bru(f99, "01 — Production-like Smoke.bru", """meta {
+write_bru(
+    f99,
+    "01 — Production-like Smoke.bru",
+    """meta {
   name: 01 — Production-like Smoke
   type: http
   seq: 1
@@ -1921,9 +2169,13 @@ tests {
     expect(res.getBody().status).to.equal("healthy");
   });
 }
-""")
+""",
+)
 
-write_bru(f99, "02 — Critical Security Smoke.bru", """meta {
+write_bru(
+    f99,
+    "02 — Critical Security Smoke.bru",
+    """meta {
   name: 02 — Critical Security Smoke
   type: http
   seq: 2
@@ -1940,9 +2192,13 @@ tests {
     expect(res.getStatus()).to.equal(401);
   });
 }
-""")
+""",
+)
 
-write_bru(f99, "03 — Critical E2E Smoke.bru", """meta {
+write_bru(
+    f99,
+    "03 — Critical E2E Smoke.bru",
+    """meta {
   name: 03 — Critical E2E Smoke
   type: http
   seq: 3
@@ -1959,13 +2215,17 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 01 — Authentication & Tenant Security
 # ==============================================================================
 p01 = private_dir / "01 — Authentication & Tenant Security"
-write_bru(p01, "01 — Verify Token A.bru", """meta {
+write_bru(
+    p01,
+    "01 — Verify Token A.bru",
+    """meta {
   name: 01 — Verify Token A
   type: http
   seq: 1
@@ -1986,9 +2246,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "02 — Authenticated Health.bru", """meta {
+write_bru(
+    p01,
+    "02 — Authenticated Health.bru",
+    """meta {
   name: 02 — Authenticated Health
   type: http
   seq: 2
@@ -2009,9 +2273,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "03 — Tenant Context.bru", """meta {
+write_bru(
+    p01,
+    "03 — Tenant Context.bru",
+    """meta {
   name: 03 — Tenant Context
   type: http
   seq: 3
@@ -2032,9 +2300,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "04 — Missing Token Rejection.bru", """meta {
+write_bru(
+    p01,
+    "04 — Missing Token Rejection.bru",
+    """meta {
   name: 04 — Missing Token Rejection
   type: http
   seq: 4
@@ -2051,9 +2323,13 @@ tests {
     expect(res.getStatus()).to.equal(401);
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "05 — Invalid Token Rejection.bru", """meta {
+write_bru(
+    p01,
+    "05 — Invalid Token Rejection.bru",
+    """meta {
   name: 05 — Invalid Token Rejection
   type: http
   seq: 5
@@ -2074,9 +2350,13 @@ tests {
     expect(res.getStatus()).to.equal(401);
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "06 — Expired Token Rejection.bru", """meta {
+write_bru(
+    p01,
+    "06 — Expired Token Rejection.bru",
+    """meta {
   name: 06 — Expired Token Rejection
   type: http
   seq: 6
@@ -2097,9 +2377,13 @@ tests {
     expect(res.getStatus()).to.equal(401);
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "07 — Internal Perimeter Secret Rejection.bru", """meta {
+write_bru(
+    p01,
+    "07 — Internal Perimeter Secret Rejection.bru",
+    """meta {
   name: 07 — Internal Perimeter Secret Rejection
   type: http
   seq: 7
@@ -2124,9 +2408,13 @@ tests {
     expect([401, 403]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "08 — Internal Perimeter Secret Valid.bru", """meta {
+write_bru(
+    p01,
+    "08 — Internal Perimeter Secret Valid.bru",
+    """meta {
   name: 08 — Internal Perimeter Secret Valid
   type: http
   seq: 8
@@ -2158,9 +2446,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p01, "09 — Billing Webhook Signature.bru", """meta {
+write_bru(
+    p01,
+    "09 — Billing Webhook Signature.bru",
+    """meta {
   name: 09 — Billing Webhook Signature
   type: http
   seq: 9
@@ -2194,13 +2486,17 @@ tests {
     expect(res.getStatus()).to.equal(400);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 02 — Security & Negative
 # ==============================================================================
 p02 = private_dir / "02 — Security & Negative"
-write_bru(p02, "01 — Missing Authentication.bru", """meta {
+write_bru(
+    p02,
+    "01 — Missing Authentication.bru",
+    """meta {
   name: 01 — Missing Authentication
   type: http
   seq: 1
@@ -2223,9 +2519,13 @@ tests {
     expect(res.getStatus()).to.equal(401);
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "02 — Invalid Authentication.bru", """meta {
+write_bru(
+    p02,
+    "02 — Invalid Authentication.bru",
+    """meta {
   name: 02 — Invalid Authentication
   type: http
   seq: 2
@@ -2252,9 +2552,13 @@ tests {
     expect(res.getStatus()).to.equal(401);
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "03 — Forbidden Permission.bru", """meta {
+write_bru(
+    p02,
+    "03 — Forbidden Permission.bru",
+    """meta {
   name: 03 — Forbidden Permission
   type: http
   seq: 3
@@ -2281,9 +2585,13 @@ tests {
     expect([403, 404, 401]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "04 — Invalid Input 422.bru", """meta {
+write_bru(
+    p02,
+    "04 — Invalid Input 422.bru",
+    """meta {
   name: 04 — Invalid Input 422
   type: http
   seq: 4
@@ -2308,9 +2616,13 @@ tests {
     expect(res.getStatus()).to.equal(422);
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "05 — Chat Validation Negative.bru", """meta {
+write_bru(
+    p02,
+    "05 — Chat Validation Negative.bru",
+    """meta {
   name: 05 — Chat Validation Negative
   type: http
   seq: 5
@@ -2339,9 +2651,13 @@ tests {
     expect(res.getStatus()).to.equal(422);
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "06 — Gateway Negative Parameters.bru", """meta {
+write_bru(
+    p02,
+    "06 — Gateway Negative Parameters.bru",
+    """meta {
   name: 06 — Gateway Negative Parameters
   type: http
   seq: 6
@@ -2375,9 +2691,13 @@ tests {
     expect(res.getStatus()).to.equal(422);
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "07 — Oversized Input 413.bru", """meta {
+write_bru(
+    p02,
+    "07 — Oversized Input 413.bru",
+    """meta {
   name: 07 — Oversized Input 413
   type: http
   seq: 7
@@ -2409,9 +2729,13 @@ tests {
     expect([413, 200, 422]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "08 — Prompt Injection Blocked.bru", """meta {
+write_bru(
+    p02,
+    "08 — Prompt Injection Blocked.bru",
+    """meta {
   name: 08 — Prompt Injection Blocked
   type: http
   seq: 8
@@ -2439,9 +2763,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "09 — Malformed Provider Response.bru", """meta {
+write_bru(
+    p02,
+    "09 — Malformed Provider Response.bru",
+    """meta {
   name: 09 — Malformed Provider Response
   type: http
   seq: 9
@@ -2474,9 +2802,13 @@ tests {
     expect([400, 502, 422]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p02, "10 — Provider Status Normalization.bru", """meta {
+write_bru(
+    p02,
+    "10 — Provider Status Normalization.bru",
+    """meta {
   name: 10 — Provider Status Normalization
   type: http
   seq: 10
@@ -2509,13 +2841,17 @@ tests {
     expect([400, 502, 422]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 03 — Failure & Recovery
 # ==============================================================================
 p03 = private_dir / "03 — Failure & Recovery"
-write_bru(p03, "01 — Provider Timeout.bru", """meta {
+write_bru(
+    p03,
+    "01 — Provider Timeout.bru",
+    """meta {
   name: 01 — Provider Timeout
   type: http
   seq: 1
@@ -2548,9 +2884,13 @@ tests {
     expect([200, 408, 503, 504]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "02 — Provider Unavailable 503.bru", """meta {
+write_bru(
+    p03,
+    "02 — Provider Unavailable 503.bru",
+    """meta {
   name: 02 — Provider Unavailable 503
   type: http
   seq: 2
@@ -2567,9 +2907,13 @@ tests {
     expect([200, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "03 — Provider Retryable.bru", """meta {
+write_bru(
+    p03,
+    "03 — Provider Retryable.bru",
+    """meta {
   name: 03 — Provider Retryable
   type: http
   seq: 3
@@ -2602,9 +2946,13 @@ tests {
     expect([200, 429, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "04 — Model Failover.bru", """meta {
+write_bru(
+    p03,
+    "04 — Model Failover.bru",
+    """meta {
   name: 04 — Model Failover
   type: http
   seq: 4
@@ -2637,9 +2985,13 @@ tests {
     expect([200, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "05 — Agent Run Failure State.bru", """meta {
+write_bru(
+    p03,
+    "05 — Agent Run Failure State.bru",
+    """meta {
   name: 05 — Agent Run Failure State
   type: http
   seq: 5
@@ -2660,9 +3012,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "06 — Resume After Interrupt.bru", """meta {
+write_bru(
+    p03,
+    "06 — Resume After Interrupt.bru",
+    """meta {
   name: 06 — Resume After Interrupt
   type: http
   seq: 6
@@ -2683,9 +3039,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "07 — Cancel Terminal Invariant.bru", """meta {
+write_bru(
+    p03,
+    "07 — Cancel Terminal Invariant.bru",
+    """meta {
   name: 07 — Cancel Terminal Invariant
   type: http
   seq: 7
@@ -2706,9 +3066,13 @@ tests {
     expect([200, 404, 409]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "08 — Cache Provider Failure Behavior.bru", """meta {
+write_bru(
+    p03,
+    "08 — Cache Provider Failure Behavior.bru",
+    """meta {
   name: 08 — Cache Provider Failure Behavior
   type: http
   seq: 8
@@ -2735,9 +3099,13 @@ tests {
     expect([200, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "09 — Streaming Disconnect Invariant.bru", """meta {
+write_bru(
+    p03,
+    "09 — Streaming Disconnect Invariant.bru",
+    """meta {
   name: 09 — Streaming Disconnect Invariant
   type: http
   seq: 9
@@ -2764,9 +3132,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p03, "10 — Accounting After Failure.bru", """meta {
+write_bru(
+    p03,
+    "10 — Accounting After Failure.bru",
+    """meta {
   name: 10 — Accounting After Failure
   type: http
   seq: 10
@@ -2787,13 +3159,17 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 04 — Cross Tenant
 # ==============================================================================
 p04 = private_dir / "04 — Cross Tenant"
-write_bru(p04, "01 — Cross Tenant Task Access.bru", """meta {
+write_bru(
+    p04,
+    "01 — Cross Tenant Task Access.bru",
+    """meta {
   name: 01 — Cross Tenant Task Access
   type: http
   seq: 1
@@ -2814,9 +3190,13 @@ tests {
     expect([404, 403]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p04, "02 — Cross Tenant RAG Isolation.bru", """meta {
+write_bru(
+    p04,
+    "02 — Cross Tenant RAG Isolation.bru",
+    """meta {
   name: 02 — Cross Tenant RAG Isolation
   type: http
   seq: 2
@@ -2837,9 +3217,13 @@ tests {
     expect([404, 403]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p04, "03 — Cache Tenant Isolation.bru", """meta {
+write_bru(
+    p04,
+    "03 — Cache Tenant Isolation.bru",
+    """meta {
   name: 03 — Cache Tenant Isolation
   type: http
   seq: 3
@@ -2867,9 +3251,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p04, "04 — Cross Tenant Access Rejection.bru", """meta {
+write_bru(
+    p04,
+    "04 — Cross Tenant Access Rejection.bru",
+    """meta {
   name: 04 — Cross Tenant Access Rejection
   type: http
   seq: 4
@@ -2890,13 +3278,17 @@ tests {
     expect([404, 403]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 05 — Tool Security
 # ==============================================================================
 p05 = private_dir / "05 — Tool Security"
-write_bru(p05, "01 — Tool Authorization RBAC.bru", """meta {
+write_bru(
+    p05,
+    "01 — Tool Authorization RBAC.bru",
+    """meta {
   name: 01 — Tool Authorization RBAC
   type: http
   seq: 1
@@ -2926,9 +3318,13 @@ tests {
     expect([403, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p05, "02 — Dangerous Tool Shell Injection.bru", """meta {
+write_bru(
+    p05,
+    "02 — Dangerous Tool Shell Injection.bru",
+    """meta {
   name: 02 — Dangerous Tool Shell Injection
   type: http
   seq: 2
@@ -2958,9 +3354,13 @@ tests {
     expect([200, 404, 400, 422]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p05, "03 — Tool Result Internal Bridge.bru", """meta {
+write_bru(
+    p05,
+    "03 — Tool Result Internal Bridge.bru",
+    """meta {
   name: 03 — Tool Result Internal Bridge
   type: http
   seq: 3
@@ -2990,13 +3390,17 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 06 — Live Provider
 # ==============================================================================
 p06 = private_dir / "06 — Live Provider"
-write_bru(p06, "01 — Live Gemini Smoke.bru", """meta {
+write_bru(
+    p06,
+    "01 — Live Gemini Smoke.bru",
+    """meta {
   name: 01 — Live Gemini Smoke
   type: http
   seq: 1
@@ -3029,9 +3433,13 @@ tests {
     expect([200, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p06, "02 — Live OpenAI Smoke.bru", """meta {
+write_bru(
+    p06,
+    "02 — Live OpenAI Smoke.bru",
+    """meta {
   name: 02 — Live OpenAI Smoke
   type: http
   seq: 2
@@ -3064,9 +3472,13 @@ tests {
     expect([200, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p06, "03 — Live Anthropic Smoke.bru", """meta {
+write_bru(
+    p06,
+    "03 — Live Anthropic Smoke.bru",
+    """meta {
   name: 03 — Live Anthropic Smoke
   type: http
   seq: 3
@@ -3099,9 +3511,13 @@ tests {
     expect([200, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p06, "04 — Live DeepSeek Smoke.bru", """meta {
+write_bru(
+    p06,
+    "04 — Live DeepSeek Smoke.bru",
+    """meta {
   name: 04 — Live DeepSeek Smoke
   type: http
   seq: 4
@@ -3134,9 +3550,13 @@ tests {
     expect([200, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p06, "05 — Live Groq Smoke.bru", """meta {
+write_bru(
+    p06,
+    "05 — Live Groq Smoke.bru",
+    """meta {
   name: 05 — Live Groq Smoke
   type: http
   seq: 5
@@ -3169,9 +3589,13 @@ tests {
     expect([200, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p06, "06 — Live OpenRouter Smoke.bru", """meta {
+write_bru(
+    p06,
+    "06 — Live OpenRouter Smoke.bru",
+    """meta {
   name: 06 — Live OpenRouter Smoke
   type: http
   seq: 6
@@ -3204,13 +3628,17 @@ tests {
     expect([200, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 07 — Live FinnApiGo
 # ==============================================================================
 p07 = private_dir / "07 — Live FinnApiGo"
-write_bru(p07, "01 — Healthz Probe.bru", """meta {
+write_bru(
+    p07,
+    "01 — Healthz Probe.bru",
+    """meta {
   name: 01 — Healthz Probe
   type: http
   seq: 1
@@ -3227,9 +3655,13 @@ tests {
     expect([200, 404, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p07, "02 — FinnApiGo Login.bru", """meta {
+write_bru(
+    p07,
+    "02 — FinnApiGo Login.bru",
+    """meta {
   name: 02 — FinnApiGo Login
   type: http
   seq: 2
@@ -3266,9 +3698,13 @@ tests {
     expect([200, 400, 401, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p07, "03 — FinnApiGo OBO Token Exchange.bru", """meta {
+write_bru(
+    p07,
+    "03 — FinnApiGo OBO Token Exchange.bru",
+    """meta {
   name: 03 — FinnApiGo OBO Token Exchange
   type: http
   seq: 3
@@ -3285,13 +3721,17 @@ tests {
     expect([200, 404, 502, 503]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
 # ==============================================================================
 # PRIVATE: 08 — Production Verification
 # ==============================================================================
 p08 = private_dir / "08 — Production Verification"
-write_bru(p08, "01 — FinnApiGo to JakeAI Auth.bru", """meta {
+write_bru(
+    p08,
+    "01 — FinnApiGo to JakeAI Auth.bru",
+    """meta {
   name: 01 — FinnApiGo to JakeAI Auth
   type: http
   seq: 1
@@ -3312,9 +3752,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "02 — Task to Run to Result.bru", """meta {
+write_bru(
+    p08,
+    "02 — Task to Run to Result.bru",
+    """meta {
   name: 02 — Task to Run to Result
   type: http
   seq: 2
@@ -3335,9 +3779,13 @@ tests {
     expect([200, 404]).to.include(res.getStatus());
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "03 — RAG Grounded Answer.bru", """meta {
+write_bru(
+    p08,
+    "03 — RAG Grounded Answer.bru",
+    """meta {
   name: 03 — RAG Grounded Answer
   type: http
   seq: 3
@@ -3364,9 +3812,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "04 — BYOK to Provider Chat.bru", """meta {
+write_bru(
+    p08,
+    "04 — BYOK to Provider Chat.bru",
+    """meta {
   name: 04 — BYOK to Provider Chat
   type: http
   seq: 4
@@ -3387,9 +3839,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "05 — Agent to Tool Verification.bru", """meta {
+write_bru(
+    p08,
+    "05 — Agent to Tool Verification.bru",
+    """meta {
   name: 05 — Agent to Tool Verification
   type: http
   seq: 5
@@ -3410,9 +3866,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "06 — Approval to Resume Flow.bru", """meta {
+write_bru(
+    p08,
+    "06 — Approval to Resume Flow.bru",
+    """meta {
   name: 06 — Approval to Resume Flow
   type: http
   seq: 6
@@ -3433,9 +3893,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "07 — Chat to Cache to FinOps.bru", """meta {
+write_bru(
+    p08,
+    "07 — Chat to Cache to FinOps.bru",
+    """meta {
   name: 07 — Chat to Cache to FinOps
   type: http
   seq: 7
@@ -3456,9 +3920,13 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
-write_bru(p08, "08 — Failure to Recovery Result.bru", """meta {
+write_bru(
+    p08,
+    "08 — Failure to Recovery Result.bru",
+    """meta {
   name: 08 — Failure to Recovery Result
   type: http
   seq: 8
@@ -3475,7 +3943,8 @@ tests {
     expect(res.getStatus()).to.equal(200);
   });
 }
-""")
+""",
+)
 
 print("[OK] Public and private directories created.")
 

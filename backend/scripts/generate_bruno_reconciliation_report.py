@@ -72,19 +72,21 @@ for bf in bru_files:
         classification = "EXACT MATCH"
         notes = "Safe public operational example or smoke verification matching OpenAPI 3.1.0 contract."
 
-    records.append({
-        "rel_path": rel_path,
-        "method": method,
-        "raw_url": raw_url,
-        "template_path": template_path,
-        "auth_type": auth_type,
-        "has_body": has_body,
-        "has_tests": has_tests,
-        "classification": classification,
-        "is_private": is_private,
-        "is_external": is_external,
-        "notes": notes,
-    })
+    records.append(
+        {
+            "rel_path": rel_path,
+            "method": method,
+            "raw_url": raw_url,
+            "template_path": template_path,
+            "auth_type": auth_type,
+            "has_body": has_body,
+            "has_tests": has_tests,
+            "classification": classification,
+            "is_private": is_private,
+            "is_external": is_external,
+            "notes": notes,
+        }
+    )
 
 # Compute summary stats
 counts = {}
@@ -122,11 +124,11 @@ lines = [
     f"| **EXACT MATCH** | {counts.get('EXACT MATCH', 0)} | Safe public API examples, smoke checks, and OpenAPI operations. | `public/` |",
     f"| **SECURITY-SENSITIVE** | {counts.get('SECURITY-SENSITIVE', 0)} | Negative tests, attack payloads, chaos, tenant boundaries, and failure injection. | `private/` |",
     f"| **LIVE-ONLY** | {counts.get('LIVE-ONLY', 0)} | Live FinnApiGo authority and live third-party model providers (BLOCKED when offline). | `private/` |",
-    f"| **VALID BUT OUTDATED** | 0 | All outdated endpoints reconciled to current routes. | N/A |",
-    f"| **OBSOLETE** | 0 | All obsolete legacy endpoints removed. | N/A |",
-    f"| **DUPLICATE** | 0 | All requests consolidated with distinct documented purposes. | N/A |",
-    f"| **BROKEN** | 0 | All requests validated with correct schemas and status codes. | N/A |",
-    f"| **MISSING** | 0 | All 51 current OpenAPI operations covered. | N/A |",
+    "| **VALID BUT OUTDATED** | 0 | All outdated endpoints reconciled to current routes. | N/A |",
+    "| **OBSOLETE** | 0 | All obsolete legacy endpoints removed. | N/A |",
+    "| **DUPLICATE** | 0 | All requests consolidated with distinct documented purposes. | N/A |",
+    "| **BROKEN** | 0 | All requests validated with correct schemas and status codes. | N/A |",
+    "| **MISSING** | 0 | All 51 current OpenAPI operations covered. | N/A |",
     f"| **TOTAL ACTIVE** | **{len(records)}** | **Full reconciled workspace collection.** | **{public_count} Pub / {private_count} Priv** |",
     "",
     "---",
@@ -148,16 +150,16 @@ lines.append("---")
 lines.append("")
 lines.append("## 3. OpenAPI 51-Operation Full Coverage Verification")
 lines.append("")
-lines.append("Every single registered public HTTP operation in JakeAI is accounted for:")
+lines.append(
+    "Every single registered public HTTP operation in JakeAI is accounted for:"
+)
 lines.append("")
 lines.append("| # | Operation | Method | Path | Bruno Primary Coverage | Partition |")
 lines.append("|:---:|---|:---:|---|---|:---:|")
 
 for op_idx, (m, p) in enumerate(sorted(openapi_ops), 1):
     matching = [
-        r["rel_path"]
-        for r in records
-        if r["method"] == m and r["template_path"] == p
+        r["rel_path"] for r in records if r["method"] == m and r["template_path"] == p
     ]
     pub_matching = [f for f in matching if "public/" in f]
     priv_matching = [f for f in matching if "private/" in f]

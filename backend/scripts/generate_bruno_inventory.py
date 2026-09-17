@@ -133,9 +133,7 @@ for path, p_data in sorted(spec["paths"].items()):
                     .get("items", {})
                     .get("$ref", "")
                 )
-                resp_model = (
-                    f"List[{i_ref.split('/')[-1]}]" if i_ref else "List[Any]"
-                )
+                resp_model = f"List[{i_ref.split('/')[-1]}]" if i_ref else "List[Any]"
             else:
                 resp_model = "JSON Object"
         else:
