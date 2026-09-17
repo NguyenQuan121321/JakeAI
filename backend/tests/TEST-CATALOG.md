@@ -1,20 +1,21 @@
 # TEST-CATALOG — JakeAI Automated Test Suite Catalog
-**Audit Baseline**: `main` (`971a340`) | **Status**: TEST-08 BRUNO CLI AUTOMATION COMPLETED
+**Audit Baseline**: `main` (`92e745a`) | **Status**: TEST-11 CI TEST ORCHESTRATION COMPLETED
 **Scope**: Complete inventory of every test file, test class, and test family under `backend/tests/` and automated Bruno collection under `Bruno/`
 
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 130 tracked in catalog (128 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 128
-- **Total Test Functions / Methods**: 1,403 (collected by Pytest as 1,877 test items)
+- **Total Tracked Test Files**: 132 tracked in catalog (130 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 130
+- **Total Test Functions / Methods**: 1,414 (collected by Pytest as 1,888 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 36 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131`)
+  - `CREATED`: 38 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131` + 2 CI Orchestration in TEST-11: `CAT-132`..`CAT-133`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
+  - `CI-*`: 2 files (`CI-001` through `CI-002`, 11 tests)
   - `DEP-*`: 3 files (`DEP-001` through `DEP-003`, 35 tests)
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
@@ -22,14 +23,14 @@
   - `E2E-*`: 3 files (`E2E-001` through `E2E-003`, 39 tests)
   - `AI-*`: 14 files (`AI-001` through `AI-014`, 131 tests)
   - `INT-*`: 25 files (`INT-001` through `INT-025`, 332 tests)
-  - `UNIT-*`: 61 files (`UNIT-001` through `UNIT-061`, 1,011 tests)
+  - `UNIT-*`: 63 files (`UNIT-001` through `UNIT-063`, 1,022 tests)
 - **Duplicate / Overlap Status Breakdown**:
-  - `COMPLEMENTARY`: 75 files
-  - `UNIQUE`: 36 files
+  - `COMPLEMENTARY`: 77 files
+  - `UNIQUE`: 38 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,749 passed, 3 skipped in offline mode, 0 failed)
-- **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
+- **Test Suite Pass Rate**: **100%** (1,760 passed, 3 skipped in offline mode, 0 failed)
+- **Code Coverage**: Branch: **88%+** (>=85% gate), Line: **91%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
 
@@ -3033,6 +3034,31 @@ JakeAI enforces automated, reproducible, and verifiable dependency governance (`
 | `DEP-001` | `CAT-129` | [`tests/unit/test_dependency_categories.py`](file:///e:/JakeAI/backend/tests/unit/test_dependency_categories.py) | Verification of all 11 dependency categories, requirements parsing, direct vs transitive classification, and pyproject minimum bound compatibility | All 11 categories (fastapi, pydantic, starlette, httpx, langchain, langgraph, qdrant, redis, pyjwt, providers, test tooling) | Continuous Integration | PR / Push (main) |
 | `DEP-002` | `CAT-130` | [`tests/unit/test_dependency_breakage_classifier.py`](file:///e:/JakeAI/backend/tests/unit/test_dependency_breakage_classifier.py) | Verification of automated breakage classification, 8-field reporting, root cause diagnosis, and rollback recommendations across breaking patterns | FastAPI deprecation, OpenAPI drift, Pydantic validator mutation, Starlette SSE drift, HTTPX transport, LangGraph interrupt, LangChain imports, Qdrant models, Redis kwargs, PyJWT algorithms, Tiktoken encoding | Continuous Integration | PR / Push (main) |
 | `DEP-003` | `CAT-131` | [`tests/unit/test_dependency_regression_runner.py`](file:///e:/JakeAI/backend/tests/unit/test_dependency_regression_runner.py) | Verification of semver diff detection, validation suite orchestration, regression reporting, and JSON/Markdown artifact emission | Diff detector, validation runner, reporter, artifact emission | Continuous Integration | PR / Push (main) |
+
+---
+
+## 9. TEST-11 — JakeAI CI Test Orchestration & Governance
+
+### 9.1 Architecture Overview
+TEST-11 introduces a 4-tier testing hierarchy that completely eliminates monolithic CI bottlenecks while enforcing strict reliability guarantees:
+- **Tier 1 — Fast PR Gate (< 5 Minutes)**: High-velocity feedback for pull requests running static analysis, type checking, in-memory unit tests, critical integration, contract & schema drift, runtime security, critical AI regression, critical business E2E, Bruno smoke, and coverage gates (>= 85% line/branch, >= 80% patch).
+- **Tier 2 — Strong Main Gate**: Full regression on every merge to `main`, including full unit, full integration, full contract, full security (SEC-001..SEC-010), full AI evaluation, full E2E workflows, full Bruno CLI collection, concurrency load stability, dependency audit, and container vulnerability scanning.
+- **Tier 3 — Deep Nightly Verification**: Off-peak statistical performance profiling (PERF-001..PERF-006) and live provider AI quality benchmarks.
+- **Tier 4 — Strict Release Verification**: Continuous deployment gating in `cd.yml` verifying OpenAPI zero-drift, CycloneDX release SBOM, Cosign keyless OIDC signing, and container vulnerability scans before tagging or artifact release.
+
+### 9.2 Key Invariants Enforced
+1. **Parallelization & Isolation**: 12 decoupled parallel CI jobs (`secret-scanning`, `static-and-quality`, `typecheck-backend`, `frontend-quality`, `unit-tests`, `contract-and-security`, `integration-tests`, `ai-and-evals`, `e2e-and-bruno`, `perf-and-dependency-gate`, `coverage-and-reporting`, `container-build-and-scan`). Each runner VM provisions its own dedicated ephemeral Redis and Qdrant containers to prevent cross-job race conditions or shared mutable state.
+2. **Centralized Pytest Markers**: Central registration in `pyproject.toml` and dynamic assignment hook in `tests/conftest.py` assigning `unit`, `integration`, `contract`, `security`, `ai`, `e2e`, `performance`, and `slow` across all 1,912 collected items.
+3. **Flaky Test Elimination**: Zero infinite retries. Any test passing on retry is classified as `FLAKY` (never a false `PASS`) in `reports/flaky/flaky-tests.json` and blocked on Main and Release gates via `--fail-on-flaky`.
+4. **Forensic Failure Reporting**: Unified reporter `scripts/ci_failure_reporter.py` consolidating JUnit XML, Bruno JSON, and benchmark outputs to render layer, test, file, scenario, dependency, log snippet, and artifact path.
+
+### 9.3 CI Orchestration Test Suites Table
+
+| LOGICAL ID | LEGACY ID | FILE | PURPOSE | SUBSYSTEM | CI JOB | RUN FREQUENCY |
+|---|---|---|---|---|---|---|
+| `CI-001` | `CAT-132` | [`tests/unit/test_ci_failure_reporter.py`](file:///e:/JakeAI/backend/tests/unit/test_ci_failure_reporter.py) | Unit tests verifying layer classification, dependency inference, JUnit XML parsing, Bruno JSON ingestion, flaky ledger parsing, and Markdown reporting | Core / Platform | unit-tests | PR / Push (main) |
+| `CI-002` | `CAT-133` | [`tests/unit/test_ci_flaky_tracker.py`](file:///e:/JakeAI/backend/tests/unit/test_ci_flaky_tracker.py) | Unit tests verifying retry bounding, explicit FLAKY classification, JSON ledger serialization, and --fail-on-flaky gate blocking | Core / Platform | unit-tests | PR / Push (main) |
+
 
 
 

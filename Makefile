@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live dep-audit dep-diff dep-validate
+.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live dep-audit dep-diff dep-validate ci-pr ci-main ci-report flaky-check
 
 PYTHON ?= python
 UV ?= uv
@@ -29,6 +29,10 @@ help:
 	@echo "  make dep-audit    Audit all dependencies across 11 architectural categories"
 	@echo "  make dep-diff     Detect dependency version deltas against base reference"
 	@echo "  make dep-validate Execute automated dependency regression validation suites"
+	@echo "  make ci-pr        Execute local PR Gate verification suite"
+	@echo "  make ci-main      Execute local Main Gate verification suite"
+	@echo "  make ci-report    Consolidate test failure and forensic reporting"
+	@echo "  make flaky-check  Scan test suite for intermittent / flaky test behavior"
 	@echo "  make audit        Scan dependencies for CVEs using pip-audit"
 	@echo "  make sast         Run static application security testing using Bandit"
 	@echo "  make openapi      Export static OpenAPI specification JSON"
@@ -91,6 +95,43 @@ dep-diff:
 
 dep-validate:
 	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode validate --dry-run
+
+ci-pr:
+	cd backend && $(RUFF) check .
+	cd backend && $(RUFF) format --check .
+	cd backend && $(MYPY) app
+	cd backend && $(PYTEST) -m unit -v
+	cd backend && $(PYTEST) -m contract -v
+	cd backend && $(PYTEST) -m security -v
+	cd backend && $(PYTEST) -m "integration and not slow" -v
+	cd backend && $(PYTEST) tests/evals/test_rag_regression.py tests/evals/test_canary_leakage.py -v
+	cd backend && $(PYTEST) tests/e2e/test_e2e_business_workflows.py -v -m "critical_e2e and not live_external"
+	$(PYTHON) scripts/run_bruno_tests.py --suite smoke --auto-start
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
+
+ci-main:
+	cd backend && $(RUFF) check .
+	cd backend && $(RUFF) format --check .
+	cd backend && $(MYPY) app
+	cd backend && $(PYTEST) -m unit -v
+	cd backend && $(PYTEST) -m contract -v
+	cd backend && $(PYTEST) -m security -v
+	cd backend && $(PYTEST) -m integration -v
+	cd backend && $(PYTEST) -m ai -v
+	cd backend && $(PYTEST) -m "e2e and not live_external" -v
+	$(PYTHON) scripts/run_bruno_tests.py --suite full --auto-start
+	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode smoke --fail-on-regression
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode audit
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode validate --fail-on-breakage
+	cd backend && $(PYTEST) --cov=app --cov-branch tests/ -v --cov-report=xml:coverage.xml --cov-fail-under=85
+	cd backend && $(PYTHON) scripts/check_coverage_diff.py --min-line 85 --min-patch 80
+
+ci-report:
+	$(PYTHON) scripts/ci_failure_reporter.py --report-dirs backend/reports backend/benchmark-results --output-dir backend/reports/summary
+
+flaky-check:
+	cd backend && $(PYTHON) scripts/ci_flaky_tracker.py --check-ledger reports/flaky/flaky-tests.json
 
 audit:
 	cd backend && $(PIP_AUDIT) -r requirements.txt
