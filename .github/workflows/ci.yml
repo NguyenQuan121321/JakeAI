@@ -334,6 +334,21 @@ jobs:
           path: backend/openapi.json
           retention-days: 14
 
+      - name: Dependency Regression Audit & Validation Gate (TEST-10)
+        run: |
+          cd backend
+          python scripts/run_dependency_regression.py --mode audit
+          python scripts/run_dependency_regression.py --mode validate --dry-run --fail-on-breakage
+          pytest tests/unit/test_dependency_categories.py tests/unit/test_dependency_breakage_classifier.py tests/unit/test_dependency_regression_runner.py -v
+
+      - name: Archive Dependency Regression Artifacts
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-regression-report
+          path: backend/reports/dependencies/
+          retention-days: 14
+
   container-build-and-scan:
     name: Container Packaging & Vulnerability Scan
     runs-on: ubuntu-latest

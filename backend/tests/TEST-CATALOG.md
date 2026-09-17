@@ -5,16 +5,17 @@
 ---
 
 ## 1. Catalog Overview & Summary Statistics
-- **Total Tracked Test Files**: 127 tracked in catalog (125 active test files + 1 shared fixture module + 1 deleted obsolete file)
-- **Active Executable Test Files**: 125
-- **Total Test Functions / Methods**: 1,368 (collected by Pytest as 1,842 test items)
+- **Total Tracked Test Files**: 130 tracked in catalog (128 active test files + 1 shared fixture module + 1 deleted obsolete file)
+- **Active Executable Test Files**: 128
+- **Total Test Functions / Methods**: 1,403 (collected by Pytest as 1,877 test items)
 - **Dispositions Summary**:
   - `PRESERVED`: 22 files (in existing directories `evals/`, `unit/`, `contract/`)
   - `MOVED`: 71 files (relocated to authoritative target directories `unit/`, `integration/`, `contract/`, `security/`, `e2e/`, `performance/`)
-  - `CREATED`: 33 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128`)
+  - `CREATED`: 36 files (9 unit in TEST-02 + 9 integration in TEST-03 + 2 contract in TEST-04 + 5 runtime security in TEST-05 + 3 AI/RAG/Hallucination evaluation in TEST-06 + 1 E2E business workflows in TEST-07: `CAT-124` + 4 Performance in TEST-09: `CAT-125`..`CAT-128` + 3 Dependency Regression in TEST-10: `CAT-129`..`CAT-131`)
   - `DELETED`: 1 file (`test_semantic_cache.py` - proven obsolete 128-d synthetic vector stub)
   - `FIXTURES`: 1 module (`tests/fixtures/` with `auth.py`, `client.py` + root `conftest.py` loader)
 - **Logical IDs Assigned**:
+  - `DEP-*`: 3 files (`DEP-001` through `DEP-003`, 35 tests)
   - `CONTRACT-*`: 7 files (`CONTRACT-001` through `CONTRACT-007`, 164 tests)
   - `SEC-*`: 10 files (`SEC-001` through `SEC-010`, 141 tests)
   - `PERF-*`: 6 files (`PERF-001` through `PERF-006`, 24 tests)
@@ -24,10 +25,10 @@
   - `UNIT-*`: 61 files (`UNIT-001` through `UNIT-061`, 1,011 tests)
 - **Duplicate / Overlap Status Breakdown**:
   - `COMPLEMENTARY`: 75 files
-  - `UNIQUE`: 33 files
+  - `UNIQUE`: 36 files
   - `PARTIAL OVERLAP`: 8 files (preserved across distinct testing layers)
   - `OBSOLETE`: 1 file (`test_semantic_cache.py`, successfully deleted)
-- **Test Suite Pass Rate**: **100%** (1,714 passed, 3 skipped in offline mode, 0 failed)
+- **Test Suite Pass Rate**: **100%** (1,749 passed, 3 skipped in offline mode, 0 failed)
 - **Code Coverage**: Branch: **87%+** (>=85% gate), Line: **90%+** (>=85% gate), Patch: **95%+** (>=80% gate)
 
 ---
@@ -2983,6 +2984,56 @@ JakeAI implements an automated, reproducible performance regression detection an
 | `PERF-004` | `CAT-126` | [`tests/performance/test_load_and_concurrency.py`](file:///e:/JakeAI/backend/tests/performance/test_load_and_concurrency.py) | Multi-worker concurrency, contention stability & SSE frame integrity | Chat, Redis, SSE, Qdrant | Scheduled Benchmark | Nightly / Release |
 | `PERF-005` | `CAT-127` | [`tests/performance/test_performance_regression_gate.py`](file:///e:/JakeAI/backend/tests/performance/test_performance_regression_gate.py) | Regression detector tolerance, noise floor, and artifact generation | Detector engine & store | Continuous Integration | PR / Push (main) |
 | `PERF-006` | `CAT-128` | [`tests/performance/test_performance_exceptions.py`](file:///e:/JakeAI/backend/tests/performance/test_performance_exceptions.py) | Non-fatal network failure in warmup, defect propagation, cancellation | Scenarios, Runner, Reporter | Continuous Integration | PR / Push (main) |
+
+---
+
+## 8. Dependency Regression Automation Suite (TEST-10)
+
+### 8.1 Architecture & Governance Overview
+JakeAI enforces automated, reproducible, and verifiable dependency governance (`app/dependencies/`, `tests/unit/test_dependency_*.py`, `backend/scripts/run_dependency_regression.py`):
+- **Version Preservation Principle**: No production dependencies are upgraded blindly or altered arbitrarily. All updates must be triggered deliberately and validated against comprehensive regression gates.
+- **Architectural Dependency Categorization**: All repository dependencies are rigorously categorized into 11 authoritative subsystems:
+  1. `fastapi`: Core application routing, ASGI interface, OpenAPI specification generator (`fastapi`, `uvicorn`).
+  2. `pydantic`: Schema validation, domain contracts, structured output, settings (`pydantic`, `pydantic-settings`, `pydantic-core`).
+  3. `starlette`: Low-level ASGI transport, middleware pipeline, SSE streaming (`starlette`).
+  4. `httpx`: Async HTTP client transport, provider wire communications, ASGI test client fixtures (`httpx`, `httpcore`).
+  5. `langchain`: Prompt templates, document chunkers, base message models (`langchain`, `langchain-core`, `langchain-text-splitters`).
+  6. `langgraph`: Multi-agent state graph orchestration, interrupt & resume bridge, checkpointer (`langgraph`, `langgraph-checkpoint`, `langgraph-prebuilt`, `langgraph-sdk`).
+  7. `qdrant_client`: Vector database storage, dense points, similarity retrieval, FastEmbed local embeddings, PDF extraction (`qdrant-client`, `fastembed`, `pypdf`).
+  8. `redis_client`: Distributed caching (Tier 1), FinOps token ledger quotas, atomic locks, durable task queues (`redis`).
+  9. `pyjwt`: Perimeter authentication, JWT claim validation, AES-256-GCM BYOK encryption, Sigstore Cosign OIDC signing (`pyjwt`, `cryptography`).
+  10. `provider_sdks`: Direct REST HTTP protocol adapters (`openai`, `anthropic`, `gemini`, `deepseek`, `local`), BPE token budgeting (`tiktoken`).
+  11. `test_tooling`: Test runners, coverage gates, linters, SAST, CVE scanners, Bruno CLI runner (`pytest`, `pytest-asyncio`, `pytest-cov`, `ruff`, `mypy`, `bandit`, `pip-audit`, `pip-licenses`, `@usebruno/cli`).
+- **Automated Validation Matrix**: Avoids combinatorial explosion by executing targeted dependency-focused gates across:
+  - `lint` (`ruff check .`)
+  - `formatting` (`ruff format --check .`)
+  - `type checking` (`mypy --config-file mypy.ini app`)
+  - `unit` (`pytest tests/unit/`)
+  - `integration` (`pytest tests/integration/`)
+  - `contract` (`pytest tests/contract/`)
+  - `security` (`pytest tests/security/`)
+  - `AI critical regression` (`pytest tests/evals/test_eval_agent_automation.py tests/evals/test_eval_rag_automation.py tests/evals/test_eval_hallucination_automation.py`)
+  - `E2E critical regression` (`pytest tests/e2e/test_e2e_business_workflows.py -m "not live_external"`)
+  - `Bruno critical smoke` (`python scripts/run_bruno_tests.py --suite smoke --auto-start`)
+- **Deterministic Breakage Classification**: When a dependency update triggers a failure, the system automatically emits a structured 8-field diagnosis:
+  - `dependency`: Target dependency package name
+  - `old version`: Baseline version before update
+  - `new version`: Candidate version introducing failure
+  - `failure`: Error message, exception name, or failure summary
+  - `affected test`: Specific test file or test method broken by update
+  - `root cause`: Detailed technical root cause analysis
+  - `breaking API if confirmed`: Confirmed breaking API signature or removed attribute if applicable
+  - `rollback/revert recommendation`: Actionable rollback or revert recommendation with empirical evidence (strictly forbidding silent unevidenced pins)
+- **Dependabot Integration**: `.github/dependabot.yml` organizes Python packages into distinct, category-aligned groups matching the 11 architectural categories. This eliminates monolithic PR bottlenecks and prevents unrelated failures from stalling valid package upgrades.
+
+### 8.2 Dependency Regression Test Suites Table
+
+| LOGICAL ID | LEGACY ID | FILE | PURPOSE | CATEGORIES / TARGETS | CI EXECUTION | RUN FREQUENCY |
+|---|---|---|---|---|---|---|
+| `DEP-001` | `CAT-129` | [`tests/unit/test_dependency_categories.py`](file:///e:/JakeAI/backend/tests/unit/test_dependency_categories.py) | Verification of all 11 dependency categories, requirements parsing, direct vs transitive classification, and pyproject minimum bound compatibility | All 11 categories (fastapi, pydantic, starlette, httpx, langchain, langgraph, qdrant, redis, pyjwt, providers, test tooling) | Continuous Integration | PR / Push (main) |
+| `DEP-002` | `CAT-130` | [`tests/unit/test_dependency_breakage_classifier.py`](file:///e:/JakeAI/backend/tests/unit/test_dependency_breakage_classifier.py) | Verification of automated breakage classification, 8-field reporting, root cause diagnosis, and rollback recommendations across breaking patterns | FastAPI deprecation, OpenAPI drift, Pydantic validator mutation, Starlette SSE drift, HTTPX transport, LangGraph interrupt, LangChain imports, Qdrant models, Redis kwargs, PyJWT algorithms, Tiktoken encoding | Continuous Integration | PR / Push (main) |
+| `DEP-003` | `CAT-131` | [`tests/unit/test_dependency_regression_runner.py`](file:///e:/JakeAI/backend/tests/unit/test_dependency_regression_runner.py) | Verification of semver diff detection, validation suite orchestration, regression reporting, and JSON/Markdown artifact emission | Diff detector, validation runner, reporter, artifact emission | Continuous Integration | PR / Push (main) |
+
 
 
 

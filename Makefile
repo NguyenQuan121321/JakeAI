@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live
+.PHONY: help install dev lint format typecheck test test-cov eval audit sast openapi docker-up docker-down clean bruno-smoke bruno-e2e bruno-full bruno-live dep-audit dep-diff dep-validate
 
 PYTHON ?= python
 UV ?= uv
@@ -26,6 +26,9 @@ help:
 	@echo "  make perf-smoke   Run fast performance regression smoke suite (<10s)"
 	@echo "  make perf-full    Run full statistical performance load benchmark"
 	@echo "  make perf-baseline Record new versioned empirical baseline"
+	@echo "  make dep-audit    Audit all dependencies across 11 architectural categories"
+	@echo "  make dep-diff     Detect dependency version deltas against base reference"
+	@echo "  make dep-validate Execute automated dependency regression validation suites"
 	@echo "  make audit        Scan dependencies for CVEs using pip-audit"
 	@echo "  make sast         Run static application security testing using Bandit"
 	@echo "  make openapi      Export static OpenAPI specification JSON"
@@ -79,6 +82,15 @@ perf-full:
 
 perf-baseline:
 	cd backend && $(PYTHON) scripts/run_performance_benchmark.py --mode baseline-record --baseline-version v1
+
+dep-audit:
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode audit
+
+dep-diff:
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode diff
+
+dep-validate:
+	cd backend && $(PYTHON) scripts/run_dependency_regression.py --mode validate --dry-run
 
 audit:
 	cd backend && $(PIP_AUDIT) -r requirements.txt
