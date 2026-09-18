@@ -86,11 +86,20 @@ export const handlers = [
   http.post("*/api/v1/byok/keys", async ({ request }) => handleStoreByokKey(request)),
   http.post("/api/v1/byok/keys", async ({ request }) => handleStoreByokKey(request)),
 
-  http.post("*/api/v1/byok/keys/validate", () => HttpResponse.json({ is_valid: true, provider: "cohere", error: null })),
-  http.post("/api/v1/byok/keys/validate", () => HttpResponse.json({ is_valid: true, provider: "cohere", error: null })),
+  http.post("*/api/v1/byok/keys/validate", async ({ request }) => handleValidateCandidateKey(request)),
+  http.post("/api/v1/byok/keys/validate", async ({ request }) => handleValidateCandidateKey(request)),
 
-  http.delete("*/api/v1/byok/keys/:provider", () => HttpResponse.json({ message: "Key revoked and deleted" })),
-  http.delete("/api/v1/byok/keys/:provider", () => HttpResponse.json({ message: "Key revoked and deleted" })),
+  http.post("*/api/v1/byok/keys/:provider/validate", ({ params }) => handleValidateExistingKey(params.provider as string)),
+  http.post("/api/v1/byok/keys/:provider/validate", ({ params }) => handleValidateExistingKey(params.provider as string)),
+
+  http.post("*/api/v1/byok/keys/:provider/rotate", async ({ params, request }) => handleRotateByokKey(params.provider as string, request)),
+  http.post("/api/v1/byok/keys/:provider/rotate", async ({ params, request }) => handleRotateByokKey(params.provider as string, request)),
+
+  http.post("*/api/v1/byok/keys/:provider/revoke", ({ params }) => handleRevokeByokKey(params.provider as string)),
+  http.post("/api/v1/byok/keys/:provider/revoke", ({ params }) => handleRevokeByokKey(params.provider as string)),
+
+  http.delete("*/api/v1/byok/keys/:provider", ({ params }) => handleDeleteByokKey(params.provider as string)),
+  http.delete("/api/v1/byok/keys/:provider", ({ params }) => handleDeleteByokKey(params.provider as string)),
 
   // FinOps
   http.get("*/api/v1/finops/summary", () => handleFinopsSummary()),
@@ -115,11 +124,11 @@ export const handlers = [
   http.post("*/api/v1/rag/generate", async ({ request }) => handleRagGenerate(request)),
   http.post("/api/v1/rag/generate", async ({ request }) => handleRagGenerate(request)),
 
-  http.post("*/api/v1/rag/ingest", () => HttpResponse.json({ status: "accepted", indexed_chunks: 1, chunk_ids: ["chunk-1"], source: "policy.pdf", tenant_id: "tenant_jakeai_core" }, { status: 201 })),
-  http.post("/api/v1/rag/ingest", () => HttpResponse.json({ status: "accepted", indexed_chunks: 1, chunk_ids: ["chunk-1"], source: "policy.pdf", tenant_id: "tenant_jakeai_core" }, { status: 201 })),
+  http.post("*/api/v1/rag/ingest", async ({ request }) => handleRagIngest(request)),
+  http.post("/api/v1/rag/ingest", async ({ request }) => handleRagIngest(request)),
 
-  http.get("*/api/v1/rag/tasks/:taskId", ({ params }) => HttpResponse.json({ task_id: params.taskId, tenant_id: "tenant_jakeai_core", status: "completed", processed_chunks: 42, total_chunks: 42, created_at: "2026-09-17T20:00:00Z" })),
-  http.get("/api/v1/rag/tasks/:taskId", ({ params }) => HttpResponse.json({ task_id: params.taskId, tenant_id: "tenant_jakeai_core", status: "completed", processed_chunks: 42, total_chunks: 42, created_at: "2026-09-17T20:00:00Z" })),
+  http.get("*/api/v1/rag/tasks/:taskId", ({ params }) => handleGetRagTask(params.taskId as string)),
+  http.get("/api/v1/rag/tasks/:taskId", ({ params }) => handleGetRagTask(params.taskId as string)),
 
   // Analytics & Billing
   http.get("*/api/v1/analytics/dashboard", () => HttpResponse.json({
@@ -566,27 +575,138 @@ async function handleUpdateQuota(request: Request) {
   });
 }
 
+interface MockByokKey {
+  provider: string;
+  masked_key: string;
+  configured: boolean;
+  status: string;
+  tenant_id: string;
+  last_validated_at?: string;
+  validation_status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const INITIAL_MOCK_BYOK_KEYS: MockByokKey[] = [
+  { provider: "openai", masked_key: "sk-...9a8b", configured: true, status: "active", tenant_id: "tenant_jakeai_core", last_validated_at: "2026-09-17T20:00:00Z", validation_status: "valid" },
+  { provider: "anthropic", masked_key: "sk-...3c4d", configured: true, status: "active", tenant_id: "tenant_jakeai_core", last_validated_at: "2026-09-17T20:00:00Z", validation_status: "valid" },
+];
+
+let mockByokKeys: MockByokKey[] = JSON.parse(JSON.stringify(INITIAL_MOCK_BYOK_KEYS));
+
+export function resetMockByokKeys() {
+  mockByokKeys = JSON.parse(JSON.stringify(INITIAL_MOCK_BYOK_KEYS));
+}
+
 function handleByokKeys() {
   return HttpResponse.json({
-    keys: [
-      { provider: "openai", masked_key: "sk-...9a8b", status: "active", tenant_id: "tenant_jakeai_core" },
-      { provider: "anthropic", masked_key: "sk-...3c4d", status: "active", tenant_id: "tenant_jakeai_core" },
-    ],
+    tenant_id: "tenant_jakeai_core",
+    keys: mockByokKeys,
   });
 }
 
 async function handleStoreByokKey(request: Request) {
-  const body = (await request.json()) as { provider: string; api_key: string };
+  const body = (await request.json()) as { provider: string; api_key: string; validate_key?: boolean };
+  const existingIdx = mockByokKeys.findIndex((k) => k.provider === body.provider);
+  const newItem = {
+    provider: body.provider,
+    masked_key: `sk-...${body.api_key.slice(-4)}`,
+    configured: true,
+    status: "active",
+    tenant_id: "tenant_jakeai_core",
+    created_at: new Date().toISOString(),
+    last_validated_at: new Date().toISOString(),
+    validation_status: "valid",
+  };
+  if (existingIdx >= 0) {
+    mockByokKeys[existingIdx] = newItem;
+  } else {
+    mockByokKeys.push(newItem);
+  }
+  return HttpResponse.json(newItem, { status: 201 });
+}
+
+async function handleValidateCandidateKey(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as { provider?: string; api_key?: string };
+  if (body.api_key?.includes("invalid")) {
+    return HttpResponse.json({ provider: body.provider || "openai", is_valid: false, error: "Authentication failed with upstream provider (Invalid API key)" });
+  }
+  if (body.api_key?.includes("rate-limited")) {
+    return HttpResponse.json({ detail: "Rate limit exceeded on provider endpoint" }, { status: 429 });
+  }
+  if (body.api_key?.includes("unavailable")) {
+    return HttpResponse.json({ detail: "Provider API is temporarily unavailable" }, { status: 503 });
+  }
+  return HttpResponse.json({
+    provider: body.provider || "openai",
+    is_valid: true,
+    error: null,
+  });
+}
+
+function handleValidateExistingKey(provider: string) {
+  const existing = mockByokKeys.find((k) => k.provider === provider);
+  if (!existing || existing.status === "revoked") {
+    return HttpResponse.json({
+      provider,
+      is_valid: false,
+      error: "No active key configured for provider",
+    });
+  }
+  return HttpResponse.json({
+    provider,
+    is_valid: true,
+    error: null,
+  });
+}
+
+async function handleRotateByokKey(provider: string, request: Request) {
+  const body = (await request.json()) as { new_api_key: string; validate_key?: boolean };
+  const existing = mockByokKeys.find((k) => k.provider === provider);
+  const updated = {
+    provider,
+    masked_key: `sk-...${body.new_api_key.slice(-4)}`,
+    configured: true,
+    status: "active",
+    tenant_id: "tenant_jakeai_core",
+    updated_at: new Date().toISOString(),
+    last_validated_at: new Date().toISOString(),
+    validation_status: "valid",
+  };
+  if (existing) {
+    Object.assign(existing, updated);
+  } else {
+    mockByokKeys.push(updated);
+  }
+  return HttpResponse.json(updated, { status: 200 });
+}
+
+function handleRevokeByokKey(provider: string) {
+  const existing = mockByokKeys.find((k) => k.provider === provider);
+  if (existing) {
+    existing.status = "revoked";
+    existing.configured = false;
+  }
   return HttpResponse.json(
-    {
+    existing || {
+      provider,
+      masked_key: "sk-...revoked",
+      configured: false,
+      status: "revoked",
       tenant_id: "tenant_jakeai_core",
-      provider: body.provider,
-      masked_key: `sk-...${body.api_key.slice(-4)}`,
-      status: "active",
-      created_at: new Date().toISOString(),
     },
-    { status: 201 }
+    { status: 200 }
   );
+}
+
+function handleDeleteByokKey(provider: string) {
+  mockByokKeys = mockByokKeys.filter((k) => k.provider !== provider);
+  return HttpResponse.json({
+    tenant_id: "tenant_jakeai_core",
+    provider,
+    status: "revoked",
+    message: "Key revoked and deleted",
+  });
 }
 
 function handleFinopsSummary() {
@@ -676,38 +796,246 @@ function handleReconciliation() {
   });
 }
 
+const mockRagTasks: Record<string, { count: number; source: string; status: string }> = {};
+
+async function handleRagIngest(request: Request) {
+  const url = new URL(request.url);
+  const isAsync = url.searchParams.get("async_mode") === "true";
+  const body = (await request.json().catch(() => ({}))) as { content?: string; source?: string; fail?: boolean };
+
+  if (body.fail || body.content?.includes("fail-now")) {
+    return HttpResponse.json({ detail: "Unsupported document format or corrupted encoding" }, { status: 400 });
+  }
+
+  if (isAsync) {
+    const taskId = `task-ingest-${Date.now()}`;
+    mockRagTasks[taskId] = { count: 0, source: body.source || "document.pdf", status: "queued" };
+    return HttpResponse.json(
+      {
+        task_id: taskId,
+        tenant_id: "tenant_jakeai_core",
+        status: "queued",
+        source: body.source || "document.pdf",
+        created_at: Date.now() / 1000,
+      },
+      { status: 202 }
+    );
+  }
+
+  return HttpResponse.json(
+    {
+      status: "accepted",
+      indexed_chunks: 3,
+      chunk_ids: ["chunk-1", "chunk-2", "chunk-3"],
+      source: body.source || "document.pdf",
+      tenant_id: "tenant_jakeai_core",
+    },
+    { status: 201 }
+  );
+}
+
+function handleGetRagTask(taskId: string) {
+  if (taskId === "rag-task-555" || taskId.includes("completed")) {
+    return HttpResponse.json({
+      task_id: taskId,
+      tenant_id: "tenant_jakeai_core",
+      status: "completed",
+      source: "policy.pdf",
+      content: "Enterprise AI Security requires perimeter isolation.",
+      chunk_size: 500,
+      chunk_overlap: 50,
+      created_at: Date.now() / 1000 - 30,
+      started_at: Date.now() / 1000 - 25,
+      completed_at: Date.now() / 1000,
+      error: null,
+      result: {
+        status: "success",
+        indexed_chunks: 3,
+        chunk_ids: ["chunk-1", "chunk-2", "chunk-3"],
+        source: "policy.pdf",
+        tenant_id: "tenant_jakeai_core",
+      },
+    });
+  }
+
+  if (!mockRagTasks[taskId]) {
+    mockRagTasks[taskId] = { count: 0, source: "policy.pdf", status: "queued" };
+  }
+  const task = mockRagTasks[taskId];
+  task.count += 1;
+
+  if (taskId.includes("fail") || task.source.includes("fail")) {
+    return HttpResponse.json({
+      task_id: taskId,
+      tenant_id: "tenant_jakeai_core",
+      status: "failed",
+      source: task.source,
+      content: "",
+      chunk_size: 500,
+      chunk_overlap: 50,
+      created_at: Date.now() / 1000 - 15,
+      started_at: Date.now() / 1000 - 10,
+      completed_at: Date.now() / 1000,
+      error: "Document parsing error: malformed PDF header detected",
+      result: null,
+    });
+  }
+
+  // Lifecycle progression: count 1 = queued, count 2 = processing, count 3+ = completed
+  const currentStatus = task.count === 1 ? "queued" : task.count === 2 ? "processing" : "completed";
+  task.status = currentStatus;
+
+  return HttpResponse.json({
+    task_id: taskId,
+    tenant_id: "tenant_jakeai_core",
+    status: currentStatus,
+    source: task.source,
+    content: "Enterprise AI Security requires perimeter isolation.",
+    chunk_size: 500,
+    chunk_overlap: 50,
+    created_at: Date.now() / 1000 - 10,
+    started_at: Date.now() / 1000 - 5,
+    completed_at: currentStatus === "completed" ? Date.now() / 1000 : null,
+    error: null,
+    result:
+      currentStatus === "completed"
+        ? {
+            status: "success",
+            indexed_chunks: 3,
+            chunk_ids: ["chunk-1", "chunk-2", "chunk-3"],
+            source: task.source,
+            tenant_id: "tenant_jakeai_core",
+          }
+        : null,
+  });
+}
+
 async function handleRagQuery(request: Request) {
-  const body = (await request.json()) as { query: string };
+  const body = (await request.json()) as {
+    query: string;
+    top_k?: number;
+    select_context?: boolean;
+    max_context_tokens?: number;
+  };
+
+  const isSingleMatchQuery = body.query === "perimeter security";
+
+  const allChunks = [
+    {
+      chunk_id: "chunk-1",
+      content: "Enterprise AI Security requires perimeter isolation and HSM tenant key scoping.",
+      score: 0.94,
+      source: "security-handbook.pdf",
+      tenant_id: "tenant_jakeai_core",
+      metadata: { department: "SecOps", classification: "Internal" },
+    },
+    {
+      chunk_id: "chunk-2",
+      content: "All inference requests enforce zero data retention and AES-256 encrypted vaults.",
+      score: 0.88,
+      source: "compliance-2026.pdf",
+      tenant_id: "tenant_jakeai_core",
+      metadata: { department: "Compliance", classification: "Public" },
+    },
+  ];
+
+  const chunks = isSingleMatchQuery ? [allChunks[0]] : allChunks.slice(0, body.top_k || 5);
+
   return HttpResponse.json({
     query: body.query,
     tenant_id: "tenant_jakeai_core",
-    chunks: [
-      {
-        chunk_id: "chunk-1",
-        content: "Enterprise AI Security requires perimeter isolation.",
-        score: 0.94,
-        source: "security-handbook.pdf",
-        tenant_id: "tenant_jakeai_core",
-      },
-    ],
-    latency_ms: 12.5,
-    sparse_matches: 1,
-    dense_matches: 1,
-    reciprocal_rank_fused: true,
-    cross_encoder_reranked: true,
+    chunks,
+    latency_ms: 18.5,
+    total_candidates: 12,
+    selected_context: body.select_context
+      ? "[1] Enterprise AI Security requires perimeter isolation and HSM tenant key scoping.\n[2] All inference requests enforce zero data retention and AES-256 encrypted vaults."
+      : null,
+    context_tokens: body.select_context ? 48 : null,
+    tokens_saved: body.select_context ? 152 : null,
+    reduction_ratio: body.select_context ? 0.76 : null,
   });
 }
 
 async function handleRagGenerate(request: Request) {
-  const body = (await request.json()) as { query: string };
+  const body = (await request.json()) as { query: string; model?: string; top_k?: number };
+  const queryLower = (body.query || "").toLowerCase();
+
+  // Epistemic abstention case
+  if (
+    queryLower.includes("martian") ||
+    queryLower.includes("alien") ||
+    queryLower.includes("abstain") ||
+    queryLower.includes("classified top-speed")
+  ) {
+    return HttpResponse.json({
+      query: body.query,
+      tenant_id: "tenant_jakeai_core",
+      answer: "I cannot answer this question as the knowledge base does not contain relevant verifiable evidence.",
+      citations: [],
+      context_tokens: 0,
+      tokens_saved: 0,
+      reduction_ratio: 0.0,
+      latency_ms: 145.0,
+      status: "ABSTAINED",
+      abstention_reason: "NO_RELEVANT_EVIDENCE",
+      grounding: {
+        is_grounded: false,
+        groundedness_ratio: 0.0,
+        unsupported_claim_rate: 1.0,
+        claims: [],
+      },
+      envelope_tokens: 0,
+    });
+  }
+
   return HttpResponse.json({
-    answer: `Grounded answer generated for: ${body.query}`,
-    citations: [{ source: "security-handbook.pdf", chunk_id: "chunk-1" }],
-    tokens_used: 150,
-    model: "gpt-4o",
-    latency_ms: 450.0,
-    retrieval_latency_ms: 15.0,
-    generation_latency_ms: 435.0,
+    query: body.query,
+    tenant_id: "tenant_jakeai_core",
+    answer: `Grounded synthesis for: ${body.query}. According to enterprise guidelines [1], perimeter isolation and cryptographic key scoping are required.`,
+    citations: [
+      {
+        index: 1,
+        source: "security-handbook.pdf",
+        snippet: "Enterprise AI Security requires perimeter isolation and HSM tenant key scoping.",
+        tenant_id: "tenant_jakeai_core",
+        confidence: 0.97,
+        chunk_id: "chunk-1",
+      },
+    ],
+    context_tokens: 180,
+    tokens_saved: 420,
+    reduction_ratio: 0.7,
+    latency_ms: 380.0,
+    status: "SUCCESS",
+    abstention_reason: null,
+    grounding: {
+      is_grounded: true,
+      groundedness_ratio: 1.0,
+      unsupported_claim_rate: 0.0,
+      claims: [
+        {
+          claim_text: "Perimeter isolation and cryptographic key scoping are required.",
+          entailment: "SUPPORTED",
+          confidence: 0.98,
+          supporting_chunk_ids: ["chunk-1"],
+          reasoning: "Direct factual entailment from security handbook chunk-1.",
+        },
+      ],
+      supported_claims: [
+        {
+          claim_text: "Perimeter isolation and cryptographic key scoping are required.",
+          entailment: "SUPPORTED",
+          confidence: 0.98,
+          supporting_chunk_ids: ["chunk-1"],
+          reasoning: "Direct factual entailment from security handbook chunk-1.",
+        },
+      ],
+      unsupported_claims: [],
+      contradicted_claims: [],
+      uncertain_claims: [],
+      verified_answer: `Grounded synthesis for: ${body.query}. According to enterprise guidelines [1], perimeter isolation and cryptographic key scoping are required.`,
+    },
+    envelope_tokens: 240,
   });
 }
 
