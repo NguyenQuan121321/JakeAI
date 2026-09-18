@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 
 from app.performance.contracts import (
+    MetricDirection,
     PerformanceRegressionReport,
     RegressionVerdict,
     ScenarioResult,
@@ -85,21 +86,32 @@ class PerformanceReporter:
                 c_val = f"{finding.current_value:.2f} ms"
                 d_val = f"{finding.delta:+.2f} ms ({finding.delta_pct:+.1f}%)"
                 t_val = f"≤ {finding.threshold:.2f} ms"
-            elif "rps" in finding.metric_name:
+            elif "rps" in finding.metric_name or "throughput" in finding.metric_name:
                 b_val = f"{finding.baseline_value:.1f} rps"
                 c_val = f"{finding.current_value:.1f} rps"
                 d_val = f"{finding.delta:+.1f} rps ({finding.delta_pct:+.1f}%)"
                 t_val = f"≥ {finding.threshold:.1f} rps"
+            elif "mb" in finding.metric_name:
+                b_val = f"{finding.baseline_value:.2f} MB"
+                c_val = f"{finding.current_value:.2f} MB"
+                d_val = f"{finding.delta:+.2f} MB ({finding.delta_pct:+.1f}%)"
+                t_val = f"≤ {finding.threshold:.2f} MB"
             elif "pct" in finding.metric_name:
                 b_val = f"{finding.baseline_value:.2f}%"
                 c_val = f"{finding.current_value:.2f}%"
                 d_val = f"{finding.delta:+.2f}%"
                 t_val = f"≤ {finding.threshold:.2f}%"
             else:
+                sym = (
+                    "≥"
+                    if getattr(finding, "direction", None)
+                    == MetricDirection.HIGHER_IS_BETTER
+                    else "≤"
+                )
                 b_val = str(finding.baseline_value)
                 c_val = str(finding.current_value)
-                d_val = str(finding.delta)
-                t_val = str(finding.threshold)
+                d_val = f"{finding.delta:+.2f} ({finding.delta_pct:+.1f}%)"
+                t_val = f"{sym} {finding.threshold:.2f}"
 
             scen_display = f"`{finding.scenario}`"
             metric_display = f"`{finding.metric_name}`"

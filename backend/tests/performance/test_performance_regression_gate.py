@@ -10,6 +10,7 @@ Verifies the regression detection and tolerance evaluation engine:
 
 from __future__ import annotations
 
+import math
 import tempfile
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from app.performance.baseline_store import (
 )
 from app.performance.contracts import (
     LatencyMetrics,
+    MetricDirection,
     MetricDistribution,
     PerformanceBaseline,
     RegressionVerdict,
@@ -173,6 +175,207 @@ def test_regression_detector_blocks_meaningful_throughput_regression() -> None:
     rps_finding = next(f for f in findings if f.metric_name == "throughput_rps")
     assert rps_finding.verdict == RegressionVerdict.FAIL
     assert "Throughput regression" in rps_finding.message
+
+
+def test_throughput_improvement_is_not_a_regression() -> None:
+    """TEST-09 / PART 9: Verify throughput improvement (56.8 -> 117.2 rps) evaluates to PASS."""
+    baseline_rps = 56.8
+    current_rps = 117.2
+
+    base = _create_dummy_baseline(
+        scenario_name="concurrent_rag_queries",
+        rps=baseline_rps,
+    )
+    curr = _create_dummy_result(
+        scenario_name="concurrent_rag_queries",
+        rps=current_rps,
+    )
+
+    findings = PerformanceRegressionDetector.evaluate_scenario(curr, base)
+    rps_finding = next(f for f in findings if f.metric_name == "throughput_rps")
+
+    assert rps_finding.verdict != RegressionVerdict.FAIL
+    assert rps_finding.verdict == RegressionVerdict.PASS
+    assert rps_finding.current_value == pytest.approx(117.2, abs=0.01)
+    assert rps_finding.baseline_value == pytest.approx(56.8, abs=0.01)
+    assert rps_finding.delta == pytest.approx(60.4, abs=0.05)
+    assert rps_finding.delta_pct == pytest.approx(106.34, abs=0.1)
+    assert rps_finding.direction == MetricDirection.HIGHER_IS_BETTER
+    assert "meets requirement" in rps_finding.message
+
+    # Also verify evaluate_all has_blocking_regressions is False
+    perf_baseline = PerformanceBaseline(
+        version="v1",
+        environment=capture_environment_metadata(),
+        scenarios={"concurrent_rag_queries": base},
+    )
+    report = PerformanceRegressionDetector.evaluate_all(
+        {"concurrent_rag_queries": curr}, perf_baseline
+    )
+    assert report.has_blocking_regressions is False
+    assert report.verdict == RegressionVerdict.PASS
+
+
+def test_regression_matrix_higher_is_better() -> None:
+    """TEST-09 / PART 8: HIGHER_IS_BETTER test matrix (throughput_rps)."""
+    # Baseline = 100 RPS, allowed drop = 35% (threshold = 65 RPS), min significant delta = 25 RPS
+    base = _create_dummy_baseline(rps=100.0)
+
+    # 1. current > baseline -> PASS
+    curr_higher = _create_dummy_result(rps=130.0)
+    f1 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(curr_higher, base)
+        if f.metric_name == "throughput_rps"
+    )
+    assert f1.verdict == RegressionVerdict.PASS
+    assert f1.delta > 0
+
+    # 2. current == baseline -> PASS
+    curr_equal = _create_dummy_result(rps=100.0)
+    f2 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(curr_equal, base)
+        if f.metric_name == "throughput_rps"
+    )
+    assert f2.verdict == RegressionVerdict.PASS
+    assert f2.delta == 0.0
+
+    # 3. current slightly below baseline:
+    # 3a. Below baseline but above threshold (e.g. 80 RPS >= 65 RPS) -> PASS
+    curr_slight_drop = _create_dummy_result(rps=80.0)
+    f3a = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(curr_slight_drop, base)
+        if f.metric_name == "throughput_rps"
+    )
+    assert f3a.verdict == RegressionVerdict.PASS
+
+    # 3b. Below threshold but within noise floor (base=50 -> threshold=32.5, drop 20 < 25 noise floor) -> WARN
+    base_50 = _create_dummy_baseline(rps=50.0)
+    curr_noise = _create_dummy_result(rps=30.0)
+    f3b = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(curr_noise, base_50)
+        if f.metric_name == "throughput_rps"
+    )
+    assert f3b.verdict == RegressionVerdict.WARN
+
+    # 4. current materially below baseline (crosses threshold AND drop >= 25 RPS noise floor) -> FAIL
+    curr_material_drop = _create_dummy_result(rps=40.0)
+    f4 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(
+            curr_material_drop, base
+        )
+        if f.metric_name == "throughput_rps"
+    )
+    assert f4.verdict == RegressionVerdict.FAIL
+
+
+def test_regression_matrix_lower_is_better() -> None:
+    """TEST-09 / PART 8: LOWER_IS_BETTER test matrix (latency_p95_ms)."""
+    # Baseline = 100ms, allowed increase = 40% (threshold = 140ms), min_delta = 15ms
+    base = _create_dummy_baseline(p95=100.0, allowed_lat_pct=40.0, min_delta_ms=15.0)
+
+    # 5. current < baseline -> PASS
+    curr_lower = _create_dummy_result(p95=75.0)
+    f5 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(curr_lower, base)
+        if f.metric_name == "latency_p95_ms"
+    )
+    assert f5.verdict == RegressionVerdict.PASS
+    assert f5.delta < 0
+
+    # 6. current == baseline -> PASS
+    curr_equal = _create_dummy_result(p95=100.0)
+    f6 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(curr_equal, base)
+        if f.metric_name == "latency_p95_ms"
+    )
+    assert f6.verdict == RegressionVerdict.PASS
+    assert f6.delta == 0.0
+
+    # 7. current slightly above baseline (> 20% warning threshold but <= 40% threshold) -> WARN
+    curr_slight_increase = _create_dummy_result(p95=125.0)
+    f7 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(
+            curr_slight_increase, base
+        )
+        if f.metric_name == "latency_p95_ms"
+    )
+    assert f7.verdict == RegressionVerdict.WARN
+
+    # 8. current materially above baseline (> 40% threshold and delta >= 15ms) -> FAIL
+    curr_material_increase = _create_dummy_result(p95=150.0)
+    f8 = next(
+        f
+        for f in PerformanceRegressionDetector.evaluate_scenario(
+            curr_material_increase, base
+        )
+        if f.metric_name == "latency_p95_ms"
+    )
+    assert f8.verdict == RegressionVerdict.FAIL
+
+
+def test_zero_baseline_and_edge_cases() -> None:
+    """TEST-09 / PART 10: Zero baseline division protection and deterministic behavior."""
+    # Zero baseline, zero current -> delta = 0.0, delta_pct = 0.0, PASS
+    f_zero = PerformanceRegressionDetector.evaluate_metric(
+        scenario_name="test",
+        metric_name="throughput_rps",
+        baseline_val=0.0,
+        current_val=0.0,
+        allowed_tolerance_pct=35.0,
+        min_significant_delta=10.0,
+        direction=MetricDirection.HIGHER_IS_BETTER,
+    )
+    assert f_zero.delta == 0.0
+    assert f_zero.delta_pct == 0.0
+    assert f_zero.verdict == RegressionVerdict.PASS
+    assert not math.isnan(f_zero.delta_pct)
+    assert not math.isinf(f_zero.delta_pct)
+
+    # Zero baseline, positive current -> improvement, PASS
+    f_pos = PerformanceRegressionDetector.evaluate_metric(
+        scenario_name="test",
+        metric_name="throughput_rps",
+        baseline_val=0.0,
+        current_val=50.0,
+        allowed_tolerance_pct=35.0,
+        min_significant_delta=10.0,
+        direction=MetricDirection.HIGHER_IS_BETTER,
+    )
+    assert f_pos.delta == 50.0
+    assert f_pos.delta_pct == 100.0
+    assert f_pos.verdict == RegressionVerdict.PASS
+
+
+def test_reporter_shows_positive_delta_for_throughput_improvement() -> None:
+    """TEST-09 / PART 7: Ensure reporter prints +60.4 rps and +106.3% when current > baseline."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        reporter = PerformanceReporter(output_dir=Path(tmpdir))
+        base = _create_dummy_baseline("rag", rps=56.8)
+        curr = _create_dummy_result("rag", rps=117.2)
+
+        perf_baseline = PerformanceBaseline(
+            version="v1",
+            environment=capture_environment_metadata(),
+            scenarios={"rag": base},
+        )
+        report = PerformanceRegressionDetector.evaluate_all(
+            {"rag": curr}, perf_baseline
+        )
+
+        md = reporter.generate_markdown_report(report, {"rag": curr})
+        assert "+60.4 rps (+106.3%)" in md
+        assert "56.8 rps" in md
+        assert "117.2 rps" in md
+        assert "✅ PASS" in md
+        assert "-60.4 rps" not in md
 
 
 def test_baseline_store_persistence_and_introspection() -> None:
