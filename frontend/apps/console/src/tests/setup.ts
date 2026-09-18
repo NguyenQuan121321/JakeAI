@@ -15,3 +15,15 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+import { beforeAll, afterEach, afterAll } from "vitest";
+import { server } from "../mocks/server";
+
+beforeAll(() => {
+  if (typeof window !== "undefined") {
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init);
+  }
+  server.listen({ onUnhandledRequest: "bypass" });
+});
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());

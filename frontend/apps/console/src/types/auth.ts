@@ -31,4 +31,5 @@ export interface AuthContextValue extends AuthState {
   switchWorkspace: (workspaceId: string) => void;
   hasRole: (role: string | string[]) => boolean;
   hasPermission: (permission: string | string[]) => boolean;
+  can: (permission: string) => boolean;
 }

@@ -10,6 +10,8 @@ paths = [
     '''backend/tests/.*''',
     '''backend/tests/evals/.*''',
     '''backend/tests/evals/golden_dataset\.json''',
+    '''frontend/apps/console/src/tests/.*''',
+    '''frontend/.*/tests/.*''',
     '''\.gitleaks\.toml''',
 ]
 regexes = [
