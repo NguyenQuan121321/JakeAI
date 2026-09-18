@@ -27,6 +27,7 @@ export const handlers = [
   http.post("*/api/v1/chat/stream", async ({ request }) => handleChatStream(request)),
   http.post("/api/v1/chat/stream", async ({ request }) => handleChatStream(request)),
 
+
   // Auth (FinnApiGo)
   http.post("*/api/v1/auth/login", async ({ request }) => handleLogin(request)),
   http.post("/api/v1/auth/login", async ({ request }) => handleLogin(request)),
