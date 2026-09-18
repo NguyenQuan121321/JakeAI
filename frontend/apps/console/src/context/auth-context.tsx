@@ -67,9 +67,12 @@ export function AuthProvider({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [user, setUser] = useState<User | null>(initialUser);
   const [workspaces] = useState<Workspace[]>(DEFAULT_WORKSPACES);
-
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(() => {
-    return tokenStore.getActiveTenantId() || initialUser?.tenantId || DEFAULT_WORKSPACES[0].id;
+    try {
+      return tokenStore.getActiveTenantId() || localStorage.getItem("jakeai-active-workspace") || initialUser?.tenantId || DEFAULT_WORKSPACES[0].id;
+    } catch {
+      return tokenStore.getActiveTenantId() || initialUser?.tenantId || DEFAULT_WORKSPACES[0].id;
+    }
   });
 
   // Subscribe to central 401 unauthorized session expiration
@@ -101,13 +104,18 @@ export function AuthProvider({
         tenantId,
         orgId: claims?.org_id,
         roles: claims?.roles || (email.includes("admin") ? ["admin", "tenant_admin"] : ["member"]),
-        permissions: claims?.permissions || (email.includes("admin") ? ["*"] : ["agent:read", "rag:read"]),
+        permissions: claims?.permissions || (email.includes("admin") ? ["*"] : ["agent:read", "rag:read", "read:workspace", "read:agent"]),
       };
 
       setUser(loggedUser);
       setIsAuthenticated(true);
       setActiveWorkspaceId(tenantId);
       tokenStore.setActiveTenantId(tenantId);
+      try {
+        localStorage.setItem("jakeai-active-workspace", tenantId);
+      } catch {
+        // Ignore storage errors
+      }
     } catch {
       // Fallback for mock/test environments if network isn't configured
       const loggedUser: User = {
@@ -116,7 +124,7 @@ export function AuthProvider({
         email,
         tenantId: activeWorkspaceId,
         roles: email.includes("admin") ? ["admin", "tenant_admin"] : ["member"],
-        permissions: email.includes("admin") ? ["*"] : ["agent:read", "rag:read"],
+        permissions: email.includes("admin") ? ["*"] : ["agent:read", "rag:read", "read:workspace", "read:agent"],
       };
       setUser(loggedUser);
       setIsAuthenticated(true);
@@ -139,6 +147,11 @@ export function AuthProvider({
 
       setActiveWorkspaceId(safeTenantId);
       tokenStore.setActiveTenantId(safeTenantId);
+      try {
+        localStorage.setItem("jakeai-active-workspace", safeTenantId);
+      } catch {
+        // Ignore storage errors
+      }
     },
     [user, workspaces]
   );
