@@ -39,3 +39,4 @@ export class ChatService {
 }
 
 export const chatService = new ChatService();
+export { chatStreamService, ChatStreamService } from "./chat-stream.service";
