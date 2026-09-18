@@ -60,6 +60,9 @@ export const handlers = [
   http.get("*/api/v1/agent/tasks/:taskId/runs/:runId", ({ params }) => handleGetRun(params.taskId as string, params.runId as string)),
   http.get("/api/v1/agent/tasks/:taskId/runs/:runId", ({ params }) => handleGetRun(params.taskId as string, params.runId as string)),
 
+  http.get("*/api/v1/agent/tasks/:taskId/runs/:runId/events", ({ params }) => handleAgentRunEvents(params.taskId as string, params.runId as string)),
+  http.get("/api/v1/agent/tasks/:taskId/runs/:runId/events", ({ params }) => handleAgentRunEvents(params.taskId as string, params.runId as string)),
+
   http.post("*/api/v1/agent/tasks/:taskId/runs/:runId/approvals/:approvalId", ({ params }) => handleDecideApproval(params.taskId as string, params.runId as string, params.approvalId as string)),
   http.post("/api/v1/agent/tasks/:taskId/runs/:runId/approvals/:approvalId", ({ params }) => handleDecideApproval(params.taskId as string, params.runId as string, params.approvalId as string)),
 
@@ -351,6 +354,156 @@ function handleGetRun(taskId: string, runId: string) {
     created_at: Date.now(),
   });
 }
+
+function handleAgentRunEvents(taskId: string, runId: string) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const emit = (event: string, data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      };
+
+      emit("run_started", {
+        event_type: "run_started",
+        task_id: taskId,
+        run_id: runId,
+        data: { goal: "Calculate EBITDA and analyze liquidity", max_iterations: 10 },
+      });
+
+      emit("task_created", {
+        event_type: "task_created",
+        task_id: taskId,
+        run_id: runId,
+        data: { goal: "Calculate EBITDA and analyze liquidity", tenant_id: "tenant_jakeai_core" },
+      });
+
+      emit("planning_started", {
+        event_type: "planning_started",
+        task_id: taskId,
+        run_id: runId,
+        data: { goal: "Calculate EBITDA and analyze liquidity" },
+      });
+
+      emit("plan_created", {
+        event_type: "plan_created",
+        task_id: taskId,
+        run_id: runId,
+        data: {
+          plan_id: "plan-mock-1",
+          planner_mode: "canonical_bounded",
+          steps_count: 3,
+          steps: [
+            { step_id: "step-1", description: "Decompose financial goals", dependencies: [] },
+            { step_id: "step-2", description: "Query FinnApiGo banking ledger", dependencies: ["step-1"] },
+            { step_id: "step-3", description: "Verify financial calculations", dependencies: ["step-2"] },
+          ],
+        },
+      });
+
+      emit("step_started", {
+        event_type: "step_started",
+        task_id: taskId,
+        run_id: runId,
+        data: { step_id: "step-1", description: "Decompose financial goals" },
+      });
+
+      emit("agent_selected", {
+        event_type: "agent_selected",
+        task_id: taskId,
+        run_id: runId,
+        data: { step_id: "step-1", agent_id: "supervisor", confidence: 0.98, selection_mode: "canonical" },
+      });
+
+      emit("step_completed", {
+        event_type: "step_completed",
+        task_id: taskId,
+        run_id: runId,
+        data: { step_id: "step-1", output: "Financial goals successfully decomposed into sub-tasks." },
+      });
+
+      emit("step_started", {
+        event_type: "step_started",
+        task_id: taskId,
+        run_id: runId,
+        data: { step_id: "step-2", description: "Query FinnApiGo banking ledger" },
+      });
+
+      emit("tool_selected", {
+        event_type: "tool_selected",
+        task_id: taskId,
+        run_id: runId,
+        data: { step_id: "step-2", tool_name: "get_account_balance" },
+      });
+
+      emit("tool_call", {
+        event_type: "tool_call",
+        task_id: taskId,
+        run_id: runId,
+        data: { tool_name: "get_account_balance", arguments: { account_id: "acc_demo_01" } },
+      });
+
+      emit("observation", {
+        event_type: "observation",
+        task_id: taskId,
+        run_id: runId,
+        data: {
+          tool_name: "get_account_balance",
+          success: true,
+          output: { balance: 4500000.0, currency: "USD", current_ratio: 2.1 },
+          duration_ms: 65,
+        },
+      });
+
+      emit("step_completed", {
+        event_type: "step_completed",
+        task_id: taskId,
+        run_id: runId,
+        data: { step_id: "step-2", output: "Account balance retrieved: $4,500,000.00 USD" },
+      });
+
+      emit("verification_started", {
+        event_type: "verification_started",
+        task_id: taskId,
+        run_id: runId,
+        data: { tenant_id: "tenant_jakeai_core", revision_count: 0 },
+      });
+
+      emit("verification_result", {
+        event_type: "verification_result",
+        task_id: taskId,
+        run_id: runId,
+        data: {
+          verdict: "PASS",
+          reason: "Mathematical invariants and tenant boundary verified cleanly.",
+          groundedness_score: 0.99,
+        },
+      });
+
+      emit("completed", {
+        event_type: "completed",
+        task_id: taskId,
+        run_id: runId,
+        data: {
+          output: "Financial liquidity analysis completed: Operating Margin 24.5%, Current Ratio 2.1, Cash Reserve $4.5M.",
+          elapsed_ms: 240,
+          steps_completed: 3,
+          verdict: "PASS",
+        },
+      });
+
+      controller.close();
+    },
+  });
+
+  return new HttpResponse(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
 
 function handleDecideApproval(taskId: string, runId: string, approvalId: string) {
   return HttpResponse.json({
