@@ -12,6 +12,7 @@ import type {
   RAGGenerateResponse,
   DocumentIngestRequest,
   DocumentIngestResponse,
+  IngestionTaskResponse,
   IngestionTaskState,
 } from "../types/domain";
 
@@ -26,8 +27,12 @@ export class RAGService {
     return res.data;
   }
 
-  public async ingest(request: DocumentIngestRequest): Promise<DocumentIngestResponse> {
-    const res = await apiClient.post<DocumentIngestResponse>("/api/v1/rag/ingest", request);
+  public async ingest(
+    request: DocumentIngestRequest,
+    asyncMode = false
+  ): Promise<DocumentIngestResponse | IngestionTaskResponse> {
+    const endpoint = asyncMode ? "/api/v1/rag/ingest?async_mode=true" : "/api/v1/rag/ingest";
+    const res = await apiClient.post<DocumentIngestResponse | IngestionTaskResponse>(endpoint, request);
     return res.data;
   }
 

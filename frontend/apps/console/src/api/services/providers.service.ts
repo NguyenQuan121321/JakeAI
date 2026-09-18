@@ -8,12 +8,34 @@ import { gatewayService } from "./gateway.service";
 import { byokService } from "./byok.service";
 import type { ModelItem, BYOKProviderItem } from "../types/domain";
 
+export const SUPPORTED_PROVIDERS = [
+  "openai",
+  "gemini",
+  "anthropic",
+  "groq",
+  "deepseek",
+  "openrouter",
+] as const;
+
+export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+
+export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  openai: "OpenAI",
+  gemini: "Google Gemini",
+  anthropic: "Anthropic Claude",
+  groq: "Groq LPU",
+  deepseek: "DeepSeek",
+  openrouter: "OpenRouter",
+};
+
 export interface ProviderStatus {
   provider: string;
   name: string;
   models: ModelItem[];
   hasByokKey: boolean;
   isHealthy: boolean;
+  byokItem?: BYOKProviderItem;
+  latencyMs?: number;
 }
 
 export class ProvidersService {
@@ -23,7 +45,10 @@ export class ProvidersService {
       byokService.listKeys().catch(() => ({ keys: [] })),
     ]);
 
-    const byokKeySet = new Set((byokData.keys || []).map((k: BYOKProviderItem) => k.provider.toLowerCase()));
+    const byokMap = new Map<string, BYOKProviderItem>();
+    for (const k of byokData.keys || []) {
+      byokMap.set(k.provider.toLowerCase(), k);
+    }
 
     // Group models by provider
     const providerMap = new Map<string, ModelItem[]>();
@@ -35,23 +60,53 @@ export class ProvidersService {
       providerMap.get(p)!.push(m);
     }
 
-    // Default provider catalog
-    const standardProviders = ["openai", "anthropic", "google", "deepseek", "cohere"];
     const results: ProviderStatus[] = [];
 
-    for (const p of standardProviders) {
+    for (const p of SUPPORTED_PROVIDERS) {
       const models = providerMap.get(p) || [];
+      const byokItem = byokMap.get(p);
+      const hasByokKey = Boolean(byokItem?.configured || byokItem?.masked_key);
+      const isUnavailable =
+        byokItem?.validation_status === "provider_unavailable" ||
+        byokItem?.validation_status === "503";
+      const isHealthy = !isUnavailable;
+
       results.push({
         provider: p,
-        name: p.charAt(0).toUpperCase() + p.slice(1),
+        name: PROVIDER_DISPLAY_NAMES[p] || p.charAt(0).toUpperCase() + p.slice(1),
         models,
-        hasByokKey: byokKeySet.has(p),
-        isHealthy: true,
+        hasByokKey,
+        isHealthy,
+        byokItem,
       });
     }
 
     return results;
   }
+
+  public async validateProviderKey(
+    provider: string
+  ): Promise<{ isValid: boolean; error: string | null; latencyMs: number }> {
+    const startTime = performance.now();
+    try {
+      const res = await byokService.validateExistingKey(provider);
+      const latencyMs = Math.round(performance.now() - startTime);
+      return {
+        isValid: res.is_valid,
+        error: res.error ?? null,
+        latencyMs,
+      };
+    } catch (err: unknown) {
+      const latencyMs = Math.round(performance.now() - startTime);
+      const message = err instanceof Error ? err.message : "Validation failed";
+      return {
+        isValid: false,
+        error: message,
+        latencyMs,
+      };
+    }
+  }
 }
 
 export const providersService = new ProvidersService();
+

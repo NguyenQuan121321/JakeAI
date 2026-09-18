@@ -5,7 +5,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ragService } from "../services/rag.service";
 import { queryKeys } from "./query-keys";
-import { CACHE_POLICIES } from "../query-client";
 import type {
   RAGQueryRequest,
   RAGGenerateRequest,
@@ -27,7 +26,13 @@ export function useRagGenerateMutation() {
 export function useRagIngestMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (request: DocumentIngestRequest) => ragService.ingest(request),
+    mutationFn: ({
+      request,
+      asyncMode = false,
+    }: {
+      request: DocumentIngestRequest;
+      asyncMode?: boolean;
+    }) => ragService.ingest(request, asyncMode),
     onSuccess: (res) => {
       if (res && "task_id" in res && res.task_id) {
         queryClient.invalidateQueries({ queryKey: queryKeys.rag.tasks() });
@@ -41,6 +46,14 @@ export function useRagTaskQuery(taskId: string, enabled = true) {
     queryKey: queryKeys.rag.task(taskId),
     queryFn: () => ragService.getIngestionTask(taskId),
     enabled: enabled && Boolean(taskId),
-    staleTime: CACHE_POLICIES.health.staleTime,
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const state = query.state.data;
+      if (state && (state.status === "completed" || state.status === "failed")) {
+        return false;
+      }
+      return 1500;
+    },
   });
 }
+

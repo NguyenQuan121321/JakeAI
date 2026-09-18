@@ -21,9 +21,16 @@ from pydantic import BaseModel, Field
 class RegressionVerdict(StrEnum):
     """Verdict classifications for performance regression evaluation."""
 
-    PASS = "PASS"
+    PASS = "PASS"  # nosec B105
     WARN = "WARN"
     FAIL = "FAIL"
+
+
+class MetricDirection(StrEnum):
+    """Directionality of metric optimization quality (higher vs lower is better)."""
+
+    HIGHER_IS_BETTER = "HIGHER_IS_BETTER"
+    LOWER_IS_BETTER = "LOWER_IS_BETTER"
 
 
 class MetricDistribution(BaseModel):
@@ -181,6 +188,7 @@ class RegressionFinding(BaseModel):
     delta_pct: float
     threshold: float
     verdict: RegressionVerdict
+    direction: MetricDirection = MetricDirection.LOWER_IS_BETTER
     is_reproducible: bool = True
     message: str
 

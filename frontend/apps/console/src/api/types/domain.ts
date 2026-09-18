@@ -52,6 +52,8 @@ export type RAGGenerateRequest = Schemas["RAGGenerateRequest"];
 export type RAGGenerateResponse = Schemas["RAGGenerateResponse"];
 export type IngestionTaskState = Schemas["IngestionTaskState"];
 export type IngestionTaskResponse = Schemas["IngestionTaskResponse"];
+export type Citation = Schemas["Citation"];
+export type DocumentChunk = Schemas["DocumentChunk"];
 
 // Health & Telemetry
 export type HealthResponse = Schemas["HealthResponse"];

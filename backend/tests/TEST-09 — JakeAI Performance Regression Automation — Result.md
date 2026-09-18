@@ -183,5 +183,84 @@ Following the initial TEST-09 implementation, CI identified linting, typing, and
 
 ---
 
-## 9. Conclusion
-TEST-09 is **100% complete and verified green**. JakeAI now possesses a rock-solid, automated, and reproducible performance regression defense system that passes all CI gates (code quality, type checking, SAST security audit, unit/concurrency tests) without flakiness or false positives.
+## 10. Regression Gate Fix: Directional Metric Model & False Failure Resolution (PERF-007)
+
+### 10.1 Original Incident Forensic Summary
+During pull request validation in CI (`Performance Smoke & Dependency Regression Gate`), a false blocking regression was flagged:
+- **Scenario**: `concurrent_rag_queries`
+- **Metric**: `throughput_rps`
+- **Baseline Value**: `56.8 rps`
+- **Current Value**: `117.2 rps`
+- **Threshold**: `≥ 58.6 rps`
+- **Observed / Incorrect Delta**: Reported as `delta = -60.4 rps`
+- **Incorrect Verdict**: `FAIL` (`BLOCKING REGRESSION`)
+
+**Logical Defect**: Since `117.2 rps > 56.8 rps`, system throughput improved by `+60.4 rps` (`+106.3%`). Marking an improvement as a blocking regression violated performance gating contracts.
+
+### 10.2 Root Cause Analysis
+1. **Absence of Metric Direction Abstraction**: `contracts.py` lacked an explicit concept of metric optimization polarity.
+2. **Inverted Sign & Threshold Logic**: Latency metrics (where lower is better) and throughput metrics (where higher is better) used separate, inconsistent evaluation code paths. When throughput dropped below a baseline or was compared, sign inversions caused `current - baseline` to be misinterpreted or compared in reverse against thresholds.
+3. **Reporter-Detector Disconnect**: The detector and reporter did not share a canonical definition of signed delta ($\Delta = \text{current} - \text{baseline}$).
+
+### 10.3 Architecture Remediation: The `MetricDirection` Model
+1. **Strongly-Typed Enum** (`app.performance.contracts`):
+   ```python
+   class MetricDirection(StrEnum):
+       HIGHER_IS_BETTER = "HIGHER_IS_BETTER"
+       LOWER_IS_BETTER = "LOWER_IS_BETTER"
+   ```
+2. **Canonical Signed Delta**:
+   $$\Delta = \text{current} - \text{baseline}$$
+   Reported signed delta is **always** `current - baseline` across all metrics.
+3. **Explicit Directional Threshold Semantics**:
+   - For `HIGHER_IS_BETTER` (e.g. `throughput_rps`):
+     - Minimum acceptable threshold: $\text{threshold} = \text{baseline} \times (1.0 - \frac{\text{allowed\_drop\_pct}}{100})$
+     - Regression condition: $\text{current} < \text{threshold}$ (higher throughput is NEVER a regression)
+   - For `LOWER_IS_BETTER` (e.g. `latency_p95_ms`):
+     - Maximum acceptable ceiling: $\text{threshold} = \text{baseline} \times (1.0 + \frac{\text{allowed\_increase\_pct}}{100})$
+     - Regression condition: $\text{current} > \text{threshold}$
+4. **Zero-Baseline Division Protection**:
+   Deterministic handling when $\text{baseline} = 0.0$ avoids division-by-zero, `NaN`, or `Infinity`.
+
+### 10.4 Comprehensive Performance Metric Direction Registry
+
+| Metric Name | Direction | Baseline Semantics | Threshold Semantics | Regression Condition |
+| :--- | :--- | :--- | :--- | :--- |
+| `throughput_rps` | `HIGHER_IS_BETTER` | Expected sustained queries/sec under concurrency | Minimum acceptable requests/sec: $\text{baseline} \times (1 - \frac{\text{allowed\_drop\_pct}}{100})$ | Regresses when $\text{current} < \text{threshold}$ and $(\text{baseline} - \text{current}) \ge \text{min\_significant\_delta}$ |
+| `operations_per_second` | `HIGHER_IS_BETTER` | Expected sustained ops/sec under concurrency | Minimum acceptable ops/sec: $\text{baseline} \times (1 - \frac{\text{allowed\_drop\_pct}}{100})$ | Regresses when $\text{current} < \text{threshold}$ and drop $\ge \text{min\_significant\_delta}$ |
+| `latency_p50_ms` | `LOWER_IS_BETTER` | Median execution latency (50th percentile) | Maximum acceptable latency: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ and $(\text{current} - \text{baseline}) \ge \text{min\_significant\_delta}$ |
+| `latency_p90_ms` | `LOWER_IS_BETTER` | 90th percentile execution latency | Maximum acceptable latency: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ and $(\text{current} - \text{baseline}) \ge \text{min\_significant\_delta}$ |
+| `latency_p95_ms` | `LOWER_IS_BETTER` | 95th percentile execution latency | Maximum acceptable latency: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ and $(\text{current} - \text{baseline}) \ge \text{min\_significant\_delta}$ |
+| `latency_p99_ms` | `LOWER_IS_BETTER` | Tail latency ceiling (99th percentile) | Maximum acceptable latency: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ and $(\text{current} - \text{baseline}) \ge \text{min\_significant\_delta}$ |
+| `ttfc_p95_ms` | `LOWER_IS_BETTER` | Time to First Chunk 95th percentile in streaming | Maximum acceptable TTFC: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ and $(\text{current} - \text{baseline}) \ge \text{min\_significant\_delta}$ |
+| `error_rate_pct` | `LOWER_IS_BETTER` | Zero error baseline | Maximum allowed error percentage (`0.0%` hard zero tolerance) | Regresses immediately when $\text{current} > \text{max\_error\_rate\_pct}$ |
+| `memory_peak_mb` | `LOWER_IS_BETTER` | Process peak heap memory allocated during benchmark | Maximum heap footprint: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ |
+| `memory_delta_mb` | `LOWER_IS_BETTER` | Net process heap allocation delta | Maximum heap delta: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ |
+| `cpu_time_seconds` | `LOWER_IS_BETTER` | Total CPU compute time consumed | Maximum CPU time: $\text{baseline} \times (1 + \frac{\text{allowed\_increase\_pct}}{100})$ | Regresses when $\text{current} > \text{threshold}$ |
+
+### 10.5 Test Matrix Verification
+Implemented in `backend/tests/performance/test_performance_regression_gate.py`:
+1. `test_throughput_improvement_is_not_a_regression()`:
+   - Validates baseline `56.8 rps` vs current `117.2 rps`.
+   - Confirms `verdict == PASS`, `delta == +60.4 rps`, `delta_pct == +106.3%`, `has_blocking_regressions == False`.
+2. `test_regression_matrix_higher_is_better()`:
+   - Evaluates all 4 states for higher-is-better metrics (improvement $\to$ PASS, equality $\to$ PASS, slight drop $\to$ PASS/WARN, material drop $\to$ FAIL).
+3. `test_regression_matrix_lower_is_better()`:
+   - Evaluates all 4 states for lower-is-better metrics (improvement $\to$ PASS, equality $\to$ PASS, slight increase $\to$ WARN, material increase $\to$ FAIL).
+4. `test_zero_baseline_and_edge_cases()`:
+   - Protects against division-by-zero, NaN, and Infinity.
+5. `test_reporter_shows_positive_delta_for_throughput_improvement()`:
+   - Verifies formatted output table prints `+60.4 rps (+106.3%)` and `✅ PASS`.
+
+### 10.6 CI Trigger Architecture Analysis (Part 14)
+**Question**: Why does a frontend-only PR run `Performance Smoke & Dependency Regression Gate`?
+- **Finding**: In `.github/workflows/ci.yml`, the workflow triggers on `pull_request` to `main`, `master`, and `develop` without file path filters (`paths:` / `paths-ignore:`). Consequently, GitHub Actions schedules all backend validation jobs unconditionally on all pull requests.
+- **Evaluation & Recommendation**:
+  - In this task, per governance constraint, **workflow trigger configurations were not altered** to ensure strict safety and avoid accidental omissions.
+  - As a future platform optimization, path filtering (e.g. `dorny/paths-filter`) could allow frontend-only changes (modifications solely within `frontend/apps/`, `frontend/packages/`) to skip runtime performance benchmarks when no backend dependency or API contract has been modified.
+
+---
+
+## 11. Conclusion
+TEST-09 is **100% complete and verified green**. JakeAI possesses an automated, reproducible, and mathematically sound performance regression gating architecture with explicit metric directionality, verified zero false positives, and full compliance across code quality, typechecking, and SAST security gates.
+

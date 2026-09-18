@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 from app.performance.contracts import (
+    MetricDirection,
     PerformanceBaseline,
     PerformanceRegressionReport,
     RegressionFinding,
@@ -35,6 +36,120 @@ class PerformanceRegressionDetector:
     DEFAULT_MAX_ERROR_RATE_PCT = 0.0  # 0% error allowed
     DEFAULT_ALLOWED_MEMORY_REGRESSION_PCT = 50.0  # +50% allowed
 
+    METRIC_DIRECTIONS: dict[str, MetricDirection] = {
+        "throughput_rps": MetricDirection.HIGHER_IS_BETTER,
+        "operations_per_second": MetricDirection.HIGHER_IS_BETTER,
+        "latency_p50_ms": MetricDirection.LOWER_IS_BETTER,
+        "latency_p90_ms": MetricDirection.LOWER_IS_BETTER,
+        "latency_p95_ms": MetricDirection.LOWER_IS_BETTER,
+        "latency_p99_ms": MetricDirection.LOWER_IS_BETTER,
+        "ttfc_p95_ms": MetricDirection.LOWER_IS_BETTER,
+        "error_rate_pct": MetricDirection.LOWER_IS_BETTER,
+        "memory_peak_mb": MetricDirection.LOWER_IS_BETTER,
+        "memory_delta_mb": MetricDirection.LOWER_IS_BETTER,
+        "cpu_time_seconds": MetricDirection.LOWER_IS_BETTER,
+    }
+
+    @classmethod
+    def get_metric_direction(cls, metric_name: str) -> MetricDirection:
+        """Resolve canonical optimization direction for a named metric."""
+        if metric_name in cls.METRIC_DIRECTIONS:
+            return cls.METRIC_DIRECTIONS[metric_name]
+        if "rps" in metric_name or "throughput" in metric_name:
+            return MetricDirection.HIGHER_IS_BETTER
+        return MetricDirection.LOWER_IS_BETTER
+
+    @classmethod
+    def evaluate_metric(
+        cls,
+        scenario_name: str,
+        metric_name: str,
+        baseline_val: float,
+        current_val: float,
+        allowed_tolerance_pct: float,
+        min_significant_delta: float = 0.0,
+        direction: MetricDirection | None = None,
+    ) -> RegressionFinding:
+        """Centralized authoritative evaluation for a single metric according to its direction."""
+        dir_type = direction or cls.get_metric_direction(metric_name)
+        b_val = float(baseline_val)
+        c_val = float(current_val)
+
+        # Canonical signed delta: always current - baseline
+        delta = round(c_val - b_val, 2)
+
+        # Canonical relative delta percentage with zero-baseline division protection
+        if b_val == 0.0:
+            delta_pct = 0.0 if delta == 0.0 else (100.0 if delta > 0 else -100.0)
+        else:
+            delta_pct = round((delta / b_val) * 100.0, 2)
+
+        if dir_type == MetricDirection.HIGHER_IS_BETTER:
+            # Minimum acceptable threshold: baseline * (1 - allowed_drop_pct / 100)
+            threshold_val = round(b_val * (1.0 - (allowed_tolerance_pct / 100.0)), 2)
+            drop = round(b_val - c_val, 2)
+
+            if c_val < threshold_val and drop >= min_significant_delta:
+                verdict = RegressionVerdict.FAIL
+                msg = (
+                    f"Throughput regression: {c_val:.2f} rps dropped below minimum threshold "
+                    f"{threshold_val:.2f} rps (baseline {b_val:.2f} rps, {delta_pct:.1f}%, drop {abs(delta):.1f} rps >= {min_significant_delta:.1f} rps)"
+                )
+            elif c_val < threshold_val:
+                verdict = RegressionVerdict.WARN
+                msg = (
+                    f"Minor throughput dip below threshold: {c_val:.2f} rps < {threshold_val:.2f} rps "
+                    f"(baseline {b_val:.2f} rps, delta {delta:+.1f} rps within {min_significant_delta:.1f} rps noise margin)"
+                )
+            else:
+                verdict = RegressionVerdict.PASS
+                msg = (
+                    f"Throughput meets requirement: {c_val:.2f} rps >= "
+                    f"threshold {threshold_val:.2f} rps (baseline {b_val:.2f} rps)"
+                )
+        else:
+            # LOWER_IS_BETTER
+            # Maximum acceptable threshold: baseline * (1 + allowed_increase_pct / 100)
+            threshold_val = round(b_val * (1.0 + (allowed_tolerance_pct / 100.0)), 2)
+            increase = delta
+
+            if (
+                delta > 0
+                and delta_pct > allowed_tolerance_pct
+                and increase >= min_significant_delta
+            ):
+                verdict = RegressionVerdict.FAIL
+                msg = (
+                    f"Meaningful latency regression in {metric_name}: current {c_val:.2f}ms > "
+                    f"threshold {threshold_val:.2f}ms (+{delta_pct:.1f}% vs baseline {b_val:.2f}ms, delta {delta:+.2f}ms >= {min_significant_delta}ms)"
+                )
+            elif delta > 0 and delta_pct > (allowed_tolerance_pct / 2.0):
+                verdict = RegressionVerdict.WARN
+                msg = (
+                    f"Moderate latency increase in {metric_name}: current {c_val:.2f}ms vs "
+                    f"baseline {b_val:.2f}ms (+{delta_pct:.1f}%, below block ceiling)"
+                )
+            else:
+                verdict = RegressionVerdict.PASS
+                msg = (
+                    f"{metric_name} within tolerance: current {c_val:.2f}ms <= "
+                    f"threshold {threshold_val:.2f}ms (baseline {b_val:.2f}ms, {delta:+.2f}ms)"
+                )
+
+        return RegressionFinding(
+            scenario=scenario_name,
+            metric_name=metric_name,
+            baseline_value=b_val,
+            current_value=c_val,
+            delta=delta,
+            delta_pct=delta_pct,
+            threshold=threshold_val,
+            verdict=verdict,
+            direction=dir_type,
+            is_reproducible=True,
+            message=msg,
+        )
+
     @classmethod
     def evaluate_scenario(
         cls,
@@ -56,6 +171,7 @@ class PerformanceRegressionDetector:
                     delta_pct=0.0,
                     threshold=0.0,
                     verdict=RegressionVerdict.PASS,
+                    direction=MetricDirection.LOWER_IS_BETTER,
                     is_reproducible=True,
                     message=f"Scenario '{result.scenario_name}' has no baseline recorded. Recorded current metrics as reference.",
                 )
@@ -70,6 +186,12 @@ class PerformanceRegressionDetector:
             "max_error_rate_pct", cls.DEFAULT_MAX_ERROR_RATE_PCT
         )
         curr_err_rate = result.error_rate_pct
+        err_delta = round(curr_err_rate - max_err_rate, 2)
+        err_delta_pct = (
+            round(curr_err_rate * 100.0, 2)
+            if max_err_rate == 0.0
+            else round((err_delta / max_err_rate) * 100.0, 2)
+        )
         if curr_err_rate > max_err_rate:
             findings.append(
                 RegressionFinding(
@@ -77,10 +199,11 @@ class PerformanceRegressionDetector:
                     metric_name="error_rate_pct",
                     baseline_value=max_err_rate,
                     current_value=curr_err_rate,
-                    delta=round(curr_err_rate - max_err_rate, 2),
-                    delta_pct=round(curr_err_rate * 100.0, 2),
+                    delta=err_delta,
+                    delta_pct=err_delta_pct,
                     threshold=max_err_rate,
                     verdict=RegressionVerdict.FAIL,
+                    direction=MetricDirection.LOWER_IS_BETTER,
                     is_reproducible=True,
                     message=f"Error rate exceeded threshold: {curr_err_rate:.2f}% > {max_err_rate:.2f}% ({result.error_count}/{result.total_requests} failed)",
                 )
@@ -92,10 +215,11 @@ class PerformanceRegressionDetector:
                     metric_name="error_rate_pct",
                     baseline_value=max_err_rate,
                     current_value=curr_err_rate,
-                    delta=0.0,
-                    delta_pct=0.0,
+                    delta=err_delta,
+                    delta_pct=err_delta_pct,
                     threshold=max_err_rate,
                     verdict=RegressionVerdict.PASS,
+                    direction=MetricDirection.LOWER_IS_BETTER,
                     is_reproducible=True,
                     message=f"Error rate within threshold: {curr_err_rate:.2f}% <= {max_err_rate:.2f}%",
                 )
@@ -141,43 +265,15 @@ class PerformanceRegressionDetector:
             if b_val is None or b_val <= 0.0:
                 continue
 
-            delta = round(c_val - b_val, 2)
-            delta_pct = round((delta / b_val) * 100.0, 2)
-            threshold_val = round(b_val * (1.0 + (allowed_lat_pct / 100.0)), 2)
-
-            # Only fail if BOTH percentage threshold AND minimum absolute delta are exceeded
-            # This is critical to prevent flaky failures on sub-millisecond shifts!
-            if delta > 0 and delta_pct > allowed_lat_pct and delta >= min_delta_ms:
-                verdict = RegressionVerdict.FAIL
-                msg = (
-                    f"Meaningful latency regression in {metric_name}: current {c_val:.2f}ms > "
-                    f"threshold {threshold_val:.2f}ms (+{delta_pct:.1f}% vs baseline {b_val:.2f}ms, delta {delta:+.2f}ms >= {min_delta_ms}ms)"
-                )
-            elif delta > 0 and delta_pct > (allowed_lat_pct / 2.0):
-                verdict = RegressionVerdict.WARN
-                msg = (
-                    f"Moderate latency increase in {metric_name}: current {c_val:.2f}ms vs "
-                    f"baseline {b_val:.2f}ms (+{delta_pct:.1f}%, below block ceiling)"
-                )
-            else:
-                verdict = RegressionVerdict.PASS
-                msg = (
-                    f"{metric_name} within tolerance: current {c_val:.2f}ms <= "
-                    f"threshold {threshold_val:.2f}ms (baseline {b_val:.2f}ms, {delta:+.2f}ms)"
-                )
-
             findings.append(
-                RegressionFinding(
-                    scenario=result.scenario_name,
+                cls.evaluate_metric(
+                    scenario_name=result.scenario_name,
                     metric_name=metric_name,
-                    baseline_value=b_val,
-                    current_value=c_val,
-                    delta=delta,
-                    delta_pct=delta_pct,
-                    threshold=threshold_val,
-                    verdict=verdict,
-                    is_reproducible=True,
-                    message=msg,
+                    baseline_val=b_val,
+                    current_val=c_val,
+                    allowed_tolerance_pct=allowed_lat_pct,
+                    min_significant_delta=min_delta_ms,
+                    direction=MetricDirection.LOWER_IS_BETTER,
                 )
             )
 
@@ -193,41 +289,16 @@ class PerformanceRegressionDetector:
                 cls.DEFAULT_MIN_SIGNIFICANT_DELTA_RPS,
             )
             c_rps = result.throughput.requests_per_second
-            min_rps_threshold = round(b_rps * (1.0 - (allowed_rps_drop_pct / 100.0)), 2)
-            rps_delta = round(c_rps - b_rps, 2)
-            rps_delta_pct = round((rps_delta / b_rps) * 100.0, 2)
-
-            if c_rps < min_rps_threshold and abs(rps_delta) >= min_delta_rps:
-                verdict = RegressionVerdict.FAIL
-                msg = (
-                    f"Throughput regression: {c_rps:.2f} rps dropped below minimum threshold "
-                    f"{min_rps_threshold:.2f} rps (baseline {b_rps:.2f} rps, {rps_delta_pct:.1f}%, drop {abs(rps_delta):.1f} rps >= {min_delta_rps:.1f} rps)"
-                )
-            elif c_rps < min_rps_threshold:
-                verdict = RegressionVerdict.WARN
-                msg = (
-                    f"Minor throughput dip below threshold: {c_rps:.2f} rps < {min_rps_threshold:.2f} rps "
-                    f"(baseline {b_rps:.2f} rps, delta {rps_delta:+.1f} rps within {min_delta_rps:.1f} rps noise margin)"
-                )
-            else:
-                verdict = RegressionVerdict.PASS
-                msg = (
-                    f"Throughput meets requirement: {c_rps:.2f} rps >= "
-                    f"threshold {min_rps_threshold:.2f} rps (baseline {b_rps:.2f} rps)"
-                )
 
             findings.append(
-                RegressionFinding(
-                    scenario=result.scenario_name,
+                cls.evaluate_metric(
+                    scenario_name=result.scenario_name,
                     metric_name="throughput_rps",
-                    baseline_value=b_rps,
-                    current_value=c_rps,
-                    delta=rps_delta,
-                    delta_pct=rps_delta_pct,
-                    threshold=min_rps_threshold,
-                    verdict=verdict,
-                    is_reproducible=True,
-                    message=msg,
+                    baseline_val=b_rps,
+                    current_val=c_rps,
+                    allowed_tolerance_pct=allowed_rps_drop_pct,
+                    min_significant_delta=min_delta_rps,
+                    direction=MetricDirection.HIGHER_IS_BETTER,
                 )
             )
 
