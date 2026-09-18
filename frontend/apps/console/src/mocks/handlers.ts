@@ -186,12 +186,30 @@ export const handlers = [
     expires_at: null,
   })),
 
-  // Admin
-  http.get("*/api/v1/admin/users", () => handleAdminUsers()),
-  http.get("/api/v1/admin/users", () => handleAdminUsers()),
+  // Admin & Identity Governance
+  http.get("*/api/v1/admin/users", ({ request }) => handleAdminUsers(new URL(request.url))),
+  http.get("/api/v1/admin/users", ({ request }) => handleAdminUsers(new URL(request.url))),
 
-  http.get("*/api/v1/admin/audit-log", () => handleAdminAudit()),
-  http.get("/api/v1/admin/audit-log", () => handleAdminAudit()),
+  http.post("*/api/v1/admin/users/:id/lock", async ({ params, request }) => handleLockUser(params.id as string, request)),
+  http.post("/api/v1/admin/users/:id/lock", async ({ params, request }) => handleLockUser(params.id as string, request)),
+
+  http.post("*/api/v1/admin/users/:id/unlock", ({ params }) => handleUnlockUser(params.id as string)),
+  http.post("/api/v1/admin/users/:id/unlock", ({ params }) => handleUnlockUser(params.id as string)),
+
+  http.post("*/api/v1/admin/users/:id/force-logout", ({ params }) => handleForceLogout(params.id as string)),
+  http.post("/api/v1/admin/users/:id/force-logout", ({ params }) => handleForceLogout(params.id as string)),
+
+  http.get("*/api/v1/admin/sessions", () => handleAdminSessions()),
+  http.get("/api/v1/admin/sessions", () => handleAdminSessions()),
+
+  http.get("*/api/v1/admin/audit-log/export", ({ request }) => handleExportAudit(request)),
+  http.get("/api/v1/admin/audit-log/export", ({ request }) => handleExportAudit(request)),
+
+  http.get("*/api/v1/admin/audit-log", ({ request }) => handleAdminAudit(request)),
+  http.get("/api/v1/admin/audit-log", ({ request }) => handleAdminAudit(request)),
+
+  http.get("*/api/v1/auth/me/audit-log", ({ request }) => handleAdminAudit(request)),
+  http.get("/api/v1/auth/me/audit-log", ({ request }) => handleAdminAudit(request)),
 ];
 
 async function handleLogin(request: Request) {
@@ -709,76 +727,121 @@ function handleDeleteByokKey(provider: string) {
   });
 }
 
+let mockBudget = {
+  tenant_id: "tenant_jakeai_core",
+  period: "2026-09",
+  token_quota: 5000000,
+  tokens_used: 1420000,
+  tokens_remaining: 3580000,
+  percentage_tokens_used: 28.4,
+  dollar_budget_usd: 500.0 as number | null,
+  dollar_spent_usd: 142.85,
+  dollar_remaining_usd: 357.15 as number | null,
+  percentage_dollars_used: 28.57 as number | null,
+  warning_threshold: 0.8,
+  is_suspended: false,
+  warning: null as string | null,
+};
+
 function handleFinopsSummary() {
   return HttpResponse.json({
     tenant_id: "tenant_jakeai_core",
-    period: "monthly",
+    period: "2026-09",
     total_requests: 1420,
     reconciled_requests: 1420,
-    reconciliation_rate: 1.0,
+    reconciliation_rate: 100.0,
     total_raw_tokens: 4500000,
     total_optimized_tokens: 4200000,
     total_physical_tokens_removed: 300000,
-    budget_status: {
-      budget_usd: 500.0,
-      dollar_budget_usd: 500.0,
-      spent_usd: 142.85,
-      dollar_spent_usd: 142.85,
-      remaining_usd: 357.15,
-      threshold_alert: false,
-      hard_cap_exceeded: false,
+    total_cached_tokens: 1200000,
+    total_uncached_tokens: 3000000,
+    total_output_tokens: 650000,
+    total_baseline_cost_usd: 181.25,
+    total_actual_cost_usd: 142.85,
+    total_savings_usd: 38.40,
+    overall_savings_percentage: 21.19,
+    savings_attribution: {
+      cache_hit_usd: 24.50,
+      physical_reduction_usd: 6.20,
+      provider_cache_usd: 4.80,
+      model_routing_usd: 2.90,
+      avoided_retries_usd: 0.0,
+      total_savings_usd: 38.40,
     },
+    budget_status: mockBudget,
   });
 }
 
 function handleFinopsBudget() {
-  return HttpResponse.json({
-    tenant_id: "tenant_jakeai_core",
-    period: "monthly",
-    token_quota: 5000000,
-    tokens_used: 1420000,
-    tokens_remaining: 3580000,
-    percentage_tokens_used: 28.4,
-    dollar_budget_usd: 500.0,
-    dollar_spent_usd: 142.85,
-    dollar_remaining_usd: 357.15,
-    percentage_dollar_spent: 28.57,
-  });
+  return HttpResponse.json(mockBudget);
 }
 
 async function handleUpdateBudget(request: Request) {
-  const body = (await request.json()) as { dollar_budget_usd?: number; token_quota?: number };
-  return HttpResponse.json({
-    tenant_id: "tenant_jakeai_core",
-    period: "monthly",
-    token_quota: body.token_quota || 10000000,
-    tokens_used: 1420000,
-    tokens_remaining: (body.token_quota || 10000000) - 1420000,
-    percentage_tokens_used: 14.2,
-    dollar_budget_usd: body.dollar_budget_usd || 1000.0,
-    dollar_spent_usd: 142.85,
-    dollar_remaining_usd: (body.dollar_budget_usd || 1000.0) - 142.85,
-    percentage_dollar_spent: 14.28,
-  });
+  const body = (await request.json()) as {
+    dollar_budget_usd?: number | null;
+    token_quota?: number | null;
+    warning_threshold?: number | null;
+  };
+
+  const newQuota = body.token_quota ?? mockBudget.token_quota;
+  const newDollarBudget = body.dollar_budget_usd !== undefined ? body.dollar_budget_usd : mockBudget.dollar_budget_usd;
+  const newThreshold = body.warning_threshold ?? mockBudget.warning_threshold;
+
+  const pctTokens = (mockBudget.tokens_used / newQuota) * 100;
+  const pctDollars = newDollarBudget ? (mockBudget.dollar_spent_usd / newDollarBudget) * 100 : null;
+  const isSuspended = pctTokens >= 100 || (pctDollars !== null && pctDollars >= 100);
+
+  mockBudget = {
+    ...mockBudget,
+    token_quota: newQuota,
+    tokens_remaining: Math.max(0, newQuota - mockBudget.tokens_used),
+    percentage_tokens_used: Number(pctTokens.toFixed(1)),
+    dollar_budget_usd: newDollarBudget,
+    dollar_remaining_usd: newDollarBudget ? Math.max(0, newDollarBudget - mockBudget.dollar_spent_usd) : null,
+    percentage_dollars_used: pctDollars ? Number(pctDollars.toFixed(1)) : null,
+    warning_threshold: newThreshold,
+    is_suspended: isSuspended,
+    warning: isSuspended ? "Tenant has exhausted allocated token quota or dollar spending limit." : null,
+  };
+
+  return HttpResponse.json(mockBudget);
 }
 
 function handleTransactions() {
   return HttpResponse.json([
     {
-      id: "rec-01",
-      request_id: "req-01",
-      correlation_id: "corr-01",
+      request_id: "req-fin-001",
       tenant_id: "tenant_jakeai_core",
-      user_id: "usr_123",
-      model: "gpt-4o",
       provider: "openai",
-      prompt_tokens: 450,
-      completion_tokens: 120,
-      total_tokens: 570,
-      estimated_cost_usd: 0.0035,
-      actual_cost_usd: 0.0035,
-      is_reconciled: true,
-      timestamp: 1726600000,
+      model: "gpt-4o",
+      requested_model: "gpt-4o",
+      timestamp: 1726650000,
+      estimated_local_tokens: 580,
+      raw_tokens: 550,
+      optimized_tokens: 420,
+      physical_tokens_removed: 130,
+      cached_tokens: 120,
+      uncached_tokens: 300,
+      output_tokens: 110,
+      provider_reported_total: 530,
+      baseline_cost_usd: 0.0055,
+      estimated_cost_usd: 0.0041,
+      actual_billed_cost_usd: 0.0038,
+      effective_cost_usd: 0.0038,
+      total_savings_usd: 0.0017,
+      savings_percentage: 30.9,
+      savings_attribution: {
+        cache_hit_usd: 0.0,
+        physical_reduction_usd: 0.0009,
+        provider_cache_usd: 0.0008,
+        model_routing_usd: 0.0,
+        avoided_retries_usd: 0.0,
+        total_savings_usd: 0.0017,
+      },
+      reconciliation_status: "authoritative",
+      is_cache_hit: false,
+      cache_type: "none",
+      metadata: { workload: "chat", route: "standard" },
     },
   ]);
 }
@@ -1039,24 +1102,168 @@ async function handleRagGenerate(request: Request) {
   });
 }
 
-function handleAdminUsers() {
+interface MockAdminUser {
+  id: number;
+  username: string;
+  fullName: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  isLocked: boolean;
+  lockedUntil?: string | null;
+  createdAt: string;
+}
+
+interface MockAdminSession {
+  id: string;
+  userId: number;
+  username: string;
+  ipAddress: string;
+  userAgent: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+const initialAdminUsers: MockAdminUser[] = [
+  { id: 1, username: "alex.mercer", fullName: "Alex Mercer", email: "alex.mercer@jakeai.internal", role: "admin", isActive: true, isLocked: false, lockedUntil: null, createdAt: "2026-01-15T09:00:00Z" },
+  { id: 2, username: "sarah.connor", fullName: "Sarah Connor", email: "sarah@cyberdyne.io", role: "member", isActive: true, isLocked: false, lockedUntil: null, createdAt: "2026-02-15T14:30:00Z" },
+];
+
+let mockAdminUsers: MockAdminUser[] = JSON.parse(JSON.stringify(initialAdminUsers));
+
+const initialAdminSessions: MockAdminSession[] = [
+  { id: "sess_01", userId: 1, username: "alex.mercer", ipAddress: "192.168.1.50", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128.0", createdAt: "2026-09-18T08:00:00Z", expiresAt: "2026-09-19T08:00:00Z" },
+  { id: "sess_02", userId: 2, username: "sarah.connor", ipAddress: "10.0.0.42", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15", createdAt: "2026-09-18T10:15:00Z", expiresAt: "2026-09-19T10:15:00Z" },
+];
+
+let mockAdminSessions: MockAdminSession[] = JSON.parse(JSON.stringify(initialAdminSessions));
+
+export function resetAdminMocks() {
+  mockAdminUsers = JSON.parse(JSON.stringify(initialAdminUsers));
+  mockAdminSessions = JSON.parse(JSON.stringify(initialAdminSessions));
+}
+
+let mockAdminAuditLogs = [
+  {
+    id: 1,
+    tenant_id: "tenant_jakeai_core",
+    user_id: 1,
+    email: "alex.mercer@jakeai.internal",
+    action: "USER_LOGIN",
+    resource: "auth",
+    status: "success",
+    ip_address: "192.168.1.50",
+    user_agent: "Mozilla/5.0 Chrome/128.0",
+    created_at: "2026-09-18T08:00:00Z",
+  },
+];
+
+function handleAdminUsers(url: URL) {
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const limit = parseInt(url.searchParams.get("limit") || "10", 10);
+  const search = (url.searchParams.get("search") || "").toLowerCase().trim();
+
+  const filtered = search
+    ? mockAdminUsers.filter(
+        (u) =>
+          u.username.toLowerCase().includes(search) ||
+          u.email.toLowerCase().includes(search) ||
+          u.fullName.toLowerCase().includes(search)
+      )
+    : mockAdminUsers;
+
+  const start = (page - 1) * limit;
+  const items = filtered.slice(start, start + limit);
+
   return HttpResponse.json({
     code: 200,
-    message: "users fetched",
-    data: [
-      { id: 1, username: "alex.mercer", email: "alex.mercer@jakeai.internal", role: "admin", isActive: true, createdAt: "2026-01-01" },
-      { id: 2, username: "sarah.connor", email: "sarah@cyberdyne.io", role: "member", isActive: true, createdAt: "2026-02-15" },
-    ],
+    message: "users retrieved",
+    data: {
+      items,
+      total: filtered.length,
+      page,
+      limit,
+    },
   });
 }
 
-function handleAdminAudit() {
+async function handleLockUser(id: string, _request: Request) {
+  const user = mockAdminUsers.find((u) => String(u.id) === String(id));
+  if (user) {
+    user.isLocked = true;
+    user.lockedUntil = new Date(Date.now() + 3600 * 1000).toISOString();
+  }
+  return HttpResponse.json({ code: 200, message: "user locked", data: null });
+}
+
+function handleUnlockUser(id: string) {
+  const user = mockAdminUsers.find((u) => String(u.id) === String(id));
+  if (user) {
+    user.isLocked = false;
+    user.lockedUntil = null;
+  }
+  return HttpResponse.json({ code: 200, message: "user unlocked", data: null });
+}
+
+function handleForceLogout(id: string) {
+  mockAdminSessions = mockAdminSessions.filter((s) => String(s.userId) !== String(id));
+  return HttpResponse.json({ code: 200, message: "user logged out of all devices", data: null });
+}
+
+function handleAdminSessions() {
   return HttpResponse.json({
     code: 200,
-    message: "audit logs fetched",
-    data: [
-      { id: 1, action: "USER_LOGIN", resource: "auth", ipAddress: "127.0.0.1", createdAt: "2026-09-17 12:00:00" },
-    ],
+    message: "tenant sessions retrieved",
+    data: mockAdminSessions,
+  });
+}
+
+function handleAdminAudit(request: Request) {
+  const url = new URL(request.url);
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+
+  const start = (page - 1) * limit;
+  const items = mockAdminAuditLogs.slice(start, start + limit);
+
+  return HttpResponse.json({
+    code: 200,
+    message: "audit logs retrieved",
+    data: {
+      items,
+      total: mockAdminAuditLogs.length,
+      page,
+      limit,
+    },
+  });
+}
+
+function handleExportAudit(request: Request) {
+  const url = new URL(request.url);
+  const format = url.searchParams.get("format") || "csv";
+
+  if (format === "ndjson") {
+    const ndjson = mockAdminAuditLogs.map((l) => JSON.stringify(l)).join("\n");
+    return new HttpResponse(ndjson, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Content-Disposition": 'attachment; filename="audit_export.ndjson"',
+      },
+    });
+  }
+
+  const csv = [
+    "id,timestamp,action,resource,actor,status,ip_address",
+    ...mockAdminAuditLogs.map(
+      (l) => `${l.id},${l.created_at},${l.action},${l.resource},${l.email},${l.status},${l.ip_address}`
+    ),
+  ].join("\n");
+
+  return new HttpResponse(csv, {
+    headers: {
+      "Content-Type": "text/csv",
+      "Content-Disposition": 'attachment; filename="audit_export.csv"',
+    },
   });
 }
 

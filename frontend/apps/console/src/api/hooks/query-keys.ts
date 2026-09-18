@@ -38,10 +38,10 @@ export const queryKeys = {
   },
   finops: {
     all: ["finops"] as const,
-    summary: (tenantId?: string) => [...queryKeys.finops.all, "summary", { tenantId }] as const,
+    summary: (tenantId?: string, period?: string) => [...queryKeys.finops.all, "summary", { tenantId, period }] as const,
     budget: (tenantId?: string) => [...queryKeys.finops.all, "budget", { tenantId }] as const,
-    transactions: (tenantId?: string) => [...queryKeys.finops.all, "transactions", { tenantId }] as const,
-    reconciliation: (tenantId?: string) => [...queryKeys.finops.all, "reconciliation", { tenantId }] as const,
+    transactions: (tenantId?: string, params?: Record<string, unknown>) => [...queryKeys.finops.all, "transactions", { tenantId, ...params }] as const,
+    reconciliation: (tenantId?: string, period?: string) => [...queryKeys.finops.all, "reconciliation", { tenantId, period }] as const,
   },
   rag: {
     all: ["rag"] as const,
@@ -56,7 +56,8 @@ export const queryKeys = {
   },
   admin: {
     all: ["admin"] as const,
-    users: () => [...queryKeys.admin.all, "users"] as const,
-    auditLogs: () => [...queryKeys.admin.all, "audit-logs"] as const,
+    users: (params?: Record<string, unknown>) => [...queryKeys.admin.all, "users", params] as const,
+    auditLogs: (params?: Record<string, unknown>) => [...queryKeys.admin.all, "audit-logs", params] as const,
+    sessions: () => [...queryKeys.admin.all, "sessions"] as const,
   },
 };
