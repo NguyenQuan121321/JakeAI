@@ -23,6 +23,10 @@ export const handlers = [
   http.get("*/api/v1/health/ready", () => HttpResponse.json({ status: "ready" })),
   http.get("/api/v1/health/ready", () => HttpResponse.json({ status: "ready" })),
 
+  // Chat Streaming
+  http.post("*/api/v1/chat/stream", async ({ request }) => handleChatStream(request)),
+  http.post("/api/v1/chat/stream", async ({ request }) => handleChatStream(request)),
+
   // Auth (FinnApiGo)
   http.post("*/api/v1/auth/login", async ({ request }) => handleLogin(request)),
   http.post("/api/v1/auth/login", async ({ request }) => handleLogin(request)),
@@ -571,5 +575,145 @@ function handleAdminAudit() {
     data: [
       { id: 1, action: "USER_LOGIN", resource: "auth", ipAddress: "127.0.0.1", createdAt: "2026-09-17 12:00:00" },
     ],
+  });
+}
+
+async function handleChatStream(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    prompt?: string;
+    conversation_id?: string;
+  };
+  const encoder = new TextEncoder();
+  const convId = body.conversation_id || "conv-mock-123";
+  const prompt = body.prompt || "";
+
+  if (!prompt.trim()) {
+    return new HttpResponse(
+      JSON.stringify({ detail: "Prompt or query must not be empty." }),
+      { status: 422, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const stream = new ReadableStream({
+    start(controller) {
+      // 1. Initial status
+      controller.enqueue(
+        encoder.encode(
+          `event: status\ndata: ${JSON.stringify({
+            phase: "initialized",
+            conversation_id: convId,
+            tenant_id: "tenant_jakeai_core",
+            mascot_state: "thinking",
+          })}\n\n`
+        )
+      );
+
+      // 2. Supervisor routing status
+      controller.enqueue(
+        encoder.encode(
+          `event: status\ndata: ${JSON.stringify({
+            node: "supervisor",
+            phase: "routing",
+            mascot_state: "thinking",
+            message: "Supervisor: Dispatching to financial_specialist.",
+          })}\n\n`
+        )
+      );
+
+      // 3. Specialist status
+      controller.enqueue(
+        encoder.encode(
+          `event: status\ndata: ${JSON.stringify({
+            node: "financial_specialist",
+            phase: "financial_analysis",
+            mascot_state: "thinking",
+            message: "Specialist analyzing query.",
+          })}\n\n`
+        )
+      );
+
+      // 4. Verifier status
+      controller.enqueue(
+        encoder.encode(
+          `event: status\ndata: ${JSON.stringify({
+            node: "verifier",
+            phase: "verification_passed",
+            mascot_state: "thinking",
+            message: "Verifier: Verified factual consistency.",
+          })}\n\n`
+        )
+      );
+
+      // 5. Synthesizer status
+      controller.enqueue(
+        encoder.encode(
+          `event: status\ndata: ${JSON.stringify({
+            node: "synthesizer",
+            phase: "synthesizing",
+            mascot_state: "thinking",
+            message: "Synthesizer: Consolidating verified claims.",
+          })}\n\n`
+        )
+      );
+
+      // 6. Tokens
+      const words = ["JakeAI", " analyzes", " your", " request", " with", " multi-agent", " verification."];
+      for (const w of words) {
+        controller.enqueue(
+          encoder.encode(
+            `event: token\ndata: ${JSON.stringify({
+              delta: w,
+              token: w,
+              conversation_id: convId,
+            })}\n\n`
+          )
+        );
+      }
+
+      // 7. Telemetry
+      controller.enqueue(
+        encoder.encode(
+          `event: telemetry\ndata: ${JSON.stringify({
+            baseline_tokens: 150,
+            billed_tokens: 120,
+            tokens_saved: 30,
+            reduction_rate: 0.2,
+          })}\n\n`
+        )
+      );
+
+      // 8. Done
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            conversation_id: convId,
+            tenant_id: "tenant_jakeai_core",
+            elapsed_ms: 180,
+            mascot_state: "success",
+            citations: [
+              {
+                index: 1,
+                source: "FinnApiGo Core Ledger",
+                snippet: "Authoritative financial statement snapshot for tenant",
+                tenant_id: "tenant_jakeai_core",
+                confidence: 0.98,
+                chunk_id: "chunk-fin-01",
+              },
+            ],
+            model: "gemini-1.5-flash",
+          })}\n\n`
+        )
+      );
+
+      controller.close();
+    },
+  });
+
+  return new HttpResponse(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
   });
 }
