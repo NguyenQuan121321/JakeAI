@@ -80,7 +80,7 @@ describe("TanStack Query Invalidation & Cache Consistency", () => {
 
     await byokService.storeKey({
       provider: "openai",
-      api_key: "sk-test12345678",
+      api_key: "test-key-for-ci-byok-12345",
       validate_key: true,
     });
 
