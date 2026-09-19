@@ -14,8 +14,10 @@ import type {
 } from "../types/domain";
 
 export class FinOpsService {
-  public async getSummary(): Promise<FinOpsSummary> {
-    const res = await apiClient.get<FinOpsSummary>("/api/v1/finops/summary");
+  public async getSummary(period?: string): Promise<FinOpsSummary> {
+    const res = await apiClient.get<FinOpsSummary>("/api/v1/finops/summary", {
+      params: period ? { period } : undefined,
+    });
     return res.data;
   }
 
@@ -29,13 +31,21 @@ export class FinOpsService {
     return res.data;
   }
 
-  public async getReconciliation(): Promise<ReconciliationReport> {
-    const res = await apiClient.get<ReconciliationReport>("/api/v1/finops/reconciliation");
+  public async getReconciliation(period?: string): Promise<ReconciliationReport> {
+    const res = await apiClient.get<ReconciliationReport>("/api/v1/finops/reconciliation", {
+      params: period ? { period } : undefined,
+    });
     return res.data;
   }
 
-  public async listTransactions(): Promise<FinOpsRecord[]> {
-    const res = await apiClient.get<FinOpsRecord[]>("/api/v1/finops/transactions");
+  public async listTransactions(params?: {
+    period?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<FinOpsRecord[]> {
+    const res = await apiClient.get<FinOpsRecord[]>("/api/v1/finops/transactions", {
+      params,
+    });
     return res.data;
   }
 }
