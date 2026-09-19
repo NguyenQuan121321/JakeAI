@@ -742,7 +742,6 @@ let mockBudget = {
   is_suspended: false,
   warning: null as string | null,
 };
-
 function handleFinopsSummary() {
   return HttpResponse.json({
     tenant_id: "tenant_jakeai_core",
