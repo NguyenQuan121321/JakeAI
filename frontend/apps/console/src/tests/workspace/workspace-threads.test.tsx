@@ -52,8 +52,8 @@ describe("Workspace Thread Management & Model UX", () => {
   it("populates controlled model selector from backend gateway models", async () => {
     renderWorkspace();
 
-    // Model select button/element is visible
-    const modelTrigger = await screen.findByRole("button", { name: /select model/i });
+    // Model select combobox/element is visible
+    const modelTrigger = await screen.findByRole("combobox", { name: /select model/i });
     expect(modelTrigger).toBeInTheDocument();
   });
 

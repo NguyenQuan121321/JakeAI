@@ -197,10 +197,23 @@ jobs:
           cd frontend/apps/console
           npm run typecheck
 
+      - name: Verify API Contract & Schema Synchronization (OpenAPI Drift)
+        run: |
+          cd frontend/apps/console
+          npm run test:contract
+
       - name: Run Vitest Unit Tests & Coverage Gate
         run: |
           cd frontend/apps/console
           npm run test:coverage
+
+      - name: Archive Frontend Console Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-console-coverage
+          path: frontend/apps/console/coverage/
+          retention-days: 14
 
       - name: Build Production Console Application
         run: |
@@ -212,6 +225,47 @@ jobs:
         with:
           name: frontend-console-dist
           path: frontend/apps/console/dist/
+          retention-days: 14
+
+  # 4c. Frontend Playwright E2E & Accessibility Verification Gate
+  frontend-e2e:
+    name: Frontend Console - Playwright E2E & A11y Gate
+    runs-on: ubuntu-latest
+    needs: [frontend-console-quality]
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: frontend/apps/console/package-lock.json
+
+      - name: Install Frontend Console Dependencies
+        run: |
+          cd frontend/apps/console
+          npm ci
+
+      - name: Install Playwright Browsers & OS Dependencies
+        run: |
+          cd frontend/apps/console
+          npx playwright install --with-deps chromium
+
+      - name: Execute Playwright E2E Workflow & Axe-core A11y Suite
+        run: |
+          cd frontend/apps/console
+          npm run test:e2e
+
+      - name: Publish Playwright HTML & JUnit Test Report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-e2e-report
+          path: |
+            frontend/apps/console/playwright-report/
+            frontend/apps/console/test-results/
           retention-days: 14
 
   # 5. Fast In-Memory Unit Test Suite (Zero External Services, Zero Race Conditions)
@@ -747,6 +801,7 @@ jobs:
       - typecheck-backend
       - frontend-quality
       - frontend-console-quality
+      - frontend-e2e
       - unit-tests
       - contract-and-security
       - integration-tests
@@ -761,20 +816,21 @@ jobs:
           echo "================================================================================"
           echo "CI / MERGE GATE: SUCCESS"
           echo "================================================================================"
-          echo "All 13 upstream verification gates passed with zero regressions:"
+          echo "All 14 upstream verification gates passed with zero regressions:"
           echo "  1. DevSecOps - Secret & Key Leak Detection"
           echo "  2. Code Quality, SAST & License Compliance Gate"
           echo "  3. Backend Type Analysis (Mypy)"
           echo "  4. Frontend Widget Build & Quality Verification"
           echo "  5. Frontend Console - Quality, Tests & Build Gate"
-          echo "  6. Unit Test Suite (In-Memory Isolation) [Python 3.11 & 3.12]"
-          echo "  7. Contract, Schema Drift & Runtime Security Gate"
-          echo "  8. Subsystem Integration Gate (Isolated Services)"
-          echo "  9. AI Quality, RAG & Evaluation Gate"
-          echo "  10. E2E Business Workflows & Bruno CLI Automation"
-          echo "  11. Performance Smoke & Dependency Regression Gate"
-          echo "  12. Coverage Gate, Forensic Failure Reporting & Flaky Audit"
-          echo "  13. Container Packaging & Vulnerability Scan"
+          echo "  6. Frontend Console - Playwright E2E & A11y Gate"
+          echo "  7. Unit Test Suite (In-Memory Isolation) [Python 3.11 & 3.12]"
+          echo "  8. Contract, Schema Drift & Runtime Security Gate"
+          echo "  9. Subsystem Integration Gate (Isolated Services)"
+          echo "  10. AI Quality, RAG & Evaluation Gate"
+          echo "  11. E2E Business Workflows & Bruno CLI Automation"
+          echo "  12. Performance Smoke & Dependency Regression Gate"
+          echo "  13. Coverage Gate, Forensic Failure Reporting & Flaky Audit"
+          echo "  14. Container Packaging & Vulnerability Scan"
           echo "================================================================================"
           echo "Commit is certified safe for merge into main."
           echo "================================================================================"

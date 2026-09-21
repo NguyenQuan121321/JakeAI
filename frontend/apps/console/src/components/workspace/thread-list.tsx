@@ -86,7 +86,7 @@ export function ThreadList({
                 )}
                 role="button"
                 tabIndex={0}
-                aria-selected={isActive}
+                aria-pressed={isActive}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     onSelectThread(thread.id);

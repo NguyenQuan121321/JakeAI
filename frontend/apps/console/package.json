@@ -11,6 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:contract": "node scripts/verify-contract.mjs",
+    "test:e2e": "playwright test",
+    "test:a11y": "playwright test e2e/a11y",
     "codegen:api": "openapi-typescript ../../../backend/openapi.json -o src/api/generated/schema.d.ts"
   },
   "dependencies": {
@@ -25,6 +28,8 @@
     "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
