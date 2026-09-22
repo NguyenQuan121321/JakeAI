@@ -1,17 +1,12 @@
 import type { Page, Route } from "@playwright/test";
+import type { User } from "../../src/types/auth";
+import { ADMIN_USER, createDeterministicTestJwt } from "./auth";
 
-export interface MockUserContext {
-  role?: string;
-  email?: string;
-  id?: number | string;
-}
-
-export async function setupDefaultMocks(page: Page, userContext: MockUserContext = {}) {
-  const role = userContext.role || "admin";
-  const email = userContext.email || "developer@jakeai.com";
-  const id = userContext.id || 1;
-
-  // 1. Auth endpoints
+/**
+ * Configure Authentication & Identity HTTP Mocks
+ */
+export async function setupAuthMocks(page: Page, user: User = ADMIN_USER) {
+  // 1. Login endpoint
   await page.route("**/api/v1/auth/login", async (route: Route) => {
     const postData = route.request().postDataJSON();
     if (postData?.email === "denied@jakeai.com") {
@@ -22,6 +17,8 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
       });
     }
 
+    const testToken = createDeterministicTestJwt(user);
+
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -29,15 +26,24 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
         code: 200,
         message: "OK",
         data: {
-          accessToken: "mock-access-token-jwt-valid",
-          refreshToken: "mock-refresh-token-valid",
-          expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-          profile: { id, email, role, isActive: true },
+          accessToken: testToken,
+          refreshToken: `refresh-${user.id}`,
+          expiresAt: new Date(Date.now() + 86400 * 1000).toISOString(),
+          profile: {
+            id: user.id,
+            email: user.email,
+            fullName: user.name,
+            username: user.email.split("@")[0],
+            role: user.roles[0] || "member",
+            isActive: true,
+            isEmailVerified: true,
+          },
         },
       }),
     });
   });
 
+  // 2. Current User Profile endpoint
   await page.route("**/api/v1/auth/me", async (route: Route) => {
     return route.fulfill({
       status: 200,
@@ -45,11 +51,41 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
       body: JSON.stringify({
         code: 200,
         message: "OK",
-        data: { id, email, role, isActive: true },
+        data: {
+          id: user.id,
+          email: user.email,
+          fullName: user.name,
+          username: user.email.split("@")[0],
+          role: user.roles[0] || "member",
+          isActive: true,
+          isEmailVerified: true,
+          tenantId: user.tenantId,
+          roles: user.roles,
+          permissions: user.permissions,
+        },
       }),
     });
   });
 
+  // 3. Refresh Token endpoint
+  await page.route("**/api/v1/auth/refresh-token", async (route: Route) => {
+    const testToken = createDeterministicTestJwt(user);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        message: "OK",
+        data: {
+          accessToken: testToken,
+          refreshToken: `refresh-${user.id}`,
+          expiresAt: new Date(Date.now() + 86400 * 1000).toISOString(),
+        },
+      }),
+    });
+  });
+
+  // 4. Logout endpoint
   await page.route("**/api/v1/auth/logout", async (route: Route) => {
     return route.fulfill({
       status: 200,
@@ -57,8 +93,15 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
       body: JSON.stringify({ code: 200, message: "Logged out", data: null }),
     });
   });
+}
 
-  // 2. Gateway models
+/**
+ * Configure Business Domain API Mocks (Gateway, Agent, RAG, FinOps, Admin)
+ */
+export async function setupBusinessApiMocks(page: Page, user: User = ADMIN_USER) {
+  const isAdmin = user.roles.includes("admin") || user.roles.includes("tenant_admin");
+
+  // 1. Gateway models
   await page.route("**/api/v1/gateway/models", async (route: Route) => {
     return route.fulfill({
       status: 200,
@@ -73,7 +116,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 3. Chat stream (SSE)
+  // 2. Chat stream (SSE)
   await page.route("**/api/v1/chat/stream", async (route: Route) => {
     const postData = route.request().postDataJSON();
     if (postData?.prompt?.includes("FAIL_503")) {
@@ -104,7 +147,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 4. Agent platform
+  // 3. Agent platform
   await page.route("**/api/v1/agent/metrics", async (route: Route) => {
     return route.fulfill({
       status: 200,
@@ -143,8 +186,8 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
       contentType: "application/json",
       body: JSON.stringify({
         task_id: "task-new-e2e-123",
-        tenant_id: "tenant-default",
-        user_id: String(id),
+        tenant_id: user.tenantId,
+        user_id: user.id,
         prompt: postData?.prompt || "Autonomous Task",
         status: "pending",
         context: {},
@@ -179,7 +222,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 5. BYOK Vault
+  // 4. BYOK Vault
   await page.route("**/api/v1/byok/keys", async (route: Route) => {
     if (route.request().method() === "POST") {
       const data = route.request().postDataJSON();
@@ -220,7 +263,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 6. RAG Pipeline
+  // 5. RAG Pipeline
   await page.route("**/api/v1/rag/query", async (route: Route) => {
     return route.fulfill({
       status: 200,
@@ -247,13 +290,13 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 7. FinOps
+  // 6. FinOps
   await page.route("**/api/v1/finops/summary*", async (route: Route) => {
     return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        tenant_id: "tenant_jakeai_core",
+        tenant_id: user.tenantId,
         period: "2026-09",
         total_requests: 1250,
         reconciled_requests: 1250,
@@ -277,7 +320,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
           total_savings_usd: 4.85,
         },
         budget_status: {
-          tenant_id: "tenant_jakeai_core",
+          tenant_id: user.tenantId,
           period: "2026-09",
           token_quota: 5000000,
           tokens_used: 1250000,
@@ -310,7 +353,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
       body: JSON.stringify([
         {
           id: "tx-1",
-          tenant_id: "tenant-default",
+          tenant_id: user.tenantId,
           model: "gpt-4o",
           prompt_tokens: 120,
           completion_tokens: 80,
@@ -321,7 +364,7 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 8. Analytics
+  // 7. Analytics
   await page.route("**/api/v1/analytics/dashboard", async (route: Route) => {
     return route.fulfill({
       status: 200,
@@ -335,9 +378,9 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
     });
   });
 
-  // 9. Admin routes
+  // 8. Admin routes
   await page.route("**/api/v1/admin/users*", async (route: Route) => {
-    if (role !== "admin") {
+    if (!isAdmin) {
       return route.fulfill({
         status: 403,
         contentType: "application/json",
@@ -380,4 +423,12 @@ export async function setupDefaultMocks(page: Page, userContext: MockUserContext
       }),
     });
   });
+}
+
+/**
+ * Composite default mock setup combining Auth and Business endpoints
+ */
+export async function setupDefaultMocks(page: Page, user: User = ADMIN_USER) {
+  await setupAuthMocks(page, user);
+  await setupBusinessApiMocks(page, user);
 }

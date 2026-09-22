@@ -1,49 +1,39 @@
-import { test, expect } from "@playwright/test";
-import { setupDefaultMocks } from "../fixtures/api-mocks";
+import { test, expect } from "../fixtures/test";
 
 test.describe("Workflows 5, 6, 7: Agent Task, Agent Run & Human-in-the-Loop Approval", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupDefaultMocks(page);
+  test("creates an agent task and starts autonomous run on agent canvas", async ({ authenticatedPage }) => {
+    await authenticatedPage.goto("/agent");
 
-    await page.addInitScript(() => {
-      window.sessionStorage.setItem("jakeai_access_token", "mock-access-token-jwt-valid");
-      window.sessionStorage.setItem("jakeai_refresh_token", "mock-refresh-token-valid");
-    });
-  });
+    await expect(authenticatedPage.getByRole("heading", { name: /Agent Orchestration Canvas/i })).toBeVisible();
 
-  test("creates an agent task and starts autonomous run on agent canvas", async ({ page }) => {
-    await page.goto("/agent");
-
-    await expect(page.getByRole("heading", { name: /Agent Orchestration Canvas/i })).toBeVisible();
-
-    const goalInput = page.getByTestId("canvas-goal-input");
+    const goalInput = authenticatedPage.getByTestId("canvas-goal-input");
     await expect(goalInput).toBeVisible();
     await goalInput.fill("Automate microservice dependency vulnerability scanner");
 
-    const startBtn = page.getByTestId("start-run-button");
+    const startBtn = authenticatedPage.getByTestId("start-run-button");
     await expect(startBtn).toBeEnabled();
     await startBtn.click();
 
     // Verify task creation & run execution triggered
-    await expect(page.getByTestId("cancel-run-button")).toBeVisible();
+    await expect(authenticatedPage.getByTestId("cancel-run-button")).toBeVisible();
   });
 
-  test("inspects historical runs and pending approval gates on /agent/runs", async ({ page }) => {
-    await page.goto("/agent/runs");
+  test("inspects historical runs and pending approval gates on /agent/runs", async ({ authenticatedPage }) => {
+    await authenticatedPage.goto("/agent/runs");
 
-    await expect(page.getByRole("heading", { name: /Agent Execution Runs/i })).toBeVisible();
+    await expect(authenticatedPage.getByRole("heading", { name: /Agent Execution Runs/i })).toBeVisible();
 
     // Check presence of data table
-    await expect(page.getByText("run-882")).toBeVisible();
-    await expect(page.getByText("run-884")).toBeVisible();
+    await expect(authenticatedPage.getByText("run-882")).toBeVisible();
+    await expect(authenticatedPage.getByText("run-884")).toBeVisible();
 
     // Click on row to view run inspector dialog
-    await page.getByText("run-882").click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page.getByText(/Execution Run:\s*run-882/i)).toBeVisible();
+    await authenticatedPage.getByText("run-882").click();
+    await expect(authenticatedPage.getByRole("dialog")).toBeVisible();
+    await expect(authenticatedPage.getByText(/Execution Run:\s*run-882/i)).toBeVisible();
 
     // Close dialog
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await authenticatedPage.keyboard.press("Escape");
+    await expect(authenticatedPage.getByRole("dialog")).not.toBeVisible();
   });
 });

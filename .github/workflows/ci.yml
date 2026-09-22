@@ -253,6 +253,11 @@ jobs:
           cd frontend/apps/console
           npx playwright install --with-deps chromium
 
+      - name: Build Production Console Application
+        run: |
+          cd frontend/apps/console
+          npm run build
+
       - name: Execute Playwright E2E Workflow & Axe-core A11y Suite
         run: |
           cd frontend/apps/console
