@@ -687,7 +687,7 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Download All Step Artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: backend/reports/collected-artifacts
 
