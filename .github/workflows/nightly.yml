@@ -582,6 +582,52 @@ jobs:
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
 
+  # 9b. Frontend Nightly E2E & Accessibility Audit Gate
+  nightly-frontend-e2e-and-a11y:
+    name: Nightly Frontend Playwright E2E & WCAG 2.1 AA Gate
+    runs-on: ubuntu-latest
+    needs: nightly-security-and-static
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: frontend/apps/console/package-lock.json
+
+      - name: Install Frontend Console Dependencies
+        run: |
+          cd frontend/apps/console
+          npm ci
+
+      - name: Install Playwright Browsers & OS Dependencies
+        run: |
+          cd frontend/apps/console
+          npx playwright install --with-deps chromium
+
+      - name: Build Production Console Application
+        run: |
+          cd frontend/apps/console
+          npm run build
+
+      - name: Execute Full Playwright Workflows & Axe-core Audits
+        run: |
+          cd frontend/apps/console
+          npm run test:e2e
+
+      - name: Archive Nightly Playwright E2E & A11y Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-playwright-e2e-reports
+          path: |
+            frontend/apps/console/playwright-report/
+            frontend/apps/console/test-results/
+          retention-days: 30
+
   # 10. Consolidated Reporting & Comprehensive Artifact Archiving
   nightly-reporting-and-artifacts:
     name: Nightly Forensic Reporting & Master Artifact Archive
@@ -596,6 +642,7 @@ jobs:
       - nightly-dependency-checks
       - nightly-real-provider-and-finnapigo-smoke
       - nightly-container-checks
+      - nightly-frontend-e2e-and-a11y
     if: always()
     services:
       redis:

@@ -93,6 +93,7 @@ export function Select({
         onClick={() => !disabled && setIsOpen((prev) => !prev)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
+        role="combobox"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={ariaLabel}

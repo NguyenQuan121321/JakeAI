@@ -49,6 +49,8 @@ coverage.xml
 benchmark-results/
 reports/
 backend/reports/
+playwright-report/
+test-results/
 
 # Type Checking & Linting
 .mypy_cache/

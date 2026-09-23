@@ -63,9 +63,34 @@ export function AuthProvider({
   initialUser?: User | null;
   initialAuthenticated?: boolean;
 }) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(initialAuthenticated);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      if (sessionStorage.getItem("jakeai_unauthenticated") === "true") {
+        return false;
+      }
+      if (sessionStorage.getItem("jakeai_user_override")) {
+        return true;
+      }
+    }
+    return initialAuthenticated;
+  });
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [user, setUser] = useState<User | null>(initialUser);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window !== "undefined") {
+      if (sessionStorage.getItem("jakeai_unauthenticated") === "true") {
+        return null;
+      }
+      const override = sessionStorage.getItem("jakeai_user_override");
+      if (override) {
+        try {
+          return JSON.parse(override) as User;
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+    return initialUser;
+  });
   const [workspaces] = useState<Workspace[]>(DEFAULT_WORKSPACES);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(() => {
     try {
@@ -116,25 +141,23 @@ export function AuthProvider({
       } catch {
         // Ignore storage errors
       }
-    } catch {
-      // Fallback for mock/test environments if network isn't configured
-      const loggedUser: User = {
-        id: `usr_${Math.random().toString(36).substring(2, 9)}`,
-        name: email.split("@")[0].replace(".", " ").replace(/^\w/, (c) => c.toUpperCase()),
-        email,
-        tenantId: activeWorkspaceId,
-        roles: email.includes("admin") ? ["admin", "tenant_admin"] : ["member"],
-        permissions: email.includes("admin") ? ["*"] : ["agent:read", "rag:read", "read:workspace", "read:agent"],
-      };
-      setUser(loggedUser);
-      setIsAuthenticated(true);
+    } catch (err: unknown) {
+      throw err;
     } finally {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("jakeai_unauthenticated");
+        sessionStorage.removeItem("jakeai_user_override");
+      }
       setIsLoading(false);
     }
   }, [activeWorkspaceId]);
 
   const logout = useCallback(async () => {
     await authService.logout();
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("jakeai_unauthenticated", "true");
+      sessionStorage.removeItem("jakeai_user_override");
+    }
     setUser(null);
     setIsAuthenticated(false);
   }, []);
