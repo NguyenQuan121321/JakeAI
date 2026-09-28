@@ -5,9 +5,9 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 
 # Multi-Agent & Orchestration
-langgraph==1.2.11
-langchain==1.4.0
-langchain-core==1.6.2
+langgraph==1.2.12
+langchain==1.4.2
+langchain-core==1.6.5
 langchain-text-splitters==1.1.2
 
 # Security & Authentication
