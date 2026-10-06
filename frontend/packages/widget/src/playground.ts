@@ -1,25 +1,21 @@
 import { JakeAI } from "./index";
 
-// Validly signed JWT token matching backend JWT_SECRET_KEY (a8f3e2b1c9d7f6e5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2)
-// Payload: {"sub":"user-demo-001","uid":101,"tid":"tenant-demo","role":"admin","perms":["chat:write","rag:read"],"type":"access","exp":253402300799}
-const DEFAULT_DEV_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
-  "eyJzdWIiOiJ1c2VyLWRlbW8tMDAxIiwidWlkIjoxMDEsInRpZCI6InRlbmFudC1kZW1vIiwicm9sZSI6ImFkbWluIiwicGVybXMiOlsiY2hhdDp3cml0ZSIsInJhZzpyZWFkIl0sInR5cGUiOiJhY2Nlc3MiLCJleHAiOjI1MzQwMjMwMDc5OX0." +
-  "vjTAyaIxrc6JwGmere5k8Up9kADaamq27HPSVU6wi3c";
-
+// Start unauthenticated. Paste a short-lived access token from your local
+// FinnApiGo login; no signing key or privileged credential belongs in this page.
 const tokenInput = document.getElementById("jwt-token") as HTMLInputElement | null;
 const backendUrlInput = document.getElementById("backend-url") as HTMLInputElement | null;
 const updateBtn = document.getElementById("update-token-btn") as HTMLButtonElement | null;
 const openBtn = document.getElementById("open-widget-btn") as HTMLButtonElement | null;
 
 if (tokenInput) {
-  tokenInput.value = DEFAULT_DEV_TOKEN;
+  tokenInput.value = "";
+  tokenInput.placeholder = "Paste a short-lived FinnApiGo access token from your local login";
 }
 
 // Initialize widget
 const widget = JakeAI.init({
   apiUrl: backendUrlInput?.value || "http://127.0.0.1:8000/api/v1/chat/stream",
-  token: DEFAULT_DEV_TOKEN,
+  token: "",
   theme: "dark",
   initialOpen: false,
 });
@@ -53,6 +49,11 @@ if (byokBtn && byokKeyInput && byokProviderSelect && byokStatus && tokenInput) {
     const apiKey = byokKeyInput.value.trim();
     const provider = byokProviderSelect.value;
     const token = tokenInput.value.trim();
+
+    if (!token) {
+      byokStatus.textContent = "Sign in to FinnApiGo and apply an access token first.";
+      return;
+    }
 
     if (!apiKey) {
       alert("Please enter an API key.");

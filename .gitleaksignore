@@ -1,3 +1,7 @@
-# Gitleaks ignore file for historic test mock fingerprints
-f0978c2d77b07db8467fdeab51c148c9f6b2b032:backend/tests/test_gateway.py:generic-api-key:73
-106c23820407cc0edc492d8216b44557b3923d06:frontend/apps/console/src/tests/api/query-invalidation.test.ts:generic-api-key:83
+# Exact historical findings only. Never exclude an app/test/playground path.
+# Retired synthetic playground JWT: previously usable in dev, now unconditionally
+# rejected by decoded-signature SHA256 in verify_finnapigo_jwt, including padding
+# variants and configured/explicit keys. Regression: test_retired_playground_token_is_inert.
+# See docs/security/ci-secret-dispositions.md. No production-use evidence exists.
+632ff2ffdf11cb1d11265cbfe49dd645f5e66786:frontend/src/playground.ts:generic-api-key:5
+632ff2ffdf11cb1d11265cbfe49dd645f5e66786:frontend/packages/widget/src/playground.ts:generic-api-key:5

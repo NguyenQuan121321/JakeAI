@@ -16,6 +16,7 @@ Automated verification covering:
 
 import hashlib
 import hmac
+import json
 import time
 from typing import Any
 from unittest.mock import AsyncMock
@@ -490,3 +491,38 @@ async def test_auth_payos_webhook_invalid_signature_rejected() -> None:
         )
         assert resp.status_code == 400
         assert "invalid" in resp.json()["detail"].lower()
+
+
+@pytest.mark.parametrize("environment", ["development", "test", "local", "production"])
+@pytest.mark.parametrize("padding", ["", "="])
+@pytest.mark.parametrize(
+    "explicit_key", [None, "unrelated-short-lived-test-signing-key"]
+)
+def test_retired_playground_token_is_inert(
+    environment: str,
+    padding: str,
+    explicit_key: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retired synthetic demo credential is rejected even with base64 padding variants."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ENVIRONMENT", environment)
+    header = jwt.utils.base64url_encode(b'{"alg":"HS256","typ":"JWT"}').decode()
+    payload = {
+        "sub": "user-demo-001",
+        "uid": 101,
+        "tid": "tenant-demo",
+        "role": "admin",
+        "perms": ["chat:write", "rag:read"],
+        "type": "access",
+        "exp": 253402300799,
+    }
+    body = jwt.utils.base64url_encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode()
+    # Original signature only, retained to regress explicit revocation; no signing key.
+    signature = "vjTAyaIxrc6JwGmere5k8Up9kADaamq27HPSVU6wi3c"
+    retired = f"{header}.{body}.{signature}{padding}"
+    with pytest.raises(HTTPException, match="Retired playground demo token") as error:
+        verify_finnapigo_jwt(retired, secret_key=explicit_key)
+    assert error.value.status_code == 401
