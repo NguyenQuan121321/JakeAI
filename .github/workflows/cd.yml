@@ -100,7 +100,7 @@ jobs:
 
       - name: Bump Version and Generate SemVer Tag
         id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
+        uses: mathieudutour/github-tag-action@v7
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
