@@ -1,5 +1,6 @@
 """Security utilities and FinnApiGo JWT policy enforcement."""
 
+import binascii
 import hashlib
 import hmac
 import logging
@@ -16,6 +17,14 @@ from app.core.config import get_settings
 from app.core.context import TenantContext, set_current_tenant_context
 
 logger = logging.getLogger(__name__)
+
+# Retired synthetic admin JWT formerly shipped in both widget playgrounds.
+# Compare decoded signature bytes so equivalent base64 padding cannot bypass
+# revocation. This applies before key/environment selection, including explicit
+# key overrides. Only a digest is retained; see docs/security/ci-secret-dispositions.md.
+_RETIRED_PLAYGROUND_SIGNATURE_SHA256 = (
+    "aaf884500d7d25e5ca1504276b3f8050a82f02c3950bcb7c6456a40f7e943a34"
+)
 
 http_bearer = HTTPBearer(
     scheme_name="FinnApiGoAuth",
@@ -42,6 +51,17 @@ def verify_finnapigo_jwt(
     (tid, perms, role, uid) and standard expanded claims (tenant_id, permissions, roles, sub).
     Preserves single correlation ID (OPS-04).
     """
+    try:
+        signature = jwt.utils.base64url_decode(token.rsplit(".", 1)[-1].encode("ascii"))
+    except (binascii.Error, ValueError, UnicodeEncodeError):
+        signature = b""
+    if hashlib.sha256(signature).hexdigest() == _RETIRED_PLAYGROUND_SIGNATURE_SHA256:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Retired playground demo token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     settings = get_settings()
     algo = algorithm or settings.JWT_ALGORITHM
 

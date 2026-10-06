@@ -1,10 +1,16 @@
+import { realpathSync } from "fs";
 import { resolve } from "path";
-import { defineConfig } from "vite";
+import { fileURLToPath } from "url";
+import { defineConfig, normalizePath } from "vite";
+
+// Canonical cross-platform project root (normalizes Windows drive letter & slashes)
+const projectRoot = normalizePath(realpathSync.native(fileURLToPath(new URL(".", import.meta.url))));
 
 export default defineConfig({
+  root: projectRoot,
   build: {
     lib: {
-      entry: resolve(__dirname, "src/index.ts"),
+      entry: resolve(projectRoot, "src/index.ts"),
       name: "JakeAIWidget",
       fileName: (format) => `jake-ai-widget.${format}.js`,
       formats: ["es", "umd"],
@@ -25,6 +31,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: ["src/**/*.ts"],
+      exclude: ["src/playground.ts", "src/vite-env.d.ts"],
     },
   },
 });

@@ -11,14 +11,14 @@ langchain-core==1.6.2
 langchain-text-splitters==1.1.2
 
 # Security & Authentication
-pyjwt[crypto]==2.13.0
+pyjwt[crypto]==2.15.0
 cryptography==50.0.1
 
 # State, Caching & Vector Store
 redis[hiredis]==8.1.0
 qdrant-client==1.19.0
 fastembed==0.8.0
-pypdf==6.18.0
+pypdf==6.19.0
 
 # HTTP Client
 httpx==0.28.1
