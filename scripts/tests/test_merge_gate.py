@@ -19,7 +19,7 @@ class MergeGateTests(unittest.TestCase):
         self.assertEqual(gate["if"], "${{ always() }}")
         self.assertEqual(set(gate["needs"]), set(jobs) - {"merge-gate"})
         self.assertEqual(
-            set(gate["steps"][-1]["env"]["REQUIRED_JOBS"].split()), set(gate["needs"])
+            set(next(step for step in gate["steps"] if "env" in step)["env"]["REQUIRED_JOBS"].split()), set(gate["needs"])
         )
 
     def run_gate(self, needs: dict, required: str = "security container") -> int:
