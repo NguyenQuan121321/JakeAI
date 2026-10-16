@@ -135,21 +135,26 @@ def test_legacy_compose_name_cannot_configure_actual_master(monkeypatch):
 def test_signing_retirement_guard_has_no_explicit_key_or_environment_bypass(
     monkeypatch,
 ):
-    import re
-    import subprocess
     import time
 
     import jwt
     from fastapi import HTTPException
 
+    from app.core import secret_material
     from app.core.config import get_settings
     from app.core.security import verify_finnapigo_jwt
 
-    # Read the already-published historical example without re-embedding it in source.
-    original = subprocess.check_output(
-        ["git", "show", "05216be:backend/.env.example"], text=True
+    # Add a synthetic compromised key to the real retirement inventory. This
+    # exercises all verifier paths without publishing credentials or depending
+    # on historical Git objects absent from shallow CI checkouts. Actual public
+    # key probes and reviewed immutable digests are recorded in J01/J03 evidence.
+    published = secrets.token_hex(32)
+    monkeypatch.setattr(
+        secret_material,
+        "RETIRED_SIGNING_KEY_SHA256",
+        secret_material.RETIRED_SIGNING_KEY_SHA256
+        | {hashlib.sha256(published.encode()).hexdigest()},
     )
-    published = re.search(r"^JWT_SECRET_KEY=(.+)$", original, re.M)[1].strip()
     token = jwt.encode(
         {"sub": "synthetic", "tid": "synthetic", "exp": int(time.time()) + 60},
         published,
