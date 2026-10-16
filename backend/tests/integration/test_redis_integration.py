@@ -196,6 +196,10 @@ class TestRedisIntegrationAuthorities:
 
     async def test_byok_manager_vault_encryption(self) -> None:
         """Authority 5: BYOKManager credential encryption and Redis storage."""
+        if not REDIS_AVAILABLE:
+            pytest.skip(
+                "BLOCKED: actual BYOK Redis integration requires reachable isolated Redis"
+            )
         from app.core.byok_storage import BYOKError, RedisStore
         from app.core.config import get_settings
 

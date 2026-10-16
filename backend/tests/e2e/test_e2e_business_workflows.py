@@ -521,7 +521,11 @@ async def test_e2e_workflow_05_byok_provider_credential_accounting(
     """
     tenant_id = f"tenant-wf5-{uuid.uuid4().hex[:8]}"
     correlation_id = f"corr-wf5-{uuid.uuid4().hex[:8]}"
-    headers = e2e_auth_headers(tenant_id=tenant_id, correlation_id=correlation_id)
+    headers = e2e_auth_headers(
+        tenant_id=tenant_id,
+        correlation_id=correlation_id,
+        permissions=["byok:read", "byok:write", "chat:write"],
+    )
     byok_mgr = get_byok_manager()
 
     test_raw_key = "sk-ant-test-key-live-simulation-777888999"
@@ -541,7 +545,7 @@ async def test_e2e_workflow_05_byok_provider_credential_accounting(
     assert key_data["provider"] == "anthropic"
     assert key_data["status"] == "configured"
     assert "masked_key" in key_data
-    assert "..." in key_data["masked_key"]
+    assert key_data["masked_key"] == "********"
     # Security Invariant: Raw secret must never be present in response text
     assert test_raw_key not in r_add_key.text
 
