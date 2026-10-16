@@ -345,7 +345,29 @@ def rehearse(image, output):
                 assert http(base, "/api/v1/byok/keys", denied)[0] == 403
             code, body = http(base, "/api/v1/byok/keys", mint(env, tenant="other"))
             assert code == 200 and not any(item["configured"] for item in body["keys"])
-            run([*compose, "restart", "jakeai-backend", "byok-redis"], env=env)
+            # The production API deliberately exits if its vault is unavailable
+            # at startup. `compose restart A B` restarts both concurrently and
+            # does not reapply depends_on health ordering. Restore the vault
+            # first, then restart the fail-closed application against it.
+            stage("persistent vault restart")
+            run([*compose, "restart", "byok-redis"], env=env)
+            for _ in range(15):
+                ready = run(
+                    [*compose, "exec", "-T", "byok-redis", "redis-cli", "ping"],
+                    env=env,
+                    required=False,
+                )
+                if ready.returncode == 0 and ready.stdout.strip() == "PONG":
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("Synthetic vault restart unavailable")
+            stage("production API restart after vault recovery")
+            run([*compose, "restart", "jakeai-backend"], env=env)
+            port = run(
+                [*compose, "port", "jakeai-backend", "8000"], env=env
+            ).stdout.strip()
+            base = "http://" + port
             wait_http(base)
             for _ in range(10):
                 if http(base, "/api/v1/byok/keys", token)[0] == 200:
