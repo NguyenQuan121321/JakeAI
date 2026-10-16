@@ -803,6 +803,9 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
+          # Re-run OS security updates; cached apt layers can predate fixes.
+          pull: true
+          no-cache: true
           load: true
           tags: jakeai-backend:test
           cache-from: type=gha
