@@ -20,6 +20,13 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_STAGE = "initialization"
+
+
+def stage(label):
+    global CURRENT_STAGE
+    CURRENT_STAGE = label
+    print("J03 stage: " + label, flush=True)
 
 
 def run(command, *, env=None, timeout=120, required=True):
@@ -90,6 +97,7 @@ def wait_http(base):
 
 
 def rehearse(image, output):
+    stage("existing Docker engine")
     run(["docker", "info"], timeout=15)
     env = os.environ.copy()
     for name in [
@@ -135,6 +143,7 @@ def rehearse(image, output):
     # Default image command must exit nonzero before serving, for each absent/default secret.
     for name in names[1:7]:
         for value in ["", "replace-with-production-secret"]:
+            stage("reject " + name + (" missing" if not value else " placeholder"))
             negative = env | {name: value}
             args = ["docker", "run", "--rm"]
             for field in names:
@@ -142,6 +151,9 @@ def rehearse(image, output):
             result = run([*args, image], env=negative, timeout=30, required=False)
             if result.returncode == 0:
                 raise RuntimeError("Invalid production startup unexpectedly succeeded")
+            assert "Production secrets require" in result.stderr, (
+                "Startup failed outside the secret-validation boundary"
+            )
             assert all(
                 secret not in result.stdout + result.stderr
                 for field, secret in negative.items()
@@ -189,6 +201,7 @@ def rehearse(image, output):
             str(override),
         ]
         try:
+            stage("production Compose mapping")
             rendered = json.loads(
                 run([*compose, "config", "--format", "json"], env=env).stdout
             )
@@ -199,6 +212,7 @@ def rehearse(image, output):
             report["checks"].append(
                 "actual production Compose maps intended settings for API and worker"
             )
+            stage("isolated persistent Redis startup")
             run(
                 [
                     *compose,
@@ -212,6 +226,7 @@ def rehearse(image, output):
                 env=env,
             )
             # Use the built image and isolated live Redis for the fault/CAS/rotation suite.
+            stage("real Redis concurrency, fault and rotation suite")
             testenv = env | {
                 "ENVIRONMENT": "test",
                 "J03_REDIS_URL": "redis://byok-redis:6379/15",
@@ -244,6 +259,7 @@ def rehearse(image, output):
             report["checks"].append(
                 "live Redis rotation/concurrency/CAS/fault/recovery suite"
             )
+            stage("production API and worker startup")
             run(
                 [
                     *compose,
@@ -278,6 +294,7 @@ def rehearse(image, output):
                 "production image process settings match injected synthetic material"
             )
             token, canary = mint(env), secrets.token_urlsafe(24)
+            stage("real HTTP authorization and encrypted persistence")
             code, body = http(
                 base,
                 "/api/v1/byok/keys",
@@ -325,6 +342,7 @@ def rehearse(image, output):
             base = "http://" + port
             wait_http(base)
             assert http(base, "/api/v1/byok/keys", token)[0] == 200
+            stage("current/previous key restart and process migration")
             migration = run(
                 [
                     *compose,
@@ -345,6 +363,7 @@ def rehearse(image, output):
                 == 1
             )
             run([*compose, "stop", "byok-redis"], env=env)
+            stage("actual vault outage and recovery")
             assert http(base, "/api/v1/byok/keys", token)[0] == 503
             assert (
                 http(
@@ -397,6 +416,7 @@ def rehearse(image, output):
             report["checks"].append(
                 "current/previous rotation, process migration, outage/recovery, retirement and masked logs"
             )
+            stage("retirement, masked diagnostics and production worker")
             state = run(
                 [
                     "docker",
@@ -435,9 +455,18 @@ if __name__ == "__main__":
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(
             json.dumps(
-                {"result": "BLOCKED_OR_FAILED", "error_type": type(error).__name__}
+                {
+                    "result": "BLOCKED"
+                    if CURRENT_STAGE == "existing Docker engine"
+                    else "FAIL",
+                    "stage": CURRENT_STAGE,
+                    "source_sha": os.getenv("GITHUB_SHA", "local"),
+                    "error_type": type(error).__name__,
+                }
             )
             + "\n"
         )
-        print("J03 runtime BLOCKED_OR_FAILED: " + type(error).__name__)
+        print(
+            "J03 runtime incomplete at " + CURRENT_STAGE + ": " + type(error).__name__
+        )
         raise SystemExit(1) from None
