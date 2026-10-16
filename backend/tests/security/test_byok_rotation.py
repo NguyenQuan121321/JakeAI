@@ -262,3 +262,31 @@ async def test_real_redis_connection_fault_is_truthful(tenant):
             await store.cas("synthetic", None, "encrypted")
     finally:
         await store.client.aclose()
+
+
+async def test_two_concurrent_migrators_only_commit_once(store, tenant, monkeypatch):
+    old, current = material(), material()
+    await BYOKManager(old, key_id="old", store=store).store_key(
+        tenant, "openai", secrets.token_urlsafe(24)
+    )
+    first_manager, second_manager = ring(store, old, current), ring(store, old, current)
+    original_cas = store.cas
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def interleave(key, expected, value):
+        if not entered.is_set():
+            entered.set()
+            await release.wait()
+        return await original_cas(key, expected, value)
+
+    monkeypatch.setattr(store, "cas", interleave)
+    first = asyncio.create_task(full_pass(first_manager))
+    await asyncio.wait_for(entered.wait(), 3)
+    second = await full_pass(second_manager)
+    release.set()
+    first_reports = await first
+    assert sum(r["migrated"] for r in second) == 1
+    assert sum(r["conflicts"] for r in first_reports) == 1
+    assert (
+        json.loads(await first_manager._get_raw_val(tenant, "openai"))["revision"] == 2
+    )
