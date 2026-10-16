@@ -113,6 +113,11 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
     )
+    from app.core.byok import get_byok_manager
+    from app.core.config import get_settings
+
+    if get_settings().ENVIRONMENT.lower() == "production":
+        await get_byok_manager().check_storage()
     worker = IngestionWorker()
 
     loop = asyncio.get_running_loop()

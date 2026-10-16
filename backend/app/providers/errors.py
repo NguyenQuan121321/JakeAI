@@ -15,6 +15,8 @@ import re
 from enum import StrEnum
 from typing import Any
 
+from app.core.credential_redaction import redact_credentials
+
 
 class ErrorCategory(StrEnum):
     """Normalized upstream error classification as required by Phase 01 Section 6."""
@@ -65,7 +67,7 @@ _SECRET_REDACTION_PATTERNS = [
 
 def sanitize_error_message(message: str) -> str:
     """Sanitize error messages to guarantee zero provider credentials, DB strings, or tokens leak."""
-    clean = str(message)
+    clean = str(redact_credentials(str(message)))
     for pattern in _SECRET_REDACTION_PATTERNS:
         clean = pattern.sub("[REDACTED_SECRET]", clean)
     return clean
@@ -94,7 +96,7 @@ class ProviderError(Exception):
         self.status_code = status_code
         self.is_retryable = is_retryable
         self.retry_after_seconds = retry_after_seconds
-        self.raw_error = raw_error
+        self.raw_error = redact_credentials(raw_error)
 
     def __str__(self) -> str:
         cat_val = (

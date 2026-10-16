@@ -1,9 +1,7 @@
-"""Bring Your Own Key (BYOK) Manager with AES-256-GCM Authenticated Encryption.
+"""Authenticated BYOK custody, CAS lifecycle and resumable encryption rotation.
 
-Enables tenants to supply their own LLM provider API keys (OpenAI, Gemini, Anthropic, OpenRouter).
-Protects against financial token surges and rate-limit depletion.
-Keys are encrypted at rest using AES-256-GCM with tenant-isolated key derivation and
-decrypted transiently in memory only during active execution.
+Masters are provisioned separately from ciphertext. Python memory erasure and
+protection from a compromised application process are not promised.
 """
 
 from __future__ import annotations
@@ -11,19 +9,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import logging
 import os
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from app.core.byok_storage import BYOKError, MemoryStore, RedisStore
 from app.core.config import get_settings
-from app.core.redis_client import acquire_redis_client
-
-logger = logging.getLogger(__name__)
+from app.core.credential_redaction import protect_credential
+from app.core.secret_material import decode_secret, validate_key_id
 
 SUPPORTED_PROVIDERS = {
     "openai",
@@ -35,618 +31,511 @@ SUPPORTED_PROVIDERS = {
 }
 
 
+def _json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 class BYOKManager:
-    """Manages tenant API key encryption, storage, validation, and dynamic in-memory injection."""
+    """One credential slot per tenant/provider, owned by its initial trusted writer."""
 
-    def __init__(self, master_key: str | None = None) -> None:
+    def __init__(
+        self,
+        master_key: str | None = None,
+        *,
+        key_id: str | None = None,
+        previous_keys: dict[str, str] | None = None,
+        retired_key_ids: list[str] | None = None,
+        retired_key_hashes: list[str] | None = None,
+        store: MemoryStore | RedisStore | None = None,
+    ) -> None:
         settings = get_settings()
-        raw_key = master_key or settings.BYOK_MASTER_KEY
-        # Ensure 32-byte master key via SHA-256 hash
-        self._master_secret = hashlib.sha256(raw_key.encode("utf-8")).digest()
-        # In-memory storage fallback when Redis is offline
-        self._memory_store: dict[str, dict[str, str]] = {}
-        self.redis_client: Any | None = None
-        self._redis_available = True
-
-    def _derive_tenant_aesgcm(self, tenant_id: str) -> AESGCM:
-        """Derive an isolated 32-byte AES-256-GCM key per tenant using HMAC-SHA256."""
-        tenant_key = hashlib.sha256(
-            self._master_secret + tenant_id.encode("utf-8")
-        ).digest()
-        return AESGCM(tenant_key)
-
-    def encrypt_key(self, api_key: str, tenant_id: str) -> str:
-        """Encrypt an API key using AES-256-GCM with tenant_id as associated data (AAD).
-
-        Returns:
-            Base64 encoded string of (12-byte nonce + ciphertext + 16-byte tag).
-        """
-        if not api_key:
-            raise ValueError("API key cannot be empty")
-        if not tenant_id:
-            raise ValueError("Tenant ID is required for encryption")
-
-        aesgcm = self._derive_tenant_aesgcm(tenant_id)
-        nonce = os.urandom(12)  # Standard 96-bit nonce for GCM
-        aad = tenant_id.encode("utf-8")
-        ciphertext = aesgcm.encrypt(nonce, api_key.encode("utf-8"), aad)
-        return base64.b64encode(nonce + ciphertext).decode("utf-8")
-
-    def decrypt_key(self, encrypted_payload: str, tenant_id: str) -> str:
-        """Decrypt an AES-256-GCM encrypted payload transiently in memory.
-
-        Raises:
-            ValueError: If ciphertext is corrupt or tenant_id does not match AAD.
-        """
-        if not encrypted_payload or not tenant_id:
-            raise ValueError("Encrypted payload and tenant ID are required")
-
         try:
-            raw_bytes = base64.b64decode(encrypted_payload.encode("utf-8"))
-            if len(raw_bytes) < 28:  # 12 nonce + at least 16 tag
-                raise ValueError("Ciphertext payload too short")
-
-            nonce = raw_bytes[:12]
-            ciphertext = raw_bytes[12:]
-            aesgcm = self._derive_tenant_aesgcm(tenant_id)
-            decrypted = aesgcm.decrypt(nonce, ciphertext, tenant_id.encode("utf-8"))
-            return decrypted.decode("utf-8")
-        except (InvalidTag, Exception) as exc:
-            logger.warning(
-                "Decryption failed for tenant %s: %s", tenant_id, type(exc).__name__
+            self.key_id = validate_key_id(
+                key_id if key_id is not None else settings.BYOK_MASTER_KEY_ID
             )
-            raise ValueError(
-                "Failed to decrypt key: authentication tag mismatch or invalid tenant"
-            ) from exc
+            self.retired = frozenset(
+                retired_key_ids
+                if retired_key_ids is not None
+                else settings.BYOK_RETIRED_KEY_IDS
+            )
+            previous = (
+                previous_keys
+                if previous_keys is not None
+                else settings.BYOK_PREVIOUS_KEYS
+            )
+            if self.key_id in previous or self.key_id in self.retired:
+                raise ValueError
+            self._keys = {
+                self.key_id: decode_secret(
+                    master_key if master_key is not None else settings.BYOK_MASTER_KEY,
+                    encoding="base64",
+                )
+            }
+            for kid, value in previous.items():
+                validate_key_id(kid)
+                if kid in self.retired:
+                    raise ValueError
+                self._keys[kid] = decode_secret(value, encoding="base64")
+            if len(set(self._keys.values())) != len(self._keys):
+                raise ValueError
+            retired_hashes = (
+                retired_key_hashes
+                if retired_key_hashes is not None
+                else settings.BYOK_RETIRED_KEY_HASHES
+            )
+            if any(
+                hashlib.sha256(key).hexdigest() in retired_hashes
+                for key in self._keys.values()
+            ):
+                raise ValueError
+        except ValueError:
+            raise BYOKError("BYOK_KEY_UNAVAILABLE") from None
+        if settings.ENVIRONMENT.lower() == "production" and isinstance(
+            store, MemoryStore
+        ):
+            raise BYOKError("BYOK_STORAGE_UNAVAILABLE")
+        self.store = (
+            store
+            if store is not None
+            else (
+                MemoryStore()
+                if settings.BYOK_STORAGE_BACKEND == "memory"
+                else RedisStore(settings.BYOK_REDIS_URL or settings.REDIS_URL)
+            )
+        )
+
+    @staticmethod
+    def _provider(provider: str) -> str:
+        norm = provider.lower().strip()
+        if norm not in SUPPORTED_PROVIDERS:
+            raise BYOKError("BYOK_UNSUPPORTED_PROVIDER", 400)
+        return norm
+
+    @staticmethod
+    def _storage_key(tenant_id: str, provider: str) -> str:
+        if not tenant_id:
+            raise BYOKError("BYOK_IDENTITY_REQUIRED", 403)
+        return f"byok:v1:{hashlib.sha256(tenant_id.encode()).hexdigest()}:{provider}"
+
+    def _key(self, kid: str) -> bytes:
+        if kid in self.retired:
+            raise BYOKError("BYOK_KEY_RETIRED")
+        if kid not in self._keys:
+            raise BYOKError("BYOK_KEY_UNKNOWN")
+        return self._keys[kid]
+
+    def _seal(
+        self, record: dict[str, Any], tenant_id: str, provider: str, revision: int
+    ) -> str:
+        header = {
+            "version": 1,
+            "kid": self.key_id,
+            "tenant": tenant_id,
+            "provider": provider,
+            "revision": revision,
+        }
+        nonce = os.urandom(12)
+        encrypted = AESGCM(self._key(self.key_id)).encrypt(
+            nonce, _json(record).encode(), _json(header).encode()
+        )
+        return _json(
+            {**header, "payload": base64.b64encode(nonce + encrypted).decode()}
+        )
+
+    def _open(
+        self, raw: str, tenant_id: str, provider: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            envelope = json.loads(raw)
+            if not isinstance(envelope, dict) or "version" not in envelope:
+                raise BYOKError("BYOK_LEGACY_RECORD", 409)
+            if envelope["version"] != 1 or type(envelope["version"]) is not int:
+                raise BYOKError("BYOK_RECORD_VERSION", 409)
+            if set(envelope) != {
+                "version",
+                "kid",
+                "tenant",
+                "provider",
+                "revision",
+                "payload",
+            }:
+                raise ValueError
+            if envelope["tenant"] != tenant_id or envelope["provider"] != provider:
+                raise ValueError
+            if type(envelope["revision"]) is not int or envelope["revision"] < 1:
+                raise ValueError
+            key = self._key(envelope["kid"])
+            payload = base64.b64decode(envelope["payload"], validate=True)
+            header = {k: v for k, v in envelope.items() if k != "payload"}
+            record = json.loads(
+                AESGCM(key).decrypt(payload[:12], payload[12:], _json(header).encode())
+            )
+            if (
+                not isinstance(record, dict)
+                or not isinstance(record.get("api_key"), str)
+                or not isinstance(record.get("owner_id"), str)
+            ):
+                raise ValueError
+            if record.get("status") not in {"active", "revoked"}:
+                raise ValueError
+            return record, envelope
+        except BYOKError:
+            raise
+        except Exception:
+            raise BYOKError("BYOK_RECORD_CORRUPT", 409) from None
+
+    def encrypt_key(
+        self, api_key: str, tenant_id: str, provider: str = "openai"
+    ) -> str:
+        if not api_key:
+            raise BYOKError("BYOK_INVALID_KEY", 400)
+        norm = self._provider(provider)
+        self._storage_key(tenant_id, norm)
+        return self._seal(
+            {"api_key": api_key, "owner_id": "", "status": "active"}, tenant_id, norm, 1
+        )
+
+    def decrypt_key(
+        self, encrypted_payload: str, tenant_id: str, provider: str = "openai"
+    ) -> str:
+        record, _ = self._open(encrypted_payload, tenant_id, self._provider(provider))
+        return protect_credential(str(record["api_key"]))
 
     @staticmethod
     def mask_key(api_key: str) -> str:
-        """Return masked key preview preserving provider prefix and last 4 characters."""
-        if not api_key:
-            return ""
-        if len(api_key) <= 8:
-            return "sk-***"
-        prefix = api_key[:3] if api_key.startswith("sk-") else api_key[:2]
-        return f"{prefix}...{api_key[-4:]}"
+        # Constant preview also protects short values and provider-prefix canaries.
+        return "********" if api_key else ""
 
-    def _pack_record(
-        self,
-        ciphertext: str,
-        masked_key: str,
-        status: str = "active",
-        created_at: str | None = None,
-        updated_at: str | None = None,
-        last_validated_at: str | None = None,
-        validation_status: str = "untested",
-    ) -> str:
-        """Pack ciphertext and lifecycle metadata into a serializable JSON record."""
-        now = datetime.now(UTC).isoformat()
-        record = {
-            "ciphertext": ciphertext,
-            "masked_key": masked_key,
-            "status": status,
-            "created_at": created_at or now,
-            "updated_at": updated_at or now,
-            "last_validated_at": last_validated_at,
-            "validation_status": validation_status,
-        }
-        return json.dumps(record)
-
-    def _unpack_record(self, raw_val: str, tenant_id: str) -> dict[str, Any]:
-        """Unpack a stored record, maintaining backward compatibility with plain ciphertexts."""
-        if not raw_val:
-            return {
-                "ciphertext": "",
-                "masked_key": None,
-                "status": "unconfigured",
-                "created_at": None,
-                "updated_at": None,
-                "last_validated_at": None,
-                "validation_status": "untested",
-            }
-
-        if raw_val.startswith("{") and raw_val.endswith("}"):
-            try:
-                data = json.loads(raw_val)
-                if isinstance(data, dict) and "ciphertext" in data:
-                    return data
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                logger.debug("Failed parsing structured BYOK record JSON: %s", exc)
-
-        # Legacy plain ciphertext backward compatibility or corrupt payload
-        try:
-            decrypted = self.decrypt_key(raw_val, tenant_id)
-            masked = self.mask_key(decrypted)
-            status = "active"
-            val_status = "untested"
-        except Exception:
-            masked = "sk-corrupt"
-            status = "corrupt"
-            val_status = "invalid"
-
-        return {
-            "ciphertext": raw_val,
-            "masked_key": masked,
-            "status": status,
-            "created_at": None,
-            "updated_at": None,
-            "last_validated_at": None,
-            "validation_status": val_status,
-        }
-
-    async def _get_redis(self) -> Any | None:
-        """Lazily initialize Redis connection with fast ping check."""
-        if self.redis_client is not None:
-            return self.redis_client
-        if not self._redis_available:
-            return None
-        client = await acquire_redis_client()
-        if client is None:
-            self._redis_available = False
-            return None
-        self.redis_client = client
-        return client
+    async def check_storage(self) -> None:
+        if isinstance(self.store, RedisStore):
+            await self.store.check(
+                durable=get_settings().ENVIRONMENT.lower() == "production"
+            )
 
     async def _get_raw_val(self, tenant_id: str, provider: str) -> str | None:
-        """Retrieve raw stored ciphertext record from Redis or fallback in-memory store."""
-        norm_provider = provider.lower().strip()
-        raw_val: str | None = None
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                key_name = f"byok:{tenant_id}:{norm_provider}"
-                raw_val = await redis.get(key_name)
-            except Exception as exc:
-                logger.warning("Redis read failed (%s), checking memory", exc)
-                raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-
-        # Fallback to in-memory store if Redis returned None or failed
-        if not raw_val:
-            raw_val = self._memory_store.get(tenant_id, {}).get(norm_provider)
-
-        return raw_val
+        norm = self._provider(provider)
+        raw = await self.store.get(self._storage_key(tenant_id, norm))
+        if raw is None and await self.store.get(f"byok:{tenant_id}:{norm}") is not None:
+            raise BYOKError("BYOK_LEGACY_RECORD", 409)
+        return raw
 
     async def _save_raw_val(self, tenant_id: str, provider: str, packed: str) -> None:
-        """Persist raw ciphertext record to Redis (if available) and mirror to in-memory store."""
-        norm_provider = provider.lower().strip()
-        redis = await self._get_redis()
-        if redis is not None:
-            try:
-                await redis.set(f"byok:{tenant_id}:{norm_provider}", packed)
-            except Exception as exc:
-                logger.warning("Redis write failed (%s), using memory store", exc)
-        self._memory_store.setdefault(tenant_id, {})[norm_provider] = packed
+        """Test/import seam; ordinary lifecycle compares its observed revision."""
+        key = self._storage_key(tenant_id, self._provider(provider))
+        prior = await self.store.get(key)
+        if not await self.store.cas(key, prior, packed):
+            raise BYOKError("BYOK_CONFLICT", 409)
+
+    @staticmethod
+    def _authorize(
+        record: dict[str, Any], actor_id: str | None, delegated_admin: bool
+    ) -> None:
+        if (
+            actor_id is not None
+            and actor_id != record["owner_id"]
+            and not delegated_admin
+        ):
+            raise BYOKError("BYOK_OWNER_REQUIRED", 403)
+
+    async def _load(
+        self, tenant: str, provider: str, actor: str | None, delegated: bool
+    ) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        raw = await self._get_raw_val(tenant, provider)
+        if raw is None:
+            raise BYOKError("BYOK_NOT_CONFIGURED", 404)
+        record, envelope = self._open(raw, tenant, provider)
+        self._authorize(record, actor, delegated)
+        return raw, record, envelope
+
+    async def _commit(
+        self,
+        tenant: str,
+        provider: str,
+        prior: str | None,
+        record: dict[str, Any] | None,
+        revision: int,
+    ) -> None:
+        value = (
+            self._seal(record, tenant, provider, revision)
+            if record is not None
+            else None
+        )
+        if not await self.store.cas(self._storage_key(tenant, provider), prior, value):
+            raise BYOKError("BYOK_CONFLICT", 409)
+
+    def _public(
+        self, tenant: str, provider: str, record: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "tenant_id": tenant,
+            "provider": provider,
+            "masked_key": self.mask_key(record["api_key"]),
+            "status": "configured" if record["status"] == "active" else "revoked",
+            **{
+                k: record.get(k)
+                for k in (
+                    "created_at",
+                    "updated_at",
+                    "last_validated_at",
+                    "validation_status",
+                )
+            },
+        }
 
     async def validate_key(
         self, provider: str, api_key: str
     ) -> tuple[bool, str | None]:
-        """Validate provider API key via minimal, quota-preserving probe.
-
-        Performs fast format inspection followed by lightweight model catalog probe.
-        Never burns generation tokens or consumes inference quota.
-        """
-        norm_provider = provider.lower().strip()
-        if norm_provider not in SUPPORTED_PROVIDERS:
-            return (
-                False,
-                f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}",
-            )
-
-        clean_key = api_key.strip()
-        if not clean_key or len(clean_key) < 8:
-            return False, "API key must be at least 8 characters long"
-
-        # Fast format inspection
-        if norm_provider == "openai" and not (
-            clean_key.startswith("sk-") or "test" in clean_key
-        ):
-            return (
-                False,
-                "Invalid key format for OpenAI (expected prefix 'sk-' or test key)",
-            )
-        if norm_provider == "anthropic" and not (
-            clean_key.startswith("sk-ant-") or "test" in clean_key
-        ):
-            return (
-                False,
-                "Invalid key format for Anthropic (expected prefix 'sk-ant-' or test key)",
-            )
-        if norm_provider == "groq" and not (
-            clean_key.startswith("gsk_") or "test" in clean_key
-        ):
-            return (
-                False,
-                "Invalid key format for Groq (expected prefix 'gsk_' or test key)",
-            )
-        if norm_provider == "gemini" and not (
-            clean_key.startswith("AIza")
-            or clean_key.startswith("AQ.")
-            or "test" in clean_key
-        ):
-            return (
-                False,
-                "Invalid key format for Gemini (expected prefix 'AIza', 'AQ.', or test key)",
-            )
-        if norm_provider == "openrouter" and not (
-            clean_key.startswith("sk-or-") or "test" in clean_key
-        ):
-            return (
-                False,
-                "Invalid key format for OpenRouter (expected prefix 'sk-or-' or test key)",
-            )
-        if norm_provider == "deepseek" and not (
-            clean_key.startswith("sk-") or "test" in clean_key
-        ):
-            return (
-                False,
-                "Invalid key format for DeepSeek (expected prefix 'sk-' or test key)",
-            )
-
-        # Fast test / mock key validation bypass (zero network overhead for testing)
-        clean_lower = clean_key.lower()
-        if (
-            clean_lower.startswith(("test-", "mock-", "sk-test-", "aizasytest"))
-            or "mock" in clean_lower
-            or "test" in clean_lower
-        ):
-            return True, None
-
-        # Minimal lightweight HTTP probe
+        norm = self._provider(provider)
+        clean = api_key.strip()
+        if len(clean) < 8 or len(clean) > 4096:
+            return False, "BYOK_INVALID_KEY"
+        endpoints = {
+            "openai": "https://api.openai.com/v1/models",
+            "anthropic": "https://api.anthropic.com/v1/models",
+            "gemini": "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+            "groq": "https://api.groq.com/openai/v1/models",
+            "deepseek": "https://api.deepseek.com/models",
+            "openrouter": "https://openrouter.ai/api/v1/auth/key",
+        }
+        headers = {"Authorization": f"Bearer {clean}"}
+        if norm == "anthropic":
+            headers = {"x-api-key": clean, "anthropic-version": "2023-06-01"}
+        elif norm == "gemini":
+            headers = {"x-goog-api-key": clean}
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                if norm_provider == "openai":
-                    res = await client.get(
-                        "https://api.openai.com/v1/models",
-                        headers={"Authorization": f"Bearer {clean_key}"},
-                    )
-                elif norm_provider == "anthropic":
-                    res = await client.get(
-                        "https://api.anthropic.com/v1/models",
-                        headers={
-                            "x-api-key": clean_key,
-                            "anthropic-version": "2023-06-01",
-                        },
-                    )
-                elif norm_provider == "gemini":
-                    res = await client.get(
-                        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
-                        params={"key": clean_key},
-                    )
-                elif norm_provider == "groq":
-                    res = await client.get(
-                        "https://api.groq.com/openai/v1/models",
-                        headers={"Authorization": f"Bearer {clean_key}"},
-                    )
-                elif norm_provider == "deepseek":
-                    res = await client.get(
-                        "https://api.deepseek.com/models",
-                        headers={"Authorization": f"Bearer {clean_key}"},
-                    )
-                elif norm_provider == "openrouter":
-                    res = await client.get(
-                        "https://openrouter.ai/api/v1/auth/key",
-                        headers={"Authorization": f"Bearer {clean_key}"},
-                    )
-                else:
-                    return (
-                        False,
-                        f"No probe endpoint configured for provider '{provider}'",
-                    )
+                response = await client.get(endpoints[norm], headers=headers)
+            if response.status_code == 200:
+                return True, None
+            if response.status_code in {401, 403}:
+                return False, "BYOK_PROVIDER_REJECTED"
+            return False, "BYOK_PROVIDER_UNAVAILABLE"
+        except Exception:
+            # No URLs, exception text or provider response bodies in diagnostics.
+            return False, "BYOK_PROVIDER_UNAVAILABLE"
 
-                if res.status_code == 200:
-                    return True, None
-                if res.status_code in (401, 403) or (
-                    norm_provider == "gemini" and res.status_code == 400
-                ):
-                    return (
-                        False,
-                        "Authentication failed: invalid or expired provider API key",
-                    )
-                if res.status_code == 429:
-                    return (
-                        True,
-                        "Key is valid but provider rate limit or quota has been exceeded",
-                    )
-                return (
-                    False,
-                    f"Provider returned unexpected status code {res.status_code}",
-                )
-        except httpx.TimeoutException:
-            return False, "Provider validation request timed out"
-        except httpx.RequestError as exc:
-            logger.warning("Provider validation network error: %s", type(exc).__name__)
-            return False, "Provider validation endpoint is unreachable"
-        except Exception as exc:
-            logger.warning("Unexpected validation failure: %s", type(exc).__name__)
-            return False, "Provider validation failed unexpectedly"
-
-    async def validate_stored_key(
-        self, tenant_id: str, provider: str
-    ) -> tuple[bool, str | None]:
-        """Validate an already stored key for a tenant, updating its validation metadata."""
-        norm_provider = provider.lower().strip()
-        if norm_provider not in SUPPORTED_PROVIDERS:
-            raise ValueError(
-                f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}"
+    async def _validate(self, provider: str, key: str, enabled: bool) -> dict[str, Any]:
+        if not enabled:
+            return {"last_validated_at": None, "validation_status": "untested"}
+        valid, error = await self.validate_key(provider, key)
+        if not valid:
+            raise BYOKError(
+                error or "BYOK_PROVIDER_REJECTED",
+                503 if error == "BYOK_PROVIDER_UNAVAILABLE" else 400,
             )
-
-        raw_val = await self._get_raw_val(tenant_id, norm_provider)
-
-        if not raw_val:
-            raise ValueError(
-                f"No key configured for provider '{provider}' under this tenant"
-            )
-
-        record = self._unpack_record(raw_val, tenant_id)
-        if record.get("status") != "active":
-            raise ValueError(
-                f"Key for provider '{provider}' is revoked and cannot be validated"
-            )
-
-        decrypted = self.decrypt_key(record["ciphertext"], tenant_id)
-        try:
-            is_valid, err = await self.validate_key(norm_provider, decrypted)
-        finally:
-            del decrypted
-
-        now = datetime.now(UTC).isoformat()
-        record["last_validated_at"] = now
-        record["validation_status"] = "valid" if is_valid else "invalid"
-        packed = json.dumps(record)
-
-        await self._save_raw_val(tenant_id, norm_provider, packed)
-        return is_valid, err
+        return {
+            "last_validated_at": datetime.now(UTC).isoformat(),
+            "validation_status": "valid",
+        }
 
     async def store_key(
-        self, tenant_id: str, provider: str, api_key: str, validate: bool = False
+        self,
+        tenant_id: str,
+        provider: str,
+        api_key: str,
+        validate: bool = False,
+        *,
+        actor_id: str | None = None,
+        delegated_admin: bool = False,
     ) -> dict[str, Any]:
-        """Encrypt and persist tenant API key for a specified provider."""
-        norm_provider = provider.lower().strip()
-        if norm_provider not in SUPPORTED_PROVIDERS:
-            raise ValueError(
-                f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}"
-            )
-
-        clean_key = api_key.strip()
-        if not clean_key or len(clean_key) < 8:
-            raise ValueError("API key must be at least 8 characters long")
-
-        last_validated_at: str | None = None
-        validation_status = "untested"
-        if validate:
-            is_valid, err = await self.validate_key(norm_provider, clean_key)
-            if not is_valid:
-                raise ValueError(f"Provider validation failed: {err}")
-            last_validated_at = datetime.now(UTC).isoformat()
-            validation_status = "valid"
-
-        encrypted = self.encrypt_key(clean_key, tenant_id)
-        masked = self.mask_key(clean_key)
+        norm = self._provider(provider)
+        clean = api_key.strip()
+        if not 8 <= len(clean) <= 4096:
+            raise BYOKError("BYOK_INVALID_KEY", 400)
+        prior = await self._get_raw_val(tenant_id, norm)
+        existing: dict[str, Any] = {}
+        revision = 1
+        if prior is not None:
+            existing, envelope = self._open(prior, tenant_id, norm)
+            self._authorize(existing, actor_id, delegated_admin)
+            revision = envelope["revision"] + 1
+        validation = await self._validate(norm, clean, validate)
         now = datetime.now(UTC).isoformat()
-        packed = self._pack_record(
-            ciphertext=encrypted,
-            masked_key=masked,
-            status="active",
-            created_at=now,
-            updated_at=now,
-            last_validated_at=last_validated_at,
-            validation_status=validation_status,
-        )
-
-        await self._save_raw_val(tenant_id, norm_provider, packed)
-
-        return {
-            "tenant_id": tenant_id,
-            "provider": norm_provider,
-            "masked_key": masked,
-            "status": "configured",
-            "created_at": now,
+        record = {
+            "api_key": clean,
+            "owner_id": existing.get("owner_id", actor_id or ""),
+            "status": "active",
+            "created_at": existing.get("created_at", now),
             "updated_at": now,
-            "last_validated_at": last_validated_at,
-            "validation_status": validation_status,
+            **validation,
         }
+        await self._commit(tenant_id, norm, prior, record, revision)
+        return self._public(tenant_id, norm, record)
 
     async def rotate_key(
-        self, tenant_id: str, provider: str, new_api_key: str, validate: bool = False
+        self,
+        tenant_id: str,
+        provider: str,
+        new_api_key: str,
+        validate: bool = False,
+        *,
+        actor_id: str | None = None,
+        delegated_admin: bool = False,
     ) -> dict[str, Any]:
-        """Rotate an existing provider API key with a new key and update timestamp."""
-        norm_provider = provider.lower().strip()
-        if norm_provider not in SUPPORTED_PROVIDERS:
-            raise ValueError(
-                f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}"
-            )
-
-        clean_key = new_api_key.strip()
-        if not clean_key or len(clean_key) < 8:
-            raise ValueError("New API key must be at least 8 characters long")
-
-        raw_val = await self._get_raw_val(tenant_id, norm_provider)
-
-        if not raw_val:
-            raise ValueError(
-                f"No existing key found for provider '{provider}' to rotate; use store_key"
-            )
-
-        existing = self._unpack_record(raw_val, tenant_id)
-
-        last_validated_at: str | None = None
-        validation_status = "untested"
-        if validate:
-            is_valid, err = await self.validate_key(norm_provider, clean_key)
-            if not is_valid:
-                raise ValueError(f"Provider validation failed: {err}")
-            last_validated_at = datetime.now(UTC).isoformat()
-            validation_status = "valid"
-
-        encrypted = self.encrypt_key(clean_key, tenant_id)
-        masked = self.mask_key(clean_key)
-        now = datetime.now(UTC).isoformat()
-        packed = self._pack_record(
-            ciphertext=encrypted,
-            masked_key=masked,
-            status="active",
-            created_at=existing.get("created_at") or now,
-            updated_at=now,
-            last_validated_at=last_validated_at,
-            validation_status=validation_status,
+        norm = self._provider(provider)
+        prior, record, envelope = await self._load(
+            tenant_id, norm, actor_id, delegated_admin
         )
+        clean = new_api_key.strip()
+        if not 8 <= len(clean) <= 4096:
+            raise BYOKError("BYOK_INVALID_KEY", 400)
+        validation = await self._validate(norm, clean, validate)
+        record.update(
+            api_key=clean,
+            status="active",
+            updated_at=datetime.now(UTC).isoformat(),
+            **validation,
+        )
+        await self._commit(tenant_id, norm, prior, record, envelope["revision"] + 1)
+        return self._public(tenant_id, norm, record)
 
-        await self._save_raw_val(tenant_id, norm_provider, packed)
+    async def validate_stored_key(
+        self,
+        tenant_id: str,
+        provider: str,
+        *,
+        actor_id: str | None = None,
+        delegated_admin: bool = False,
+    ) -> tuple[bool, str | None]:
+        norm = self._provider(provider)
+        prior, record, envelope = await self._load(
+            tenant_id, norm, actor_id, delegated_admin
+        )
+        if record["status"] != "active":
+            raise BYOKError("BYOK_REVOKED", 409)
+        valid, error = await self.validate_key(norm, record["api_key"])
+        record.update(
+            last_validated_at=datetime.now(UTC).isoformat(),
+            validation_status="valid"
+            if valid
+            else "unavailable"
+            if error == "BYOK_PROVIDER_UNAVAILABLE"
+            else "invalid",
+        )
+        await self._commit(tenant_id, norm, prior, record, envelope["revision"] + 1)
+        return valid, error
 
-        return {
-            "tenant_id": tenant_id,
-            "provider": norm_provider,
-            "masked_key": masked,
-            "status": "configured",
-            "created_at": existing.get("created_at") or now,
-            "updated_at": now,
-            "last_validated_at": last_validated_at,
-            "validation_status": validation_status,
-        }
-
-    async def revoke_key(self, tenant_id: str, provider: str) -> dict[str, Any]:
-        """Revoke a provider key, disabling runtime inference without wiping metadata."""
-        norm_provider = provider.lower().strip()
-        if norm_provider not in SUPPORTED_PROVIDERS:
-            raise ValueError(
-                f"Unsupported provider '{provider}'. Supported: {sorted(SUPPORTED_PROVIDERS)}"
-            )
-
-        raw_val = await self._get_raw_val(tenant_id, norm_provider)
-
-        if not raw_val:
-            raise ValueError(
-                f"No key found for provider '{provider}' under this tenant"
-            )
-
-        existing = self._unpack_record(raw_val, tenant_id)
-        now = datetime.now(UTC).isoformat()
-        existing["status"] = "revoked"
-        existing["updated_at"] = now
-        packed = json.dumps(existing)
-
-        await self._save_raw_val(tenant_id, norm_provider, packed)
-
-        return {
-            "tenant_id": tenant_id,
-            "provider": norm_provider,
-            "masked_key": existing.get("masked_key", "sk-***"),
-            "status": "revoked",
-            "created_at": existing.get("created_at"),
-            "updated_at": now,
-        }
+    async def revoke_key(
+        self,
+        tenant_id: str,
+        provider: str,
+        *,
+        actor_id: str | None = None,
+        delegated_admin: bool = False,
+    ) -> dict[str, Any]:
+        norm = self._provider(provider)
+        prior, record, envelope = await self._load(
+            tenant_id, norm, actor_id, delegated_admin
+        )
+        record.update(status="revoked", updated_at=datetime.now(UTC).isoformat())
+        await self._commit(tenant_id, norm, prior, record, envelope["revision"] + 1)
+        return self._public(tenant_id, norm, record)
 
     async def get_decrypted_key(self, tenant_id: str, provider: str) -> str | None:
-        """Retrieve and decrypt an API key transiently in memory for inference."""
-        norm_provider = provider.lower().strip()
-        raw_val = await self._get_raw_val(tenant_id, norm_provider)
-        if not raw_val:
+        norm = self._provider(provider)
+        raw = await self._get_raw_val(tenant_id, norm)
+        if raw is None:
             return None
+        record, _ = self._open(raw, tenant_id, norm)
+        if record["status"] != "active":
+            raise BYOKError("BYOK_REVOKED", 409)
+        return protect_credential(str(record["api_key"]))
 
-        record = self._unpack_record(raw_val, tenant_id)
-        if record.get("status") != "active":
-            return None
-
-        return self.decrypt_key(record["ciphertext"], tenant_id)
-
-    async def list_keys(self, tenant_id: str) -> list[dict[str, Any]]:
-        """List all configured providers for a tenant with masked previews and lifecycle state."""
-        results: list[dict[str, Any]] = []
-
+    async def list_keys(
+        self,
+        tenant_id: str,
+        *,
+        actor_id: str | None = None,
+        delegated_admin: bool = False,
+    ) -> list[dict[str, Any]]:
+        results = []
         for provider in sorted(SUPPORTED_PROVIDERS):
-            raw_val = await self._get_raw_val(tenant_id, provider)
-
-            if raw_val:
-                try:
-                    record = self._unpack_record(raw_val, tenant_id)
-                    if record.get("status") == "corrupt":
-                        results.append(
-                            {
-                                "provider": provider,
-                                "masked_key": "sk-corrupt",
-                                "configured": False,
-                                "status": "corrupt",
-                                "created_at": None,
-                                "updated_at": None,
-                                "last_validated_at": None,
-                                "validation_status": "invalid",
-                            }
-                        )
-                        continue
-                    masked = record.get("masked_key")
-                    if not masked:
-                        decrypted = self.decrypt_key(record["ciphertext"], tenant_id)
-                        masked = self.mask_key(decrypted)
-                    results.append(
-                        {
-                            "provider": provider,
-                            "masked_key": masked,
-                            "configured": True,
-                            "status": record.get("status", "active"),
-                            "created_at": record.get("created_at"),
-                            "updated_at": record.get("updated_at"),
-                            "last_validated_at": record.get("last_validated_at"),
-                            "validation_status": record.get(
-                                "validation_status", "untested"
-                            ),
-                        }
-                    )
-                except Exception:
-                    results.append(
-                        {
-                            "provider": provider,
-                            "masked_key": "sk-corrupt",
-                            "configured": False,
-                            "status": "corrupt",
-                            "created_at": None,
-                            "updated_at": None,
-                            "last_validated_at": None,
-                            "validation_status": "invalid",
-                        }
-                    )
-            else:
+            raw = await self._get_raw_val(tenant_id, provider)
+            if raw is None:
                 results.append(
                     {
                         "provider": provider,
                         "masked_key": None,
                         "configured": False,
                         "status": "unconfigured",
-                        "created_at": None,
-                        "updated_at": None,
-                        "last_validated_at": None,
-                        "validation_status": "untested",
                     }
                 )
+                continue
+            record, _ = self._open(raw, tenant_id, provider)
+            self._authorize(record, actor_id, delegated_admin)
+            results.append(
+                {
+                    **self._public(tenant_id, provider, record),
+                    "configured": record["status"] == "active",
+                }
+            )
         return results
 
-    async def delete_key(self, tenant_id: str, provider: str) -> bool:
-        """Revoke and delete a provider key for a tenant."""
-        norm_provider = provider.lower().strip()
-        deleted = False
-        redis = await self._get_redis()
-        if redis is not None:
+    async def delete_key(
+        self,
+        tenant_id: str,
+        provider: str,
+        *,
+        actor_id: str | None = None,
+        delegated_admin: bool = False,
+    ) -> bool:
+        norm = self._provider(provider)
+        try:
+            prior, _, envelope = await self._load(
+                tenant_id, norm, actor_id, delegated_admin
+            )
+        except BYOKError as exc:
+            if exc.code == "BYOK_NOT_CONFIGURED":
+                return False
+            raise
+        await self._commit(tenant_id, norm, prior, None, envelope["revision"] + 1)
+        return True
+
+    async def reencrypt_batch(
+        self, cursor: str = "0", count: int = 100
+    ) -> dict[str, Any]:
+        """CAS migration; repeat full passes after faults/restart and before retirement."""
+        next_cursor, keys = await self.store.scan(cursor, max(1, min(count, 1000)))
+        report: dict[str, Any] = {
+            "cursor": next_cursor,
+            "migrated": 0,
+            "current": 0,
+            "conflicts": 0,
+            "errors": {},
+        }
+        for key in keys:
             try:
-                key_name = f"byok:{tenant_id}:{norm_provider}"
-                del_count = await redis.delete(key_name)
-                deleted = bool(del_count > 0)
+                raw = await self.store.get(key)
+                if raw is None:
+                    continue
+                envelope = json.loads(raw)
+                tenant, provider = (
+                    envelope["tenant"],
+                    self._provider(envelope["provider"]),
+                )
+                if self._storage_key(tenant, provider) != key:
+                    raise BYOKError("BYOK_RECORD_CORRUPT", 409)
+                record, envelope = self._open(raw, tenant, provider)
+                if envelope["kid"] == self.key_id:
+                    report["current"] += 1
+                    continue
+                replacement = self._seal(
+                    record, tenant, provider, envelope["revision"] + 1
+                )
+                if await self.store.cas(key, raw, replacement):
+                    report["migrated"] += 1
+                else:
+                    report["conflicts"] += 1
             except Exception as exc:
-                logger.debug("Redis delete skipped (%s)", exc)
-
-        if (
-            tenant_id in self._memory_store
-            and norm_provider in self._memory_store[tenant_id]
-        ):
-            del self._memory_store[tenant_id][norm_provider]
-            deleted = True
-
-        return deleted
+                code = exc.code if isinstance(exc, BYOKError) else "BYOK_RECORD_CORRUPT"
+                report["errors"][code] = report["errors"].get(code, 0) + 1
+        return report
 
 
 _byok_manager: BYOKManager | None = None
 
 
 def get_byok_manager() -> BYOKManager:
-    """Singleton getter for BYOKManager."""
     global _byok_manager
     if _byok_manager is None:
         _byok_manager = BYOKManager()

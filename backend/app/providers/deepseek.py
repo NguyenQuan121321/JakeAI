@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from app.core.byok import get_byok_manager
 from app.core.config import get_settings
+from app.core.credential_redaction import protect_credential
 from app.optimizer.provider_cache_policy import CacheMissReason
 from app.optimizer.provider_pricing import calculate_provider_costs
 from app.optimizer.two_zone_compiler import get_two_zone_compiler
@@ -53,7 +54,7 @@ class DeepSeekAdapter(LLMProvider):
 
     async def _resolve_api_key(self, request: ProviderRequest) -> str:
         if request.api_key:
-            return request.api_key
+            return protect_credential(request.api_key)
         byok_mgr = get_byok_manager()
         key = await byok_mgr.get_decrypted_key(request.tenant_id, self.provider_name)
         if key:
@@ -149,14 +150,14 @@ class DeepSeekAdapter(LLMProvider):
                     provider=self.provider_name,
                     model=payload["model"],
                     raw_error=exc,
-                ) from exc
+                ) from None
             except httpx.TransportError as exc:
                 raise ProviderUnavailableError(
                     message=f"Provider endpoint unreachable: {exc}",
                     provider=self.provider_name,
                     model=payload["model"],
                     raw_error=exc,
-                ) from exc
+                ) from None
             latency = (time.perf_counter() - start_t) * 1000.0
 
             if res.status_code != 200:
@@ -181,7 +182,7 @@ class DeepSeekAdapter(LLMProvider):
                     model=payload["model"],
                     status_code=res.status_code,
                     raw_error=exc,
-                ) from exc
+                ) from None
             choices = data.get("choices", [])
             text_output = (
                 choices[0].get("message", {}).get("content", "") if choices else ""
@@ -298,14 +299,14 @@ class DeepSeekAdapter(LLMProvider):
                     provider=self.provider_name,
                     model=payload["model"],
                     raw_error=exc,
-                ) from exc
+                ) from None
             except httpx.TransportError as exc:
                 raise ProviderUnavailableError(
                     message=f"Provider stream endpoint unreachable: {exc}",
                     provider=self.provider_name,
                     model=payload["model"],
                     raw_error=exc,
-                ) from exc
+                ) from None
 
         if client is not None:
             async for chunk in _stream_runner(client):

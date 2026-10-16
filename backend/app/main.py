@@ -26,6 +26,7 @@ from app.api.v1.endpoints.health import (
     check_readiness,
 )
 from app.core.config import get_settings
+from app.core.credential_redaction import begin_credentials, end_credentials
 from app.providers.errors import ErrorCategory, ProviderError
 from app.telemetry.metrics import metrics
 from app.telemetry.tracing import (
@@ -40,6 +41,10 @@ logger = logging.getLogger("jakeai.main")
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown resource lifecycle."""
     logger.info("JakeAI platform initializing...")
+    from app.core.byok import get_byok_manager
+
+    if get_settings().ENVIRONMENT.lower() == "production":
+        await get_byok_manager().check_storage()
     yield
     logger.info("JakeAI platform shutting down, releasing resources...")
     from app.optimizer.semantic_cache import get_semantic_cache_manager
@@ -56,6 +61,14 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
             with suppress(Exception):
                 await client.aclose()
             manager.redis_client = None
+    from app.core import byok
+    from app.core.byok_storage import RedisStore
+
+    if byok._byok_manager is not None and isinstance(
+        byok._byok_manager.store, RedisStore
+    ):
+        await byok._byok_manager.store.client.aclose()
+        byok._byok_manager = None
 
 
 def create_application() -> FastAPI:
@@ -119,6 +132,7 @@ def create_application() -> FastAPI:
         set_current_trace_context(trace_ctx)
 
         start_time = time.perf_counter()
+        credential_token = begin_credentials()
         try:
             response: Response = await call_next(request)
         except Exception:
@@ -128,6 +142,8 @@ def create_application() -> FastAPI:
             )
             set_current_trace_context(None)
             raise
+        finally:
+            end_credentials(credential_token)
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         response.headers["X-Correlation-ID"] = correlation_id

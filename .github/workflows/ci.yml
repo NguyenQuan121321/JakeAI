@@ -789,6 +789,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Rehearse J03 Production Startup, HTTP and Redis on Tested Image
+        run: python scripts/j03_runtime.py --image jakeai-backend:test --output reports/j03-runtime.json
+
+      - name: Archive J03 Runtime Evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: j03-production-runtime
+          path: reports/j03-runtime.json
+          retention-days: 30
+
       - name: Trivy Container Image Vulnerability Scanner
         uses: aquasecurity/trivy-action@master
         with:
