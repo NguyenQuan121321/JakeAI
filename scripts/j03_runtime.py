@@ -31,7 +31,13 @@ def stage(label):
 
 def run(command, *, env=None, timeout=120, required=True):
     result = subprocess.run(
-        command, cwd=ROOT, env=env, text=True, capture_output=True, timeout=timeout
+        command,
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
     )
     if required and result.returncode:
         # Dependency output can contain injected values. Persist only a fixed diagnosis.
@@ -241,7 +247,7 @@ def rehearse(image, output):
             ]
             for field in [*names, "J03_REDIS_URL"]:
                 args += ["--env", field]
-            run(
+            storage_tests = run(
                 [
                     *args,
                     "--volume",
@@ -253,9 +259,16 @@ def rehearse(image, output):
                     "tests/security/test_byok_rotation.py",
                     "-q",
                     "--tb=no",
+                    "-o",
+                    "addopts=",
                 ],
                 env=testenv,
             )
+            assert (
+                "19 passed" in storage_tests.stdout
+                and "skipped" not in storage_tests.stdout
+            )
+            report["storage_tests"] = "19 passed; memory and actual Redis; zero skips"
             report["checks"].append(
                 "live Redis rotation/concurrency/CAS/fault/recovery suite"
             )
@@ -278,18 +291,11 @@ def rehearse(image, output):
             base = "http://" + port
             wait_http(base)
             check_settings = "from app.core.config import get_settings; import os; s=get_settings(); assert all(getattr(s,k)==os.environ[k] for k in ('JWT_SECRET_KEY','INTERNAL_GATEWAY_SECRET','FINNAPIGO_SERVICE_SECRET','AUDIT_HMAC_KEY','BYOK_MASTER_KEY','BYOK_MASTER_KEY_ID')); print('SETTINGS_MATCH')"
-            run(
-                [
-                    *compose,
-                    "exec",
-                    "-T",
-                    "jakeai-backend",
-                    "python",
-                    "-c",
-                    check_settings,
-                ],
-                env=env,
-            )
+            for service in ["jakeai-backend", "jakeai-worker"]:
+                run(
+                    [*compose, "exec", "-T", service, "python", "-c", check_settings],
+                    env=env,
+                )
             report["checks"].append(
                 "production image process settings match injected synthetic material"
             )
@@ -302,6 +308,39 @@ def rehearse(image, output):
                 {"provider": "openai", "api_key": canary},
             )
             assert code == 201 and canary not in json.dumps(body)
+            assert body["masked_key"] == "********"
+            for path, data, method in [
+                (
+                    "/api/v1/byok/keys",
+                    {"provider": "openai", "api_key": canary},
+                    "POST",
+                ),
+                ("/api/v1/byok/keys/openai/rotate", {"new_api_key": canary}, "POST"),
+                ("/api/v1/byok/keys/openai", None, "DELETE"),
+            ]:
+                assert (
+                    http(base, path, mint(env, user="member"), data, method)[0] == 403
+                )
+            assert (
+                http(
+                    base,
+                    "/api/v1/byok/keys/openai",
+                    mint(env, tenant="other"),
+                    method="DELETE",
+                )[0]
+                == 404
+            )
+            code, body = http(
+                base,
+                "/api/v1/byok/keys",
+                token,
+                {"provider": "openai", "api_key": canary},
+            )
+            assert code == 201 and canary not in json.dumps(body)
+            code, body = http(
+                base, "/api/v1/byok/keys/openai/rotate", token, {"new_api_key": canary}
+            )
+            assert code == 200 and body["masked_key"] == "********"
             for denied in [mint(env, perms=[]), mint(env, user="member")]:
                 assert http(base, "/api/v1/byok/keys", denied)[0] == 403
             code, body = http(base, "/api/v1/byok/keys", mint(env, tenant="other"))
@@ -451,7 +490,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         rehearse(args.image, args.output)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 -- diagnostics must never echo injected values
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(
             json.dumps(

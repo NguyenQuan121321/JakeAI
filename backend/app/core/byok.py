@@ -47,8 +47,10 @@ class BYOKManager:
         retired_key_ids: list[str] | None = None,
         retired_key_hashes: list[str] | None = None,
         store: MemoryStore | RedisStore | None = None,
+        validation_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         settings = get_settings()
+        self._validation_transport = validation_transport
         try:
             self.key_id = validate_key_id(
                 key_id if key_id is not None else settings.BYOK_MASTER_KEY_ID
@@ -303,7 +305,10 @@ class BYOKManager:
         elif norm == "gemini":
             headers = {"x-goog-api-key": clean}
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            options: dict[str, Any] = {"timeout": 5.0}
+            if self._validation_transport is not None:
+                options["transport"] = self._validation_transport
+            async with httpx.AsyncClient(**options) as client:
                 response = await client.get(endpoints[norm], headers=headers)
             if response.status_code == 200:
                 return True, None
