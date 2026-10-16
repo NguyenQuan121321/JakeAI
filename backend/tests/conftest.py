@@ -1,6 +1,19 @@
 """Root pytest fixtures and configuration registering shared test fixtures."""
 
+import base64
+import os
+import secrets
+
 import pytest
+
+# Synthetic provisioning belongs in tests, never in runtime defaults or CI credentials.
+os.environ.setdefault("JWT_SECRET_KEY", secrets.token_hex(32))
+os.environ.setdefault("INTERNAL_GATEWAY_SECRET", secrets.token_hex(32))
+os.environ.setdefault(
+    "BYOK_MASTER_KEY", base64.b64encode(secrets.token_bytes(32)).decode()
+)
+os.environ.setdefault("BYOK_MASTER_KEY_ID", "test-current")
+os.environ.setdefault("BYOK_STORAGE_BACKEND", "memory")
 
 from tests.fixtures.auth import create_test_jwt, generate_agent_jwt
 from tests.fixtures.client import async_client

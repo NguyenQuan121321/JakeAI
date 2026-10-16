@@ -173,6 +173,8 @@ class ProviderRequest(BaseModel):
     tenant_id: str = Field(default="default", description="Tenant identifier for BYOK")
     api_key: str | None = Field(
         default=None,
+        repr=False,
+        exclude=True,
         description="Explicit decrypted key if provided; otherwise resolved by adapter",
     )
     response_format: dict[str, Any] | str | None = Field(

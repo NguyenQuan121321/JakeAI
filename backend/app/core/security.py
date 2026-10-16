@@ -15,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
 from app.core.context import TenantContext, set_current_tenant_context
+from app.core.secret_material import signing_key_is_retired
 
 logger = logging.getLogger(__name__)
 
@@ -78,21 +79,8 @@ def verify_finnapigo_jwt(
         ):
             candidate_keys.append(settings.JWT_SECRET_PREVIOUS)
 
-        # In non-production environments, provide known dev secret fallbacks
-        if getattr(settings, "ENVIRONMENT", "").lower() in (
-            "development",
-            "test",
-            "testing",
-            "local",
-            "",
-        ):
-            dev_fallbacks = [
-                "a04c1981ceded10b6ecadc8c0504f89f524b7b9057ed5036233803a78bee7fc8",
-                "a8f3e2b1c9d7f6e5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2",
-            ]
-            for fb in dev_fallbacks:
-                if fb not in candidate_keys:
-                    candidate_keys.append(fb)
+    # J01 reviewed retirement invariant: no development or explicit-key bypass.
+    candidate_keys = [key for key in candidate_keys if not signing_key_is_retired(key)]
 
     # Inspect token header for kid and alg
     header_kid: str | None = None
@@ -184,6 +172,7 @@ def verify_finnapigo_jwt(
     context = TenantContext(
         tenant_id=tenant_id,
         user_id=sub,
+        explicit_tenant=bool(payload.get("tenant_id") or payload.get("tid")),
         org_id=payload.get("org_id"),
         roles=[str(r) for r in roles],
         scopes=[str(s) for s in scopes],
@@ -255,6 +244,8 @@ def verify_internal_perimeter_secret(request: Request | None) -> bool:
 
     settings = get_settings()
     configured_secret = settings.INTERNAL_GATEWAY_SECRET
+    if not configured_secret:
+        return False
 
     # 1. Check direct X-Internal-Secret header
     internal_secret = request.headers.get("x-internal-secret", "").strip()

@@ -40,7 +40,9 @@ def create_token(
         "iat": now,
         "exp": now + expires_in,
         "roles": roles or ["admin", "developer"],
-        "permissions": permissions or ["*"],
+        "permissions": permissions
+        if permissions is not None
+        else ["*", "byok:read", "byok:write"],
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
@@ -221,11 +223,23 @@ async def test_workflow_2_rag_ingest_query_and_grounded_generation(
 @pytest.mark.asyncio
 async def test_workflow_3_byok_cryptographic_keystore_lifecycle(
     async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify full BYOK lifecycle: Store key -> List (Masked) -> Validate -> Rotate -> Revoke -> Delete."""
     tenant_id = f"tenant-byok-{uuid.uuid4().hex[:6]}"
     headers = auth_headers(tenant_id=tenant_id)
     provider = "groq"
+    import httpx
+
+    # Exercise the real probe path with a controlled provider transport.
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200)), **kwargs
+        ),
+    )
 
     # Step 1: Store Provider Key (AES-256-GCM encrypted) via POST /api/v1/byok/keys
     r_store = await async_client.post(

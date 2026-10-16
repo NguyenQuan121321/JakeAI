@@ -64,17 +64,33 @@ async def acquire_redis_client(
     reason. Callers decide their own retry/latch policy on a None result.
     """
     try:
-        from redis import asyncio as aioredis
-
         settings = get_settings()
-        client = aioredis.from_url(
+        client = create_redis_client(
             settings.REDIS_URL,
-            encoding="utf-8",
             decode_responses=decode_responses,
-            socket_connect_timeout=connect_timeout,
+            connect_timeout=connect_timeout,
             socket_timeout=socket_timeout,
         )
         await client.ping()
         return client
     except Exception:
         return None
+
+
+def create_redis_client(
+    url: str,
+    *,
+    decode_responses: bool = True,
+    connect_timeout: float = 1,
+    socket_timeout: float = 2,
+) -> Any:
+    """Construct without hiding failure; durable callers own fail-closed semantics."""
+    from redis import asyncio as aioredis
+
+    return aioredis.from_url(
+        url,
+        encoding="utf-8",
+        decode_responses=decode_responses,
+        socket_connect_timeout=connect_timeout,
+        socket_timeout=socket_timeout,
+    )

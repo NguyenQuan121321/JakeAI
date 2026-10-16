@@ -1,5 +1,6 @@
 # Production Docker Compose Configuration for JakeAI Platform
-# Target Deployment: 2 vCPU / 4GB RAM VPS (Total container budget <= 3,224 MB RAM)
+# Configured memory limits total 3,672 MB, including the dedicated BYOK vault.
+# Actual host sizing and workload qualification remain required.
 # Invariant 4: Backend port 8000 and datastores are strictly isolated to Docker internal network
 
 services:
@@ -43,14 +44,26 @@ services:
       - CORS_ORIGINS=["https://jakeai.local","https://jakeai.yourdomain.com"]
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
-      - INTERNAL_GATEWAY_SECRET=${INTERNAL_GATEWAY_SECRET:-replace-with-prod-secret-min-32-chars}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-replace-with-prod-jwt-secret-min-32-chars}
-      - BYOK_ENCRYPTION_MASTER_KEY=${BYOK_ENCRYPTION_MASTER_KEY:-replace-with-master-aes-key-64-hex}
+      - INTERNAL_GATEWAY_SECRET=${INTERNAL_GATEWAY_SECRET:?Provision independent internal secret}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Provision signing secret}
+      - JWT_SECRET_PREVIOUS=${JWT_SECRET_PREVIOUS:-}
+      - JWT_ALGORITHM=HS256
+      - FINNAPIGO_SERVICE_SECRET=${FINNAPIGO_SERVICE_SECRET:?Provision independent service secret}
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?Provision independent audit secret}
+      - BYOK_MASTER_KEY=${BYOK_MASTER_KEY:?Provision base64 AES-256 master}
+      - BYOK_MASTER_KEY_ID=${BYOK_MASTER_KEY_ID:?Provision current master ID}
+      - BYOK_PREVIOUS_KEYS=${BYOK_PREVIOUS_KEYS:-{}}
+      - BYOK_RETIRED_KEY_IDS=${BYOK_RETIRED_KEY_IDS:-[]}
+      - BYOK_RETIRED_KEY_HASHES=${BYOK_RETIRED_KEY_HASHES:-[]}
+      - BYOK_STORAGE_BACKEND=redis
+      - BYOK_REDIS_URL=redis://byok-redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
       qdrant:
         condition: service_started
+      byok-redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -80,11 +93,26 @@ services:
       - PROJECT_NAME=JakeAI-Worker
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
+      - INTERNAL_GATEWAY_SECRET=${INTERNAL_GATEWAY_SECRET:?Provision independent internal secret}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Provision signing secret}
+      - JWT_SECRET_PREVIOUS=${JWT_SECRET_PREVIOUS:-}
+      - JWT_ALGORITHM=HS256
+      - FINNAPIGO_SERVICE_SECRET=${FINNAPIGO_SERVICE_SECRET:?Provision independent service secret}
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?Provision independent audit secret}
+      - BYOK_MASTER_KEY=${BYOK_MASTER_KEY:?Provision base64 AES-256 master}
+      - BYOK_MASTER_KEY_ID=${BYOK_MASTER_KEY_ID:?Provision current master ID}
+      - BYOK_PREVIOUS_KEYS=${BYOK_PREVIOUS_KEYS:-{}}
+      - BYOK_RETIRED_KEY_IDS=${BYOK_RETIRED_KEY_IDS:-[]}
+      - BYOK_RETIRED_KEY_HASHES=${BYOK_RETIRED_KEY_HASHES:-[]}
+      - BYOK_STORAGE_BACKEND=redis
+      - BYOK_REDIS_URL=redis://byok-redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
       qdrant:
         condition: service_started
+      byok-redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -92,6 +120,27 @@ services:
           memory: 768M
         reservations:
           memory: 400M
+    networks:
+      - jakeai-prod-network
+
+  # Credentials must not share the evictable cache Redis below.
+  byok-redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --appendfsync always --maxmemory 128mb --maxmemory-policy noeviction
+    expose:
+      - "6379"
+    volumes:
+      - byok_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 192M
     networks:
       - jakeai-prod-network
 
@@ -145,6 +194,8 @@ services:
       - jakeai-prod-network
 
 volumes:
+  byok_data:
+    driver: local
   redis_prod_data:
     driver: local
   qdrant_prod_data:

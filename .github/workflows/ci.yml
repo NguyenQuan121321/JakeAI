@@ -587,7 +587,7 @@ jobs:
 
       - name: Full Bruno API & E2E Test Suite (TEST-08)
         run: |
-          python scripts/run_bruno_tests.py --suite full --auto-start
+          python -u scripts/run_bruno_tests.py --suite full --auto-start --synthetic-byok --command-timeout 180
 
       - name: Archive Bruno & E2E Test Reports
         if: always()
@@ -646,6 +646,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+
+      - name: Provision Synthetic Benchmark Credentials
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import secrets
+          values = {
+              "ENVIRONMENT": "test",
+              "JWT_SECRET_KEY": secrets.token_hex(32),
+              "INTERNAL_GATEWAY_SECRET": secrets.token_hex(32),
+              "BYOK_MASTER_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
+              "BYOK_MASTER_KEY_ID": "ci-smoke",
+              "BYOK_STORAGE_BACKEND": "memory",
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as target:
+              for name, value in values.items():
+                  target.write(f"{name}={value}\n")
+          PY
 
       - name: Performance Regression Smoke Gate (TEST-09 / PERF-003)
         env:
@@ -784,10 +803,24 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
+          # Re-run OS security updates; cached apt layers can predate fixes.
+          pull: true
+          no-cache: true
           load: true
           tags: jakeai-backend:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Rehearse J03 Production Startup, HTTP and Redis on Tested Image
+        run: python scripts/j03_runtime.py --image jakeai-backend:test --output reports/j03-runtime.json
+
+      - name: Archive J03 Runtime Evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: j03-production-runtime
+          path: reports/j03-runtime.json
+          retention-days: 30
 
       - name: Trivy Container Image Vulnerability Scanner
         uses: aquasecurity/trivy-action@master

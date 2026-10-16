@@ -24,7 +24,9 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -195,14 +197,16 @@ def find_uvicorn_python(repo_root: Path) -> str:
     return sys.executable
 
 
-def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[str]:
+def start_uvicorn_server(
+    repo_root: Path, port: int = 8000, *, synthetic_byok: bool = False
+) -> subprocess.Popen[str]:
     """Start local JakeAI backend server in the background."""
     python_bin = find_uvicorn_python(repo_root)
     cmd = [
         python_bin,
         "-m",
         "uvicorn",
-        "app.main:app",
+        "tests.fixtures.byok_http_app:app" if synthetic_byok else "app.main:app",
         "--host",
         "127.0.0.1",
         "--port",
@@ -218,8 +222,7 @@ def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[
         cmd,
         cwd=str(backend_dir),
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # Inherit/drain server output: undrained pipes can stall an HTTP request.
         text=True,
     )
     health_url = f"http://127.0.0.1:{port}/health"
@@ -240,7 +243,7 @@ def start_uvicorn_server(repo_root: Path, port: int = 8000) -> subprocess.Popen[
 
 
 def resolve_authoritative_jwt_secret(repo_root: Path | None = None) -> str:
-    """Resolve authoritative JWT_SECRET_KEY across CI environment, .env, or defaults."""
+    """Require explicitly provisioned signing material for the selected backend."""
     if os.environ.get("JWT_SECRET_KEY"):
         return os.environ["JWT_SECRET_KEY"]
     if os.environ.get("FINNAPIGO_JWT_SECRET"):
@@ -252,9 +255,14 @@ def resolve_authoritative_jwt_secret(repo_root: Path | None = None) -> str:
     try:
         from app.core.config import get_settings
 
-        return get_settings().JWT_SECRET_KEY
-    except Exception:
-        return "insecure-development-secret-change-in-production"
+        value = get_settings().JWT_SECRET_KEY
+        if not value:
+            raise ValueError
+        return value
+    except (ImportError, ValueError):
+        raise RuntimeError(
+            "Synthetic or explicitly provisioned signing material is required"
+        ) from None
 
 
 def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
@@ -275,7 +283,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 sub="16",
                 tenant_id="default",
                 roles=["admin"],
-                permissions=["*"],
+                permissions=["*", "byok:read", "byok:write"],
                 expires_in=3600,
                 secret_key=secret,
                 jti=f"test-token-16-{now}",
@@ -293,13 +301,13 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 sub="16",
                 tenant_id="default",
                 roles=["admin"],
-                permissions=["*"],
+                permissions=["*", "byok:read", "byok:write"],
                 expires_in=-3600,
                 secret_key=secret,
                 jti=f"test-token-16-{now}",
             ),
         }
-    except Exception:
+    except ImportError:
         now = int(time.time())
 
         def _b64url(b: bytes) -> str:
@@ -317,8 +325,12 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 "tid": tenant_id,
                 "role": role,
                 "roles": [role],
-                "permissions": ["*"] if role == "admin" else ["read"],
-                "perms": ["*"] if role == "admin" else ["read"],
+                "permissions": ["*", "byok:read", "byok:write"]
+                if role == "admin"
+                else ["read"],
+                "perms": ["*", "byok:read", "byok:write"]
+                if role == "admin"
+                else ["read"],
                 "type": "access",
                 "iat": now,
                 "exp": now + exp_offset,
@@ -328,7 +340,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
             p_str = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
             sig = hmac.new(
                 secret.encode("utf-8"),
-                f"{h_str}.{p_str}".encode("utf-8"),
+                f"{h_str}.{p_str}".encode(),
                 hashlib.sha256,
             ).digest()
             return f"{h_str}.{p_str}.{_b64url(sig)}"
@@ -350,6 +362,7 @@ def run_bruno_cli_target(
     temp_json_path: Path,
     verbose: bool = False,
     extra_env_vars: dict[str, str] | None = None,
+    timeout_seconds: float = 180,
 ) -> tuple[int, list[TestItemResult]]:
     """Execute Bruno CLI for a specific folder or request and parse output."""
     is_dir = (bruno_dir / target).is_dir()
@@ -363,31 +376,66 @@ def run_bruno_cli_target(
     if is_dir:
         cmd.append("-r")
 
-    cmd.extend([
-        "--env",
-        environment,
-        "--reporter-json",
-        str(temp_json_path),
-        "--reporter-skip-headers",
-        "Authorization",
-    ])
+    cmd.extend(
+        [
+            "--env",
+            environment,
+            "--reporter-json",
+            str(temp_json_path),
+            "--reporter-skip-headers",
+            "Authorization",
+        ]
+    )
 
     if extra_env_vars:
         for k, v in extra_env_vars.items():
             cmd.extend(["--env-var", f"{k}={v}"])
 
     if verbose:
-        print(f"[DEBUG] Executing: {' '.join(cmd)}")
+        print(
+            f"[DEBUG] Executing Bruno target {target}; credential arguments omitted",
+            flush=True,
+        )
 
-    res = subprocess.run(
+    print(f"[*] Bruno target: {target}", flush=True)
+    proc = subprocess.Popen(
         cmd,
         cwd=str(bruno_dir),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        check=False,
+        start_new_session=os.name != "nt",
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate(timeout=5)
+        return 1, [
+            TestItemResult(
+                name=target,
+                target=target,
+                status="failed",
+                error_message="BRUNO_COMMAND_TIMEOUT",
+            )
+        ]
+    res = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    for value in (extra_env_vars or {}).values():
+        if value:
+            res.stdout = res.stdout.replace(value, "[REDACTED]")
+            res.stderr = res.stderr.replace(value, "[REDACTED]")
 
     if verbose or res.returncode != 0:
         if res.stdout:
@@ -438,7 +486,9 @@ def run_bruno_cli_target(
                     )
         except Exception as exc:  # noqa: BLE001
             if verbose:
-                print(f"[WARN] Failed parsing Bruno JSON report {temp_json_path}: {exc}")
+                print(
+                    f"[WARN] Failed parsing Bruno JSON report {temp_json_path}: {exc}"
+                )
 
     if not results and res.returncode != 0:
         results.append(
@@ -627,8 +677,44 @@ def main() -> int:
     parser.add_argument(
         "--verbose", action="store_true", help="Print verbose execution details"
     )
+    parser.add_argument(
+        "--synthetic-byok",
+        action="store_true",
+        help="Use an explicit synthetic BYOK/probe fixture for an auto-started local backend",
+    )
+    parser.add_argument(
+        "--command-timeout",
+        type=float,
+        default=180,
+        help="Per-target CLI deadline; timeout fails the suite",
+    )
 
     args = parser.parse_args()
+    if args.command_timeout <= 0:
+        parser.error("command timeout must be positive")
+    if args.synthetic_byok:
+        if args.suite == "live-release" or args.base_url not in {
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        }:
+            parser.error("Synthetic fixture is limited to local non-live suites")
+        os.environ.update(
+            ENVIRONMENT="test",
+            JWT_SECRET_KEY=secrets.token_hex(32),
+            INTERNAL_GATEWAY_SECRET=secrets.token_hex(32),
+            BYOK_MASTER_KEY=base64.b64encode(secrets.token_bytes(32)).decode(),
+            BYOK_MASTER_KEY_ID="bruno-synthetic",
+            BYOK_STORAGE_BACKEND="memory",
+        )
+        for name in [
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GROQ_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OPENROUTER_API_KEY",
+        ]:
+            os.environ.pop(name, None)
 
     # Aliases
     suite = args.suite
@@ -642,7 +728,10 @@ def main() -> int:
     bruno_dir = repo_root / "Bruno"
 
     if not bruno_dir.is_dir():
-        print(f"[ERROR] Bruno collection directory not found at {bruno_dir}", file=sys.stderr)
+        print(
+            f"[ERROR] Bruno collection directory not found at {bruno_dir}",
+            file=sys.stderr,
+        )
         return 1
 
     npx_bin = resolve_npx()
@@ -659,10 +748,18 @@ def main() -> int:
         jakeai_ok, _, _ = check_http_endpoint(f"{args.base_url}/api/v1/health")
 
     server_proc = None
+    if jakeai_ok and args.synthetic_byok:
+        print(
+            "[ERROR] Synthetic fixture requires its own auto-started backend; existing server preserved.",
+            file=sys.stderr,
+        )
+        return 1
     if not jakeai_ok:
         if args.auto_start or os.environ.get("CI"):
             print("[*] JakeAI server not detected. Auto-starting backend...")
-            server_proc = start_uvicorn_server(repo_root)
+            server_proc = start_uvicorn_server(
+                repo_root, synthetic_byok=args.synthetic_byok
+            )
             jakeai_ok = True
         else:
             print(
@@ -730,8 +827,6 @@ def main() -> int:
                     print(f"[WARN] Target not found: {target}")
                     continue
 
-            is_folder_target = target_path.is_dir()
-
             # Dependency governance for FinnApiGo requests
             norm_target = target.replace("\\", "/")
             if not finnapigo_ok and (
@@ -792,6 +887,7 @@ def main() -> int:
                 temp_json_path=temp_json,
                 verbose=args.verbose,
                 extra_env_vars=runtime_dev_jwts,
+                timeout_seconds=args.command_timeout,
             )
             summary.items.extend(res_items)
 
@@ -854,7 +950,9 @@ def main() -> int:
     summary_md_path.write_text(md_content, encoding="utf-8")
 
     print_console_summary(summary)
-    print(f"[OK] Reports written to:\n  - {json_path}\n  - {junit_path}\n  - {summary_md_path}")
+    print(
+        f"[OK] Reports written to:\n  - {json_path}\n  - {junit_path}\n  - {summary_md_path}"
+    )
 
     return 0 if summary.is_success else 1
 

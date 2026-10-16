@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from app.core.byok import get_byok_manager
 from app.core.config import get_settings
+from app.core.credential_redaction import protect_credential
 from app.optimizer.provider_cache_policy import (
     CacheMissReason,
     get_provider_cache_policy,
@@ -55,14 +56,14 @@ class GeminiAdapter(LLMProvider):
 
     async def _resolve_api_key(self, request: ProviderRequest) -> str:
         if request.api_key:
-            return request.api_key
+            return protect_credential(request.api_key)
         byok_mgr = get_byok_manager()
         key = await byok_mgr.get_decrypted_key(request.tenant_id, self.provider_name)
         if key:
             return key
         settings = get_settings()
         if settings.GEMINI_API_KEY:
-            return settings.GEMINI_API_KEY
+            return protect_credential(settings.GEMINI_API_KEY)
         raise ProviderAuthenticationError(
             message="No Google Gemini API key configured (neither tenant BYOK nor platform default)",
             provider=self.provider_name,
@@ -146,14 +147,14 @@ class GeminiAdapter(LLMProvider):
                     provider=self.provider_name,
                     model=model_name,
                     raw_error=exc,
-                ) from exc
+                ) from None
             except httpx.TransportError as exc:
                 raise ProviderUnavailableError(
                     message=f"Provider endpoint unreachable: {exc}",
                     provider=self.provider_name,
                     model=model_name,
                     raw_error=exc,
-                ) from exc
+                ) from None
             latency = (time.perf_counter() - start_t) * 1000.0
 
             if res.status_code != 200:
@@ -178,7 +179,7 @@ class GeminiAdapter(LLMProvider):
                     model=model_name,
                     status_code=res.status_code,
                     raw_error=exc,
-                ) from exc
+                ) from None
             candidates = data.get("candidates", [])
             text_output = ""
             finish_reason = "stop"
@@ -298,14 +299,14 @@ class GeminiAdapter(LLMProvider):
                     provider=self.provider_name,
                     model=model_name,
                     raw_error=exc,
-                ) from exc
+                ) from None
             except httpx.TransportError as exc:
                 raise ProviderUnavailableError(
                     message=f"Provider stream endpoint unreachable: {exc}",
                     provider=self.provider_name,
                     model=model_name,
                     raw_error=exc,
-                ) from exc
+                ) from None
 
         if client is not None:
             async for chunk in _stream_runner(client):

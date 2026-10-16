@@ -435,7 +435,6 @@
           "BYOK"
         ],
         "summary": "List Provider Keys",
-        "description": "List all supported providers and their configuration status with masked previews.",
         "operationId": "list_provider_keys_api_v1_byok_keys_get",
         "responses": {
           "200": {
@@ -460,7 +459,6 @@
           "BYOK"
         ],
         "summary": "Store Provider Key",
-        "description": "Store and encrypt a tenant-supplied LLM provider key.",
         "operationId": "store_provider_key_api_v1_byok_keys_post",
         "requestBody": {
           "content": {
@@ -507,7 +505,6 @@
           "BYOK"
         ],
         "summary": "Validate Candidate Key",
-        "description": "Validate candidate LLM provider key via minimal quota-safe probe.",
         "operationId": "validate_candidate_key_api_v1_byok_keys_validate_post",
         "requestBody": {
           "content": {
@@ -554,7 +551,6 @@
           "BYOK"
         ],
         "summary": "Validate Existing Key",
-        "description": "Validate an existing stored key for this tenant without burning generation quota.",
         "operationId": "validate_existing_key_api_v1_byok_keys__provider__validate_post",
         "security": [
           {
@@ -602,7 +598,6 @@
           "BYOK"
         ],
         "summary": "Rotate Provider Key",
-        "description": "Rotate an existing provider key for this tenant.",
         "operationId": "rotate_provider_key_api_v1_byok_keys__provider__rotate_post",
         "security": [
           {
@@ -660,7 +655,6 @@
           "BYOK"
         ],
         "summary": "Revoke Provider Key",
-        "description": "Revoke an existing provider key, preventing runtime inference without wiping metadata.",
         "operationId": "revoke_provider_key_api_v1_byok_keys__provider__revoke_post",
         "security": [
           {
@@ -708,7 +702,6 @@
           "BYOK"
         ],
         "summary": "Delete Provider Key",
-        "description": "Revoke and delete an encrypted provider key.",
         "operationId": "delete_provider_key_api_v1_byok_keys__provider__delete",
         "security": [
           {
@@ -732,8 +725,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Delete Provider Key Api V1 Byok Keys  Provider  Delete"
                 }
               }
@@ -2552,8 +2543,7 @@
           "masked_key",
           "status"
         ],
-        "title": "BYOKKeyResponse",
-        "description": "Response returning masked key information and lifecycle status."
+        "title": "BYOKKeyResponse"
       },
       "BYOKListResponse": {
         "properties": {
@@ -2574,8 +2564,7 @@
           "tenant_id",
           "keys"
         ],
-        "title": "BYOKListResponse",
-        "description": "List of configured provider keys for a tenant."
+        "title": "BYOKListResponse"
       },
       "BYOKProviderItem": {
         "properties": {
@@ -2654,21 +2643,21 @@
           "masked_key",
           "configured"
         ],
-        "title": "BYOKProviderItem",
-        "description": "Provider key status item."
+        "title": "BYOKProviderItem"
       },
       "BYOKRotateRequest": {
         "properties": {
           "new_api_key": {
             "type": "string",
+            "maxLength": 4096,
             "minLength": 8,
+            "format": "password",
             "title": "New Api Key",
-            "description": "New raw provider API key to encrypt"
+            "writeOnly": true
           },
           "validate_key": {
             "type": "boolean",
             "title": "Validate Key",
-            "description": "Whether to perform live probe validation before rotating",
             "default": false
           }
         },
@@ -2676,26 +2665,26 @@
         "required": [
           "new_api_key"
         ],
-        "title": "BYOKRotateRequest",
-        "description": "Request payload to rotate an existing provider API key."
+        "title": "BYOKRotateRequest"
       },
       "BYOKStoreRequest": {
         "properties": {
           "provider": {
             "type": "string",
-            "title": "Provider",
-            "description": "LLM provider: openai, gemini, anthropic, groq, deepseek, or openrouter"
+            "maxLength": 32,
+            "title": "Provider"
           },
           "api_key": {
             "type": "string",
+            "maxLength": 4096,
             "minLength": 8,
+            "format": "password",
             "title": "Api Key",
-            "description": "Raw provider API key to encrypt"
+            "writeOnly": true
           },
           "validate_key": {
             "type": "boolean",
             "title": "Validate Key",
-            "description": "Whether to perform live probe validation before storing",
             "default": false
           }
         },
@@ -2704,21 +2693,22 @@
           "provider",
           "api_key"
         ],
-        "title": "BYOKStoreRequest",
-        "description": "Request payload to register or update an LLM provider API key."
+        "title": "BYOKStoreRequest"
       },
       "BYOKValidateRequest": {
         "properties": {
           "provider": {
             "type": "string",
-            "title": "Provider",
-            "description": "Target LLM provider"
+            "maxLength": 32,
+            "title": "Provider"
           },
           "api_key": {
             "type": "string",
+            "maxLength": 4096,
             "minLength": 8,
+            "format": "password",
             "title": "Api Key",
-            "description": "Raw API key to validate"
+            "writeOnly": true
           }
         },
         "type": "object",
@@ -2726,8 +2716,7 @@
           "provider",
           "api_key"
         ],
-        "title": "BYOKValidateRequest",
-        "description": "Request payload to validate a candidate provider API key."
+        "title": "BYOKValidateRequest"
       },
       "BYOKValidationResponse": {
         "properties": {
@@ -2756,8 +2745,7 @@
           "provider",
           "is_valid"
         ],
-        "title": "BYOKValidationResponse",
-        "description": "Response returning provider key validation verdict."
+        "title": "BYOKValidationResponse"
       },
       "ChangelogRequest": {
         "properties": {

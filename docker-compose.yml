@@ -15,6 +15,11 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - FINNAPIGO_JWKS_URL=http://host.docker.internal:8080/.well-known/jwks.json
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - INTERNAL_GATEWAY_SECRET=${INTERNAL_GATEWAY_SECRET:-}
+      - BYOK_MASTER_KEY=${BYOK_MASTER_KEY:-}
+      - BYOK_MASTER_KEY_ID=${BYOK_MASTER_KEY_ID:-}
+      - BYOK_STORAGE_BACKEND=redis
     depends_on:
       redis:
         condition: service_healthy
@@ -44,6 +49,11 @@ services:
       - ENVIRONMENT=development
       - DEBUG=true
       - PROJECT_NAME=JakeAI-Worker
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - INTERNAL_GATEWAY_SECRET=${INTERNAL_GATEWAY_SECRET:-}
+      - BYOK_MASTER_KEY=${BYOK_MASTER_KEY:-}
+      - BYOK_MASTER_KEY_ID=${BYOK_MASTER_KEY_ID:-}
+      - BYOK_STORAGE_BACKEND=redis
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
     depends_on:

@@ -39,7 +39,8 @@ def _make_auth_headers(
         tenant_id=tenant_id,
         user_id=user_id,
         roles=roles or ["admin", "developer"],
-        permissions=permissions or ["chat:write", "agent:write", "byok:manage"],
+        permissions=permissions
+        or ["chat:write", "agent:write", "byok:read", "byok:write"],
     )
     token = exchange_obo_token(ctx)
     return {"Authorization": f"Bearer {token}"}
@@ -393,9 +394,7 @@ async def test_tenant_isolation_byok_keys_crud_and_masking() -> None:
         keys_a = {k["provider"]: k for k in a_list.json()["keys"]}
         assert keys_a["openai"]["configured"] is True
         assert secret_key_val not in a_list.text  # Plaintext never leaked
-        assert "1234" in str(
-            keys_a["openai"]["masked_key"]
-        )  # Last 4 chars visible for audit
+        assert keys_a["openai"]["masked_key"] == "********"
 
 
 # ==============================================================================

@@ -1,40 +1,62 @@
-# ADR-003: Stateless Zero-Retention BYOK Pipeline and Local OS Keystore Isolation
+# ADR-003: Versioned encrypted server-side BYOK custody
 
-## Status
-Accepted
+Status: corrected by J03. The original zero-retention/OS-keystore proposal was
+not implemented by the HTTP vault. This decision describes actual custody.
 
-## Context
-In commercial AI coding platforms, persisting customer third-party provider API keys (OpenAI, Anthropic, Gemini, OpenRouter) in a central database introduces a catastrophic "Credential Honeypot" risk. If the backend database is compromised, all customer API keys are exfiltrated, exposing users to unlimited financial drain and credit exhaustion.
+The backend persists encrypted tenant/provider credentials in Redis. It decrypts
+them in Python memory for provider injection. Operators provision encryption
+masters separately through environment injection. There is no implemented OS
+keystore, external KMS, guaranteed memory wiping, or protection from an attacker
+who controls both the running application and its encryption material.
 
-Furthermore, selling raw LLM tokens forces the platform into a negative-margin liability trap where high-usage edge cases deplete platform operating cash flow.
+Records use AES-256-GCM with a fresh 96-bit nonce. A canonical JSON header binds
+schema version 1, master key ID, explicit tenant, provider and positive record
+revision as authenticated associated data. The ciphertext contains the API key,
+owner, lifecycle status, timestamps and validation metadata. Previews are constant
+masks derived by the application, never trusted store-supplied text. Header changes
+or substitution across tenants/providers/versions fail authentication. The store
+remains trusted for availability and freshness: a replay of a complete older
+valid envelope at the same slot is not cryptographically detectable.
 
-## Decision
-JakeAI adopts a strict **Bring Your Own Key (BYOK)** model backed by a **Stateless Zero-Retention & Local-First Keystore Architecture**:
+Production requires a separate persistent, non-evicting BYOK Redis and explicit
+provisioned current/previous key material. Startup checks AOF, always-fsync and
+noeviction configuration. There is no process-memory fallback after an outage.
+Development/tests may explicitly select an in-memory store; that store has no
+cross-process or restart durability. Neither configuration proves backup quality,
+HA, approved retention, RPO/RTO, or a production deployment.
 
-1. **Zero Database Persistence**:
-   - The JakeAI database contains strictly zero tables or columns for customer API keys (`user_api_keys` does not exist).
-   - In the event of a total server intrusion, an attacker captures 0 API keys.
+Each tenant/provider slot belongs to its first authenticated writer. HTTP reads
+require exactly `byok:read`; mutations and provider probes require exactly
+`byok:write`. Existing records require the owner or an explicitly signed
+`tenant_admin` role plus the exact permission, scoped to the verified tenant.
+Roles, wildcards, scopes, client tenant headers and `byok:manage` do not replace
+these grants. The ordinary `default` tenant has the same rules. This BYOK boundary
+does not qualify the existing JWT verifier or Finn introspection; those are J02.
 
-2. **Local-First OS Keystore Vault**:
-   - Customer API keys reside strictly on the developer's workstation within OS-native secure hardware enclaves:
-     - **Windows**: DPAPI via Windows Credential Manager.
-     - **macOS**: Apple Keychain Services.
-     - **Linux**: Secret Service API / Libsecret.
-     - **VS Code Extension**: `vscode.SecretStorage` API.
+Writes, rotations, validations, revocations, deletion and re-encryption use atomic
+compare-and-swap against the complete observed envelope. A race returns a conflict
+instead of overwriting a concurrent change. Dependency errors are fixed codes;
+they do not disclose secrets or silently become absent/demo credentials. A lost
+write reply can leave an unknown outcome, requiring a read to reconcile.
 
-3. **Ephemeral In-Flight Transmission**:
-   - Keys are transmitted over TLS 1.3 in request headers (`X-Provider-API-Key`).
-   - The gateway parses the key into a volatile bytearray buffer, injects it into outbound provider requests, and immediately zeroes/wipes the memory buffer upon request completion.
-   - Keys are never written to disk, database, swap space, or crash logs.
+Old unversioned records do not establish authenticated provider or owner. They
+are detected at their old storage names and fail with `BYOK_LEGACY_RECORD` rather
+than being automatically adopted. Before rollout, inventory and back them up;
+use a separately reviewed offline attribution/migration or authorized enrollment
+after disposition of the old record. Do not decrypt using a public old master or
+erase old data merely to pass startup. Mixed old/new writers are unsupported.
 
-4. **Hardened Redaction & Anomaly Detection**:
-   - Global regex interceptors sanitize all logging sinks: `sk-[a-zA-Z0-9_\-]{20,}` is replaced with `sk-***[REDACTED]***`.
-   - Edge proxy computes non-reversible `HMAC-SHA256(key, server_pepper)` for velocity rate limiting without ever exposing the raw secret.
+Current writes always use the current master. Previous masters are read-only
+migration material. Re-encryption repeats complete scans and CAS updates; faults
+and conflicts are reported, and successful updates survive retry/restart. Before
+retirement, stop old writers and require a subsequent complete pass with no
+migrations, conflicts or errors. Keep the retired-ID and retired-material-digest
+inventory outside restored ciphertext backups; supply it to every restart.
+Retired material is refused even if renamed. Removing that trusted inventory or
+running an old binary defeats retirement and is forbidden rollback practice.
 
-5. **Terms of Service & Blast Radius Isolation**:
-   - Platform operates as a non-custodial prompt optimizer with zero custody of user funds.
-   - Users are mandated to configure project-scoped restricted keys with hard $5–$20 monthly spend ceilings on provider consoles.
-
-## Consequences
-- **Positive**: 100% elimination of the credential honeypot vulnerability; 0 VND upstream LLM liability for the platform; enterprise compliance with SOC 2 / GDPR data minimization.
-- **Negative**: Users must manage their own API keys and provider billing accounts.
+Signing-key retirement and data-key migration have different lifetimes. The
+JWT token drain is never a ciphertext deletion deadline. A compromised master
+cannot be restored as active for rollback. Retention, backups, physical erasure
+and incident recovery require the separate approved policy; no automatic purge
+or live rotation is introduced. See [BYOK operations](../security/byok-operations.md).

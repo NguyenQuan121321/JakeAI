@@ -524,7 +524,7 @@ async def test_byok_invalid_ciphertext_tamper_defense() -> None:
 
     mgr = BYOKManager()
     tampered_ciphertext = "v1:tampered-iv-123:tampered-ciphertext-xyz:tampered-tag"
-    with pytest.raises(ValueError, match="Failed to decrypt key"):
+    with pytest.raises(ValueError, match="BYOK_RECORD_CORRUPT"):
         mgr.decrypt_key(tampered_ciphertext, tenant_id="tenant-crypto-test")
 
 

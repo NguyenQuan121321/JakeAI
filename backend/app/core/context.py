@@ -11,6 +11,9 @@ class TenantContext(BaseModel):
 
     tenant_id: str = Field(description="Unique tenant or organization identifier")
     user_id: str = Field(description="Authenticated subject user identifier")
+    explicit_tenant: bool = Field(
+        default=False, description="Tenant explicitly present in verified claims"
+    )
     org_id: str | None = Field(default=None, description="Optional organization ID")
     roles: list[str] = Field(
         default_factory=list,
