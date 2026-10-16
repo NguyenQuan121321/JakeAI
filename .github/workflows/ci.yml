@@ -647,6 +647,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Provision Synthetic Benchmark Credentials
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import secrets
+          values = {
+              "ENVIRONMENT": "test",
+              "JWT_SECRET_KEY": secrets.token_hex(32),
+              "INTERNAL_GATEWAY_SECRET": secrets.token_hex(32),
+              "BYOK_MASTER_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
+              "BYOK_MASTER_KEY_ID": "ci-smoke",
+              "BYOK_STORAGE_BACKEND": "memory",
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as target:
+              for name, value in values.items():
+                  target.write(f"{name}={value}\n")
+          PY
+
       - name: Performance Regression Smoke Gate (TEST-09 / PERF-003)
         env:
           QDRANT_OFFLINE: "1"

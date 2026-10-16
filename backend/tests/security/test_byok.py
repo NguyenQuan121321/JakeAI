@@ -80,6 +80,14 @@ async def test_authenticated_envelope_substitution(manager, field, value):
     envelope[field] = value
     with pytest.raises(BYOKError):
         manager.decrypt_key(json.dumps(envelope), "bound")
+    # Match the forged cleartext header at the destination: rejection must come
+    # from authentication of the ciphertext, not just a header equality check.
+    if field == "tenant":
+        with pytest.raises(BYOKError, match="BYOK_RECORD_CORRUPT"):
+            manager.decrypt_key(json.dumps(envelope), value)
+    if field == "provider":
+        with pytest.raises(BYOKError, match="BYOK_RECORD_CORRUPT"):
+            manager.decrypt_key(json.dumps(envelope), "bound", value)
     with pytest.raises(BYOKError):
         manager.decrypt_key(raw, "other")
     other = BYOKManager(
