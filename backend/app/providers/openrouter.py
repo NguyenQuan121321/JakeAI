@@ -63,7 +63,7 @@ class OpenRouterAdapter(LLMProvider):
             "OPENROUTER_API_KEY"
         )
         if platform_key:
-            return platform_key
+            return protect_credential(platform_key)
         raise ProviderAuthenticationError(
             message="No OpenRouter API key configured (neither tenant BYOK nor platform default)",
             provider=self.provider_name,

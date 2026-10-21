@@ -128,6 +128,30 @@ def test_pdf_parser_text_and_pages() -> None:
     assert "pages" in parsed.metadata
 
 
+def test_pdf_image_ingestion_uses_compatible_pypdf_and_pillow() -> None:
+    """Exercise actual JPEG/PNG codecs and an image-bearing PDF without OCR/model calls."""
+    import pypdf
+    from PIL import Image
+
+    original = Image.new("RGB", (8, 6), (17, 43, 79))
+    for codec in ["PNG", "JPEG"]:
+        data = io.BytesIO()
+        original.save(data, format=codec)
+        with Image.open(io.BytesIO(data.getvalue())) as decoded:
+            decoded.load()
+            assert decoded.size == (8, 6)
+            assert decoded.mode == "RGB"
+    document = io.BytesIO()
+    original.save(document, format="PDF")
+    reader = pypdf.PdfReader(io.BytesIO(document.getvalue()))
+    assert len(reader.pages) == 1
+    assert reader.pages[0].images[0].image.size == (8, 6)
+    parsed = PDFParser().parse_bytes(
+        document.getvalue(), filename="synthetic-image.pdf"
+    )
+    assert parsed.metadata["total_pages"] == 1
+
+
 def test_get_parser_resolution_and_rejection() -> None:
     """Verify get_parser resolves valid types and rejects unsupported formats."""
     # Valid extensions

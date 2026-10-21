@@ -45,7 +45,7 @@ def run(command, *, env=None, timeout=120, required=True):
     return result
 
 
-def mint(env, *, tenant="runtime", perms=None, user="owner"):
+def mint(env, *, tenant="runtime", perms=None, user="owner", roles=None):
     def encoded(value):
         return base64.urlsafe_b64encode(
             json.dumps(value, separators=(",", ":")).encode()
@@ -62,6 +62,7 @@ def mint(env, *, tenant="runtime", perms=None, user="owner"):
             "iat": now,
             "exp": now + 600,
             "perms": perms if perms is not None else ["byok:read", "byok:write"],
+            "roles": roles or [],
         }
     )
     signed = header + b"." + body
@@ -257,6 +258,8 @@ def rehearse(image, output):
                     "-m",
                     "pytest",
                     "tests/security/test_byok_rotation.py",
+                    "tests/security/test_byok_owner_listing.py",
+                    "tests/security/test_provider_credential_sources.py",
                     "-q",
                     "--tb=no",
                     "-o",
@@ -265,10 +268,12 @@ def rehearse(image, output):
                 env=testenv,
             )
             assert (
-                "19 passed" in storage_tests.stdout
+                "69 passed" in storage_tests.stdout
                 and "skipped" not in storage_tests.stdout
             )
-            report["storage_tests"] = "19 passed; memory and actual Redis; zero skips"
+            report["storage_tests"] = (
+                "69 passed; provider HTTP, owner listing, memory and actual Redis; zero skips"
+            )
             report["checks"].append(
                 "live Redis rotation/concurrency/CAS/fault/recovery suite"
             )
@@ -341,8 +346,39 @@ def rehearse(image, output):
                 base, "/api/v1/byok/keys/openai/rotate", token, {"new_api_key": canary}
             )
             assert code == 200 and body["masked_key"] == "********"
-            for denied in [mint(env, perms=[]), mint(env, user="member")]:
-                assert http(base, "/api/v1/byok/keys", denied)[0] == 403
+            assert http(base, "/api/v1/byok/keys", mint(env, perms=[]))[0] == 403
+            assert (
+                http(base, "/api/v1/byok/keys", mint(env, user="member"))[1]["keys"]
+                == []
+            )
+            second_owner = mint(env, user="second-owner")
+            assert (
+                http(
+                    base,
+                    "/api/v1/byok/keys",
+                    second_owner,
+                    {"provider": "gemini", "api_key": canary},
+                )[0]
+                == 201
+            )
+            for identity, expected in [(token, "openai"), (second_owner, "gemini")]:
+                status_code, listed = http(base, "/api/v1/byok/keys", identity)
+                assert status_code == 200
+                assert [row["provider"] for row in listed["keys"]] == [expected]
+                assert listed["keys"][0]["masked_key"] == "********"
+            delegate = mint(env, user="delegate", roles=["tenant_admin"])
+            assert {
+                row["provider"]
+                for row in http(base, "/api/v1/byok/keys", delegate)[1]["keys"]
+                if row["configured"]
+            } == {"openai", "gemini"}
+            assert (
+                http(base, "/api/v1/byok/keys/gemini", token, method="DELETE")[0] == 403
+            )
+            assert (
+                http(base, "/api/v1/byok/keys/gemini", second_owner, method="DELETE")[0]
+                == 200
+            )
             code, body = http(base, "/api/v1/byok/keys", mint(env, tenant="other"))
             assert code == 200 and not any(item["configured"] for item in body["keys"])
             # The production API deliberately exits if its vault is unavailable

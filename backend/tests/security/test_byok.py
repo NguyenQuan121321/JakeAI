@@ -162,8 +162,9 @@ async def test_http_owner_permissions_delegation_and_tenant_boundary(
             ("POST", "/keys/openai/validate", None),
             ("DELETE", "/keys/openai", None),
         ]:
+            member_headers = headers(user="member")
             for denied_headers in [
-                headers(user="member"),
+                member_headers,
                 headers(roles=["admin"], perms=[]),
                 headers(perms=["*"]),
                 headers(perms=["byok:manage"]),
@@ -171,7 +172,11 @@ async def test_http_owner_permissions_delegation_and_tenant_boundary(
                 response = await client.request(
                     method, "/api/v1/byok" + path, json=data, headers=denied_headers
                 )
-                assert response.status_code == 403
+                if method == "GET" and denied_headers is member_headers:
+                    assert response.status_code == 200
+                    assert response.json()["keys"] == []
+                else:
+                    assert response.status_code == 403
                 assert canary not in response.text
         assert (
             await client.get("/api/v1/byok/keys", headers=headers(perms=["byok:read"]))
