@@ -196,7 +196,14 @@ class TestRedisIntegrationAuthorities:
 
     async def test_byok_manager_vault_encryption(self) -> None:
         """Authority 5: BYOKManager credential encryption and Redis storage."""
-        byok = BYOKManager()
+        if not REDIS_AVAILABLE:
+            pytest.skip(
+                "BLOCKED: actual BYOK Redis integration requires reachable isolated Redis"
+            )
+        from app.core.byok_storage import BYOKError, RedisStore
+        from app.core.config import get_settings
+
+        byok = BYOKManager(store=RedisStore(get_settings().REDIS_URL))
         tenant_id = f"tenant-byok-{uuid.uuid4().hex[:8]}"
         secret_api_key = "sk-live-secret-test-key-12345678"
 
@@ -207,7 +214,7 @@ class TestRedisIntegrationAuthorities:
             api_key=secret_api_key,
         )
         assert entry["status"] == "configured"
-        assert entry["masked_key"].startswith("sk-")
+        assert entry["masked_key"] == "********"
 
         # Decrypt key
         decrypted = await byok.get_decrypted_key(tenant_id=tenant_id, provider="openai")
@@ -226,10 +233,10 @@ class TestRedisIntegrationAuthorities:
 
         # Key revocation
         await byok.revoke_key(tenant_id=tenant_id, provider="openai")
-        revoked_decrypted = await byok.get_decrypted_key(
-            tenant_id=tenant_id, provider="openai"
-        )
-        assert revoked_decrypted is None
+        with pytest.raises(BYOKError, match="BYOK_REVOKED"):
+            await byok.get_decrypted_key(tenant_id=tenant_id, provider="openai")
+        await byok.delete_key(tenant_id, "openai")
+        await byok.store.client.aclose()
 
     async def test_semantic_cache_exact_tier_redis(
         self,

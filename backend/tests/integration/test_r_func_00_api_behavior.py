@@ -60,7 +60,9 @@ def create_token(
         "iat": now,
         "exp": now + expires_in,
         "roles": roles or ["admin"],
-        "permissions": permissions or ["*"],
+        "permissions": permissions
+        if permissions is not None
+        else ["*", "byok:read", "byok:write"],
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
@@ -356,9 +358,21 @@ async def test_rag_pipeline_endpoints(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_byok_lifecycle_endpoints(async_client: AsyncClient) -> None:
+async def test_byok_lifecycle_endpoints(
+    async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify store (201), list (200), candidate validate, stored validate, rotate, revoke, delete."""
     headers = auth_headers(tenant_id="tenant-byok-test")
+    import httpx
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200)), **kwargs
+        ),
+    )
 
     # 1. Validate candidate key (without storing)
     r_cand = await async_client.post(
@@ -441,7 +455,7 @@ async def test_byok_lifecycle_endpoints(async_client: AsyncClient) -> None:
     r_bad_del = await async_client.delete(
         "/api/v1/byok/keys/invalid-llm", headers=headers
     )
-    assert r_bad_del.status_code == 404
+    assert r_bad_del.status_code == 400
 
 
 # ==============================================================================

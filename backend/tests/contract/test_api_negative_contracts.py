@@ -51,7 +51,9 @@ def create_token(
         "iat": now,
         "exp": now + expires_in,
         "roles": roles or ["admin"],
-        "permissions": permissions or ["*"],
+        "permissions": permissions
+        if permissions is not None
+        else ["*", "byok:read", "byok:write"],
     }
     return jwt.encode(payload, key, algorithm="HS256")
 
@@ -87,7 +89,7 @@ async def test_negative_400_bad_request_unsupported_byok_provider(
         json={"provider": "invalid-nonexistent-cloud", "api_key": "sk-test-12345"},
     )
     assert response.status_code == 400
-    assert "Unsupported provider" in response.json()["detail"]
+    assert response.json()["detail"] == "BYOK_UNSUPPORTED_PROVIDER"
 
 
 @pytest.mark.asyncio
@@ -398,7 +400,7 @@ async def test_negative_404_not_found_nonexistent_byok_provider_key(
     headers = auth_headers(tenant_id="tenant-no-keys-stored")
     response = await async_client.delete("/api/v1/byok/keys/deepseek", headers=headers)
     assert response.status_code == 404
-    assert "No key found" in response.json()["detail"]
+    assert response.json()["detail"] == "BYOK_NOT_CONFIGURED"
 
 
 # ==============================================================================

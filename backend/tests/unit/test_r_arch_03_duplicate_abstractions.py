@@ -73,7 +73,6 @@ _REDIS_HELPER_MODULES = (
     "services/resume_bridge.py",
     "core/rate_limiter.py",
     "finops/budget.py",
-    "core/byok.py",
     "optimizer/semantic_cache.py",
     "rag/tasks.py",
     "services/ai_gateway.py",
@@ -93,6 +92,7 @@ def test_redis_client_construction_has_single_authority() -> None:
     sources = _app_sources()
     factory_src = sources["core/redis_client.py"]
     assert "acquire_redis_client" in factory_src
+    assert "create_redis_client(" in sources["core/byok_storage.py"]
 
     for rel in _REDIS_HELPER_MODULES:
         src = sources[rel]
