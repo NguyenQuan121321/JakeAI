@@ -369,12 +369,11 @@ async def test_tenant_isolation_byok_keys_crud_and_masking() -> None:
         )
         assert b_val.status_code == 404
 
-        # 3. Tenant B lists keys -> Tenant A's key is not configured for Tenant B
+        # 3. Tenant B lists keys -> no visible records or foreign-slot existence.
         b_list = await client.get("/api/v1/byok/keys", headers=headers_b)
         assert b_list.status_code == 200
-        keys_b = {k["provider"]: k for k in b_list.json()["keys"]}
-        assert keys_b["openai"]["configured"] is False
-        assert keys_b["openai"]["masked_key"] is None
+        assert b_list.json()["keys"] == []
+        assert secret_key_val not in b_list.text
 
         # 4. Tenant B attempts to rotate Tenant A's key -> 400 or 404 (no existing key)
         b_rotate = await client.post(

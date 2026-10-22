@@ -128,6 +128,30 @@ def test_pdf_parser_text_and_pages() -> None:
     assert "pages" in parsed.metadata
 
 
+def test_pdf_image_ingestion_uses_compatible_pypdf_and_pillow() -> None:
+    """Exercise actual JPEG/PNG codecs and an image-bearing PDF without OCR/model calls."""
+    import pypdf
+    from PIL import Image
+
+    original = Image.new("RGB", (8, 6), (17, 43, 79))
+    for codec in ["PNG", "JPEG"]:
+        data = io.BytesIO()
+        original.save(data, format=codec)
+        with Image.open(io.BytesIO(data.getvalue())) as decoded:
+            decoded.load()
+            assert decoded.size == (8, 6)
+            assert decoded.mode == "RGB"
+    document = io.BytesIO()
+    original.save(document, format="PDF")
+    reader = pypdf.PdfReader(io.BytesIO(document.getvalue()))
+    assert len(reader.pages) == 1
+    assert reader.pages[0].images[0].image.size == (8, 6)
+    parsed = PDFParser().parse_bytes(
+        document.getvalue(), filename="synthetic-image.pdf"
+    )
+    assert parsed.metadata["total_pages"] == 1
+
+
 def test_get_parser_resolution_and_rejection() -> None:
     """Verify get_parser resolves valid types and rejects unsupported formats."""
     # Valid extensions
@@ -155,12 +179,28 @@ def test_get_parser_resolution_and_rejection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_file_bytes_markdown_and_pdf() -> None:
+async def test_ingest_file_bytes_markdown_and_pdf(monkeypatch, tmp_path) -> None:
     """Verify DocumentIngestionPipeline.ingest_file_bytes parses markdown and pdf bytes."""
-    from app.rag.ingestion import default_ingestion_pipeline
+    from app.rag.bm25 import BM25Retriever
+    from app.rag.embedding import TestOnlyFakeEmbeddingProvider
+    from app.rag.ingestion import DocumentIngestionPipeline
+    from app.rag.retriever import HybridRetriever
+    from app.rag.vector_store import QdrantVectorStore
+
+    # Parsing/indexing has its own fixture; it cannot depend on a model cached
+    # by another test or on the global production embedding singleton.
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    store = QdrantVectorStore(
+        embedding_provider=TestOnlyFakeEmbeddingProvider(), url="http://127.0.0.1:1"
+    )
+    index_path = tmp_path / "parser-index.json"
+    sparse = BM25Retriever(storage_path=index_path)
+    pipeline = DocumentIngestionPipeline(
+        retriever=HybridRetriever(vector_store=store, bm25=sparse)
+    )
 
     md_data = b"# Section Header\n\nSome important technical documentation content."
-    res = await default_ingestion_pipeline.ingest_file_bytes(
+    res = await pipeline.ingest_file_bytes(
         data=md_data,
         filename="guide.md",
         tenant_id="tenant-file-bytes",
@@ -168,3 +208,6 @@ async def test_ingest_file_bytes_markdown_and_pdf() -> None:
     assert res.status == "success"
     assert res.indexed_chunks >= 1
     assert res.tenant_id == "tenant-file-bytes"
+    assert index_path.is_file()
+    restored = BM25Retriever(storage_path=index_path)
+    assert restored.search("important", "tenant-file-bytes")[0].source == "guide.md"

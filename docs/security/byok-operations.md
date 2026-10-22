@@ -67,6 +67,14 @@ is compromised, incident handling/re-enrollment replaces the ordinary procedure;
 rollback must not reactivate it or remove retirement safeguards. An older valid
 record replay at the same slot is outside this envelope's freshness protection.
 
+Metadata listing is owner scoped for ordinary authenticated callers: only their
+own stored records are returned. Foreign and nonexistent slots are both omitted;
+an omitted slot is not a statement that no credential exists. The console labels
+those slots "Not Visible". An explicitly permitted delegated tenant administrator
+can see the full tenant inventory. Direct foreign-record mutations remain denied.
+Storage and decryption failures still return truthful errors rather than being
+represented as missing or unconfigured credentials.
+
 Public failures distinguish `BYOK_NOT_CONFIGURED` (404), owner/permission denial
 (403), conflict/corruption/legacy/version/revocation (409), and unavailable
 storage/material or retired/unknown masters (503). Provider validation only

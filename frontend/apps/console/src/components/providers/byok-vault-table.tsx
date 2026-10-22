@@ -231,7 +231,7 @@ export function ByokVaultTable() {
                         </span>
                       ) : (
                         <span className="text-xs text-muted-foreground italic">
-                          No key configured
+                          {item ? "No key configured" : "No key visible to you"}
                         </span>
                       )}
                     </td>
@@ -242,7 +242,7 @@ export function ByokVaultTable() {
                       ) : isConfigured ? (
                         <StatusIndicator status="healthy" customLabel="Active" variant="badge" />
                       ) : (
-                        <StatusIndicator status="idle" customLabel="Not Configured" variant="badge" />
+                        <StatusIndicator status="idle" customLabel={item ? "Not Configured" : "Not Visible"} variant="badge" />
                       )}
                     </td>
 

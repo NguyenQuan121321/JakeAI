@@ -18,8 +18,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+COPY vendor/ ./vendor/
 
-RUN pip install --prefix=/install --no-warn-script-location -r requirements.txt
+RUN python vendor/verify_fastembed.py \
+    && pip install --prefix=/install --no-warn-script-location -r requirements.txt
 
 # ==============================================================================
 # Stage 2: Production Runtime

@@ -6,11 +6,13 @@ Requires an existing Docker engine; never installs infrastructure.
 """
 
 import argparse
+import ast
 import base64
 import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import subprocess
 import tempfile
@@ -45,7 +47,77 @@ def run(command, *, env=None, timeout=120, required=True):
     return result
 
 
-def mint(env, *, tenant="runtime", perms=None, user="owner"):
+def suite_diagnostics(result):
+    """Classify image test failures without echoing injected values or tracebacks."""
+    captured = result.stdout + result.stderr
+    groups = (
+        "tests/security/test_byok_rotation.py",
+        "tests/security/test_byok_owner_listing.py",
+        "tests/security/test_provider_credential_sources.py",
+        "tests/unit/test_fastembed_pillow_compat.py",
+        "tests/unit/test_rag_parsers.py",
+    )
+    failed_tests = []
+    for group in groups:
+        tree = ast.parse((ROOT / "backend" / group).read_text())
+        for node in ast.walk(tree):
+            if isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ) and node.name.startswith("test_"):
+                identity = group + "::" + node.name
+                if "FAILED " + identity in captured or "ERROR " + identity in captured:
+                    failed_tests.append(identity)
+    return {
+        "exit_code": result.returncode,
+        "counts": {
+            status: int(count)
+            for count, status in re.findall(
+                r"\b(\d+) (passed|failed|errors?|skipped)\b", captured
+            )
+        },
+        "missing_native_libraries": [
+            library
+            for library in ("libstdc++.so.6", "libgomp.so.1")
+            if library + ": cannot open shared object file" in captured
+        ],
+        "failed_groups": [
+            name
+            for name in groups
+            if "FAILED " + name in captured or "ERROR " + name in captured
+        ],
+        "failed_tests": failed_tests,
+        "error_types": [
+            name
+            for name in (
+                "PermissionError",
+                "AssertionError",
+                "ImportError",
+                "RuntimeError",
+                "ValueError",
+                "TypeError",
+                "IndexError",
+                "KeyError",
+                "AttributeError",
+                "ModuleNotFoundError",
+                "OSError",
+                "ConnectionError",
+                "TimeoutError",
+            )
+            if re.search(r"(?:^|\n)E\s+" + name + r"(?::|\s|$)", captured)
+        ],
+        "source_locations": [
+            {"file": filename, "line": int(line)}
+            for filename, line in dict.fromkeys(
+                re.findall(
+                    r"(?:^|\n)((?:app|tests)/[a-zA-Z0-9_/]+\.py):(\d+):", captured
+                )
+            )
+            if (ROOT / "backend" / filename).is_file()
+        ],
+    }
+
+
+def mint(env, *, tenant="runtime", perms=None, user="owner", roles=None):
     def encoded(value):
         return base64.urlsafe_b64encode(
             json.dumps(value, separators=(",", ":")).encode()
@@ -62,6 +134,7 @@ def mint(env, *, tenant="runtime", perms=None, user="owner"):
             "iat": now,
             "exp": now + 600,
             "perms": perms if perms is not None else ["byok:read", "byok:write"],
+            "roles": roles or [],
         }
     )
     signed = header + b"." + body
@@ -257,18 +330,32 @@ def rehearse(image, output):
                     "-m",
                     "pytest",
                     "tests/security/test_byok_rotation.py",
+                    "tests/security/test_byok_owner_listing.py",
+                    "tests/security/test_provider_credential_sources.py",
+                    "tests/unit/test_fastembed_pillow_compat.py",
+                    "tests/unit/test_rag_parsers.py",
                     "-q",
-                    "--tb=no",
+                    "--tb=short",
                     "-o",
                     "addopts=",
                 ],
                 env=testenv,
+                required=False,
             )
+            if storage_tests.returncode:
+                print(
+                    "J03 image suite failure: "
+                    + json.dumps(suite_diagnostics(storage_tests)),
+                    flush=True,
+                )
+                raise RuntimeError("Image regression suite failed")
             assert (
-                "19 passed" in storage_tests.stdout
+                "84 passed" in storage_tests.stdout
                 and "skipped" not in storage_tests.stdout
             )
-            report["storage_tests"] = "19 passed; memory and actual Redis; zero skips"
+            report["storage_tests"] = (
+                "84 passed; provider HTTP, owner listing, Pillow/PDF, memory and actual Redis; zero skips"
+            )
             report["checks"].append(
                 "live Redis rotation/concurrency/CAS/fault/recovery suite"
             )
@@ -341,8 +428,39 @@ def rehearse(image, output):
                 base, "/api/v1/byok/keys/openai/rotate", token, {"new_api_key": canary}
             )
             assert code == 200 and body["masked_key"] == "********"
-            for denied in [mint(env, perms=[]), mint(env, user="member")]:
-                assert http(base, "/api/v1/byok/keys", denied)[0] == 403
+            assert http(base, "/api/v1/byok/keys", mint(env, perms=[]))[0] == 403
+            assert (
+                http(base, "/api/v1/byok/keys", mint(env, user="member"))[1]["keys"]
+                == []
+            )
+            second_owner = mint(env, user="second-owner")
+            assert (
+                http(
+                    base,
+                    "/api/v1/byok/keys",
+                    second_owner,
+                    {"provider": "gemini", "api_key": canary},
+                )[0]
+                == 201
+            )
+            for identity, expected in [(token, "openai"), (second_owner, "gemini")]:
+                status_code, listed = http(base, "/api/v1/byok/keys", identity)
+                assert status_code == 200
+                assert [row["provider"] for row in listed["keys"]] == [expected]
+                assert listed["keys"][0]["masked_key"] == "********"
+            delegate = mint(env, user="delegate", roles=["tenant_admin"])
+            assert {
+                row["provider"]
+                for row in http(base, "/api/v1/byok/keys", delegate)[1]["keys"]
+                if row["configured"]
+            } == {"openai", "gemini"}
+            assert (
+                http(base, "/api/v1/byok/keys/gemini", token, method="DELETE")[0] == 403
+            )
+            assert (
+                http(base, "/api/v1/byok/keys/gemini", second_owner, method="DELETE")[0]
+                == 200
+            )
             code, body = http(base, "/api/v1/byok/keys", mint(env, tenant="other"))
             assert code == 200 and not any(item["configured"] for item in body["keys"])
             # The production API deliberately exits if its vault is unavailable

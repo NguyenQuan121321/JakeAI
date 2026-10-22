@@ -40,8 +40,10 @@ jobs:
 
       - name: Install Release Dependencies
         run: |
+          python backend/vendor/verify_fastembed.py
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          python backend/vendor/verify_fastembed.py --check-installed
 
       - name: Verify API Contract & Zero Schema Drift Gate
         run: |

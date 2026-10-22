@@ -233,7 +233,17 @@ KNOWN_DEPENDENCIES: dict[str, dict[str, Any]] = {
         ],
         "critical_test_paths": [
             "tests/unit/test_rag_embedding_and_points.py",
+            "tests/unit/test_fastembed_pillow_compat.py",
             "tests/integration/test_semantic_cache_real.py",
+        ],
+    },
+    "pillow": {
+        "category": DependencyCategory.QDRANT_CLIENT,
+        "is_direct": True,
+        "affected_subsystems": ["Image/PDF Ingestion", "FastEmbed Image Preprocessing"],
+        "critical_test_paths": [
+            "tests/unit/test_fastembed_pillow_compat.py",
+            "tests/unit/test_rag_parsers.py",
         ],
     },
     "pypdf": {
@@ -437,7 +447,7 @@ def parse_requirements_file(file_path: Path) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         # Match e.g. fastapi==0.141.1 or uvicorn[standard]==0.52.4
-        match = re.match(r"^([a-zA-Z0-9_\-\[\]]+)\s*==\s*([a-zA-Z0-9\.\-]+)", line)
+        match = re.match(r"^([a-zA-Z0-9_\-\[\]]+)\s*==\s*([a-zA-Z0-9.+\-]+)", line)
         if match:
             raw_pkg, version = match.groups()
             norm = normalize_package_name(raw_pkg)

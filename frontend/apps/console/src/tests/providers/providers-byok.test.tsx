@@ -64,6 +64,21 @@ describe("FE-05 Providers, Models & BYOK Console Suite", () => {
     vi.restoreAllMocks();
   });
 
+  it("renders omitted owner-scoped slots without claiming they are unconfigured", async () => {
+    const ownKeys = () => HttpResponse.json({
+      tenant_id: "tenant_jakeai_core",
+      keys: [{ provider: "openai", masked_key: "********", configured: true, status: "active" }],
+    });
+    server.use(
+      http.get("*/api/v1/byok/keys", ownKeys),
+      http.get("/api/v1/byok/keys", ownKeys)
+    );
+    renderWithProviders(<ByokVaultTable />);
+    await waitFor(() => expect(screen.getByText("********")).toBeInTheDocument());
+    expect(screen.getAllByText("No key visible to you").length).toBeGreaterThan(0);
+    expect(screen.queryByText("No key configured")).not.toBeInTheDocument();
+  });
+
   // Criterion 1: Provider Unavailable / Health Degradation
   it("displays Unavailable status badge when provider reports health degradation or 503", async () => {
     const mockModels = () =>

@@ -75,6 +75,10 @@ class TestDependencyCategories:
                 and len(meta["critical_test_paths"]) > 0
             )
 
+    def test_requirements_preserve_local_distribution_identity(self) -> None:
+        reqs = parse_requirements_file(BACKEND_DIR / "requirements.txt")
+        assert reqs["fastembed"] == "0.8.0+jakeai.1"
+
     def test_starlette_transitive_classification(self) -> None:
         """Verify starlette is classified under STARLETTE category and marked as transitive."""
         assert resolve_category("starlette") == DependencyCategory.STARLETTE

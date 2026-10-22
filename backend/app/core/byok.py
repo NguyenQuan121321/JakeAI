@@ -454,9 +454,12 @@ class BYOKManager:
         delegated_admin: bool = False,
     ) -> list[dict[str, Any]]:
         results = []
+        owner_scoped = actor_id is not None and not delegated_admin
         for provider in sorted(SUPPORTED_PROVIDERS):
             raw = await self._get_raw_val(tenant_id, provider)
             if raw is None:
+                if owner_scoped:
+                    continue
                 results.append(
                     {
                         "provider": provider,
@@ -467,6 +470,8 @@ class BYOKManager:
                 )
                 continue
             record, _ = self._open(raw, tenant_id, provider)
+            if owner_scoped and record["owner_id"] != actor_id:
+                continue
             self._authorize(record, actor_id, delegated_admin)
             results.append(
                 {
