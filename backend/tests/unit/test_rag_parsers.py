@@ -179,12 +179,23 @@ def test_get_parser_resolution_and_rejection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_file_bytes_markdown_and_pdf() -> None:
+async def test_ingest_file_bytes_markdown_and_pdf(monkeypatch) -> None:
     """Verify DocumentIngestionPipeline.ingest_file_bytes parses markdown and pdf bytes."""
-    from app.rag.ingestion import default_ingestion_pipeline
+    from app.rag.embedding import TestOnlyFakeEmbeddingProvider
+    from app.rag.ingestion import DocumentIngestionPipeline
+    from app.rag.retriever import HybridRetriever
+    from app.rag.vector_store import QdrantVectorStore
+
+    # Parsing/indexing has its own fixture; it cannot depend on a model cached
+    # by another test or on the global production embedding singleton.
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    store = QdrantVectorStore(
+        embedding_provider=TestOnlyFakeEmbeddingProvider(), url="http://127.0.0.1:1"
+    )
+    pipeline = DocumentIngestionPipeline(retriever=HybridRetriever(vector_store=store))
 
     md_data = b"# Section Header\n\nSome important technical documentation content."
-    res = await default_ingestion_pipeline.ingest_file_bytes(
+    res = await pipeline.ingest_file_bytes(
         data=md_data,
         filename="guide.md",
         tenant_id="tenant-file-bytes",
