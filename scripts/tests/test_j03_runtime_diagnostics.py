@@ -29,6 +29,7 @@ class RuntimeDiagnosticTests(unittest.TestCase):
                 "exit_code": 2,
                 "counts": {"error": 1},
                 "missing_native_libraries": ["libstdc++.so.6"],
+                "failed_groups": [],
             },
         )
 
@@ -36,7 +37,8 @@ class RuntimeDiagnosticTests(unittest.TestCase):
         result = subprocess.CompletedProcess(
             [],
             1,
-            stdout="1 failed, 83 passed\nplaintext synthetic credential",
+            stdout="1 failed, 83 passed\nplaintext synthetic credential\n"
+            "FAILED tests/unit/test_rag_parsers.py::test_sensitive_canary",
             stderr="unknown-library.so: cannot open shared object file",
         )
         safe = runtime.suite_diagnostics(result)
@@ -46,6 +48,7 @@ class RuntimeDiagnosticTests(unittest.TestCase):
                 "exit_code": 1,
                 "counts": {"failed": 1, "passed": 83},
                 "missing_native_libraries": [],
+                "failed_groups": ["tests/unit/test_rag_parsers.py"],
             },
         )
         self.assertNotIn("credential", json.dumps(safe))

@@ -62,6 +62,17 @@ def suite_diagnostics(result):
             for library in ("libstdc++.so.6", "libgomp.so.1")
             if library + ": cannot open shared object file" in captured
         ],
+        "failed_groups": [
+            name
+            for name in (
+                "tests/security/test_byok_rotation.py",
+                "tests/security/test_byok_owner_listing.py",
+                "tests/security/test_provider_credential_sources.py",
+                "tests/unit/test_fastembed_pillow_compat.py",
+                "tests/unit/test_rag_parsers.py",
+            )
+            if "FAILED " + name in captured or "ERROR " + name in captured
+        ],
     }
 
 
