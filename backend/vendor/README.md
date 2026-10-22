@@ -24,7 +24,8 @@ pip-audit -r backend/requirements.txt
 ```
 
 The first command deterministically reproduces the stored wheel using an
-uncompressed ZIP with fixed timestamps. The mandatory second gate retrieves
+uncompressed ZIP with fixed timestamps and creator-system metadata on all hosts.
+The mandatory second gate retrieves
 the pinned upstream release through PyPI, checks its active security advisories,
 reconstructs the entire compatibility wheel, verifies every byte and verifies
 the installed runtime modules/data. Network, inventory, hash, source/license or

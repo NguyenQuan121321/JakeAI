@@ -6,6 +6,7 @@ import io
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location(
     "fastembed_compat",
@@ -52,6 +53,19 @@ class CompatibilityGateTests(unittest.TestCase):
     def test_tampered_upstream_rejected(self):
         with self.assertRaisesRegex(ValueError, "Upstream archive hash"):
             compat.verify_wheel(self.upstream + b"changed", self.patched, self.manifest)
+
+    def test_reconstruction_is_identical_on_windows_and_unix_hosts(self):
+        original = zipfile.ZipInfo
+        for system in (0, 3):
+            with self.subTest(zip_creator_system=system):
+
+                class HostZipInfo(original):
+                    def __init__(self, *args, _system=system, **kwargs):
+                        super().__init__(*args, **kwargs)
+                        self.create_system = _system
+
+                with patch.object(zipfile, "ZipInfo", HostZipInfo):
+                    self.assertEqual(compat.build_wheel(self.upstream), self.patched)
 
     def test_rehashed_unauthorized_code_change_still_rejected(self):
         stream = io.BytesIO(self.patched)

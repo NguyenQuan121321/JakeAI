@@ -73,6 +73,8 @@ def build_wheel(upstream: bytes) -> bytes:
     with zipfile.ZipFile(result, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, data in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            # Preserve the released archive's origin field on every build host.
+            info.create_system = 0
             info.external_attr = 0o100644 << 16
             archive.writestr(info, data)
     return result.getvalue()
