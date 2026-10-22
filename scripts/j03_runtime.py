@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import subprocess
 import tempfile
@@ -43,6 +44,25 @@ def run(command, *, env=None, timeout=120, required=True):
         # Dependency output can contain injected values. Persist only a fixed diagnosis.
         raise RuntimeError(f"Command failed: {command[0]} (exit {result.returncode})")
     return result
+
+
+def suite_diagnostics(result):
+    """Classify image test failures without echoing injected values or tracebacks."""
+    captured = result.stdout + result.stderr
+    return {
+        "exit_code": result.returncode,
+        "counts": {
+            status: int(count)
+            for count, status in re.findall(
+                r"\b(\d+) (passed|failed|errors?|skipped)\b", captured
+            )
+        },
+        "missing_native_libraries": [
+            library
+            for library in ("libstdc++.so.6", "libgomp.so.1")
+            if library + ": cannot open shared object file" in captured
+        ],
+    }
 
 
 def mint(env, *, tenant="runtime", perms=None, user="owner", roles=None):
@@ -263,12 +283,20 @@ def rehearse(image, output):
                     "tests/unit/test_fastembed_pillow_compat.py",
                     "tests/unit/test_rag_parsers.py",
                     "-q",
-                    "--tb=no",
+                    "--tb=short",
                     "-o",
                     "addopts=",
                 ],
                 env=testenv,
+                required=False,
             )
+            if storage_tests.returncode:
+                print(
+                    "J03 image suite failure: "
+                    + json.dumps(suite_diagnostics(storage_tests)),
+                    flush=True,
+                )
+                raise RuntimeError("Image regression suite failed")
             assert (
                 "84 passed" in storage_tests.stdout
                 and "skipped" not in storage_tests.stdout
