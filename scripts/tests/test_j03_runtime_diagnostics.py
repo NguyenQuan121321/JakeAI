@@ -30,6 +30,9 @@ class RuntimeDiagnosticTests(unittest.TestCase):
                 "counts": {"error": 1},
                 "missing_native_libraries": ["libstdc++.so.6"],
                 "failed_groups": [],
+                "failed_tests": [],
+                "error_types": ["ImportError"],
+                "source_locations": [],
             },
         )
 
@@ -38,7 +41,11 @@ class RuntimeDiagnosticTests(unittest.TestCase):
             [],
             1,
             stdout="1 failed, 83 passed\nplaintext synthetic credential\n"
-            "FAILED tests/unit/test_rag_parsers.py::test_sensitive_canary",
+            "FAILED tests/unit/test_rag_parsers.py::test_plain_text_parser\n"
+            "FAILED tests/unit/test_rag_parsers.py::test_sensitive_canary\n"
+            "app/rag/parsers.py:1: in parse_bytes\n"
+            "private/synthetic-secret.py:2: in secret\n"
+            "E PermissionError: synthetic-secret-must-not-escape",
             stderr="unknown-library.so: cannot open shared object file",
         )
         safe = runtime.suite_diagnostics(result)
@@ -49,6 +56,11 @@ class RuntimeDiagnosticTests(unittest.TestCase):
                 "counts": {"failed": 1, "passed": 83},
                 "missing_native_libraries": [],
                 "failed_groups": ["tests/unit/test_rag_parsers.py"],
+                "failed_tests": [
+                    "tests/unit/test_rag_parsers.py::test_plain_text_parser"
+                ],
+                "error_types": ["PermissionError"],
+                "source_locations": [{"file": "app/rag/parsers.py", "line": 1}],
             },
         )
         self.assertNotIn("credential", json.dumps(safe))

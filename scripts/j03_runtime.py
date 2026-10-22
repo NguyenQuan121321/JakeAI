@@ -6,6 +6,7 @@ Requires an existing Docker engine; never installs infrastructure.
 """
 
 import argparse
+import ast
 import base64
 import hashlib
 import hmac
@@ -49,6 +50,23 @@ def run(command, *, env=None, timeout=120, required=True):
 def suite_diagnostics(result):
     """Classify image test failures without echoing injected values or tracebacks."""
     captured = result.stdout + result.stderr
+    groups = (
+        "tests/security/test_byok_rotation.py",
+        "tests/security/test_byok_owner_listing.py",
+        "tests/security/test_provider_credential_sources.py",
+        "tests/unit/test_fastembed_pillow_compat.py",
+        "tests/unit/test_rag_parsers.py",
+    )
+    failed_tests = []
+    for group in groups:
+        tree = ast.parse((ROOT / "backend" / group).read_text())
+        for node in ast.walk(tree):
+            if isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ) and node.name.startswith("test_"):
+                identity = group + "::" + node.name
+                if "FAILED " + identity in captured or "ERROR " + identity in captured:
+                    failed_tests.append(identity)
     return {
         "exit_code": result.returncode,
         "counts": {
@@ -64,14 +82,37 @@ def suite_diagnostics(result):
         ],
         "failed_groups": [
             name
-            for name in (
-                "tests/security/test_byok_rotation.py",
-                "tests/security/test_byok_owner_listing.py",
-                "tests/security/test_provider_credential_sources.py",
-                "tests/unit/test_fastembed_pillow_compat.py",
-                "tests/unit/test_rag_parsers.py",
-            )
+            for name in groups
             if "FAILED " + name in captured or "ERROR " + name in captured
+        ],
+        "failed_tests": failed_tests,
+        "error_types": [
+            name
+            for name in (
+                "PermissionError",
+                "AssertionError",
+                "ImportError",
+                "RuntimeError",
+                "ValueError",
+                "TypeError",
+                "IndexError",
+                "KeyError",
+                "AttributeError",
+                "ModuleNotFoundError",
+                "OSError",
+                "ConnectionError",
+                "TimeoutError",
+            )
+            if re.search(r"(?:^|\n)E\s+" + name + r"(?::|\s|$)", captured)
+        ],
+        "source_locations": [
+            {"file": filename, "line": int(line)}
+            for filename, line in dict.fromkeys(
+                re.findall(
+                    r"(?:^|\n)((?:app|tests)/[a-zA-Z0-9_/]+\.py):(\d+):", captured
+                )
+            )
+            if (ROOT / "backend" / filename).is_file()
         ],
     }
 
