@@ -260,6 +260,8 @@ def rehearse(image, output):
                     "tests/security/test_byok_rotation.py",
                     "tests/security/test_byok_owner_listing.py",
                     "tests/security/test_provider_credential_sources.py",
+                    "tests/unit/test_fastembed_pillow_compat.py",
+                    "tests/unit/test_rag_parsers.py",
                     "-q",
                     "--tb=no",
                     "-o",
@@ -268,11 +270,11 @@ def rehearse(image, output):
                 env=testenv,
             )
             assert (
-                "69 passed" in storage_tests.stdout
+                "84 passed" in storage_tests.stdout
                 and "skipped" not in storage_tests.stdout
             )
             report["storage_tests"] = (
-                "69 passed; provider HTTP, owner listing, memory and actual Redis; zero skips"
+                "84 passed; provider HTTP, owner listing, Pillow/PDF, memory and actual Redis; zero skips"
             )
             report["checks"].append(
                 "live Redis rotation/concurrency/CAS/fault/recovery suite"

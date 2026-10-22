@@ -1,0 +1,17 @@
+{
+  "package": "fastembed",
+  "base_version": "0.8.0",
+  "patched_version": "0.8.0+jakeai.1",
+  "upstream_filename": "fastembed-0.8.0-py3-none-any.whl",
+  "upstream_url": "https://files.pythonhosted.org/packages/2a/e8/26b7d78bb8972498c467ca34cb12ee2e60d26ba5eae6d8443189a1af37a5/fastembed-0.8.0-py3-none-any.whl",
+  "upstream_sha256": "40bee672657574a1009e35ec50030a55f2b426842cb011845379817641bbbbd0",
+  "patched_sha256": "6dc385ec3e254d3ac3bc1dd049ef554fb7c3701f6c104b2398639558ccd9d7af",
+  "license": "Apache-2.0",
+  "changes": [
+    "METADATA: local release version",
+    "METADATA: Python>=3.11 and Pillow>=13,<14",
+    "dist-info directory and regenerated RECORD",
+    "METADATA: prominent downstream modification notice"
+  ],
+  "runtime_source_changes": []
+}

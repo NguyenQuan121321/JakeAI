@@ -64,6 +64,7 @@ jobs:
 
       - name: Install Lint & Security Dependencies
         run: |
+          python backend/vendor/verify_fastembed.py
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
@@ -77,6 +78,9 @@ jobs:
       - name: Ruff Formatter Check
         run: |
           ruff format --check backend/
+
+      - name: FastEmbed Compatibility Provenance & Upstream Advisory Gate
+        run: python backend/vendor/verify_fastembed.py --check-installed
 
       - name: Pip-Audit Dependency Vulnerability Scan
         run: |

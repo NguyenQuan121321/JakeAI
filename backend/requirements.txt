@@ -17,7 +17,10 @@ cryptography==50.0.1
 # State, Caching & Vector Store
 redis[hiredis]==8.1.0
 qdrant-client==1.19.0
-fastembed==0.8.0
+# Versioned metadata-only compatibility release; provenance/advisory gate is mandatory.
+--find-links ./vendor
+fastembed==0.8.0+jakeai.1
+Pillow==13.0.0
 pypdf==6.21.1
 
 # HTTP Client
