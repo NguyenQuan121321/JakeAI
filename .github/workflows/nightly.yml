@@ -61,6 +61,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          python backend/vendor/verify_fastembed.py
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
@@ -68,6 +69,9 @@ jobs:
         run: |
           ruff check backend/
           ruff format --check backend/
+
+      - name: FastEmbed Compatibility Provenance & Upstream Advisory Gate
+        run: python backend/vendor/verify_fastembed.py --check-installed
 
       - name: Pip-Audit Vulnerability Scan
         run: |

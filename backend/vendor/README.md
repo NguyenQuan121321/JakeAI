@@ -38,6 +38,10 @@ closes that gap using its proven exact upstream identity; it does not accept
 an unknown local package or replace the normal dependency audit. Both gates
 must pass. SBOM/license/image gates remain enabled and see the actual local
 distribution version and its retained license files.
+Scheduled security auditing repeats the installed-byte/upstream-advisory gate
+before pip-audit so later upstream advisories cannot escape nightly monitoring.
+Workflow regressions execute the checked-in guard commands against a controlled
+active-advisory response and require them to fail closed.
 
 The embedding model remains `BAAI/bge-small-en-v1.5`, dimension 384, version
 tag `v1.0`, with unchanged tokenizer, ONNX model, pooling and normalization.
