@@ -179,8 +179,9 @@ def test_get_parser_resolution_and_rejection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_file_bytes_markdown_and_pdf(monkeypatch) -> None:
+async def test_ingest_file_bytes_markdown_and_pdf(monkeypatch, tmp_path) -> None:
     """Verify DocumentIngestionPipeline.ingest_file_bytes parses markdown and pdf bytes."""
+    from app.rag.bm25 import BM25Retriever
     from app.rag.embedding import TestOnlyFakeEmbeddingProvider
     from app.rag.ingestion import DocumentIngestionPipeline
     from app.rag.retriever import HybridRetriever
@@ -192,7 +193,11 @@ async def test_ingest_file_bytes_markdown_and_pdf(monkeypatch) -> None:
     store = QdrantVectorStore(
         embedding_provider=TestOnlyFakeEmbeddingProvider(), url="http://127.0.0.1:1"
     )
-    pipeline = DocumentIngestionPipeline(retriever=HybridRetriever(vector_store=store))
+    index_path = tmp_path / "parser-index.json"
+    sparse = BM25Retriever(storage_path=index_path)
+    pipeline = DocumentIngestionPipeline(
+        retriever=HybridRetriever(vector_store=store, bm25=sparse)
+    )
 
     md_data = b"# Section Header\n\nSome important technical documentation content."
     res = await pipeline.ingest_file_bytes(
@@ -203,3 +208,6 @@ async def test_ingest_file_bytes_markdown_and_pdf(monkeypatch) -> None:
     assert res.status == "success"
     assert res.indexed_chunks >= 1
     assert res.tenant_id == "tenant-file-bytes"
+    assert index_path.is_file()
+    restored = BM25Retriever(storage_path=index_path)
+    assert restored.search("important", "tenant-file-bytes")[0].source == "guide.md"
