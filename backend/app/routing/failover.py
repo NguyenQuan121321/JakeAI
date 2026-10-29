@@ -185,6 +185,11 @@ class FailoverManager:
                         provider_retries + 1,
                         total_attempts,
                     )
+                    from app.core.identity_state import authorize_bound_effect
+
+                    await authorize_bound_effect(
+                        current_request.tenant_id, "chat:write"
+                    )
                     return await adapter.complete(current_request, client=client)
                 except ProviderError as p_err:
                     last_error = p_err
@@ -269,6 +274,9 @@ class FailoverManager:
             current_request = request.model_copy(
                 update={"model": decision.selected_model, "api_key": target_api_key}
             )
+            from app.core.identity_state import authorize_bound_effect
+
+            await authorize_bound_effect(current_request.tenant_id, "chat:write")
             async for chunk in adapter.stream(current_request, client=client):
                 yield chunk
 

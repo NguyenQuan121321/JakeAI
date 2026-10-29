@@ -73,6 +73,9 @@ async def configure_tenant_budget(
     context: TenantContext = Depends(get_current_tenant),
 ) -> Any:
     """Configure tenant token quota limit, monthly dollar budget ceiling, and warning threshold."""
+    from app.core.identity_state import authorize_bound_effect
+
+    await authorize_bound_effect(context.tenant_id, "finops:write")
     svc = get_finops_service()
     return await svc.set_budget(
         tenant_id=context.tenant_id,

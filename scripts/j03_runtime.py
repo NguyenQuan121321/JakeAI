@@ -124,17 +124,22 @@ def mint(env, *, tenant="runtime", perms=None, user="owner", roles=None):
         ).rstrip(b"=")
 
     now = int(time.time())
-    header = encoded({"alg": "HS256", "typ": "JWT"})
+    uid = int(hashlib.sha256(user.encode()).hexdigest()[:12], 16) + 1
+    header = encoded({"alg": "HS256", "typ": "JWT", "kid": env["JWT_KEY_ID"]})
     body = encoded(
         {
-            "sub": user,
-            "uid": user,
+            "sub": str(uid),
+            "uid": uid,
+            "contract_ver": 1, "iss": "finnapigo",
+            "aud": ["finnapigo-api", "jakeai-service"],
+            "nbf": now, "sid": "session-" + str(uid), "jti": "token-" + str(uid),
+            "pwdver": 0, "auth_epoch": 0,
             "tid": tenant,
             "type": "access",
             "iat": now,
             "exp": now + 600,
             "perms": perms if perms is not None else ["byok:read", "byok:write"],
-            "roles": roles or [],
+            "role": roles[0] if roles else "user",
         }
     )
     signed = header + b"." + body
@@ -142,7 +147,7 @@ def mint(env, *, tenant="runtime", perms=None, user="owner", roles=None):
         signed
         + b"."
         + base64.urlsafe_b64encode(
-            hmac.digest(env["JWT_SECRET_KEY"].encode(), signed, "sha256")
+            hmac.digest(base64.b64decode(env["JWT_SECRET_KEY"]), signed, "sha256")
         ).rstrip(b"=")
     ).decode()
 
@@ -186,6 +191,11 @@ def rehearse(image, output):
         "AUDIT_HMAC_KEY",
     ]:
         env[name] = secrets.token_hex(32)
+    env["JWT_SECRET_KEY"] = base64.b64encode(secrets.token_bytes(32)).decode()
+    env.update(JWT_KEY_ID="j03-signing", IDENTITY_STATE_KEY_ID="j03-state",
+        IDENTITY_STATE_URL="https://j03-authority:8443/api/v1/identity/introspect",
+        IDENTITY_STATE_SECRET=base64.b64encode(secrets.token_bytes(32)).decode(),
+        IDENTITY_STATE_CA_FILE="/run/j03/ca.crt")
     old = base64.b64encode(secrets.token_bytes(32)).decode()
     current = base64.b64encode(secrets.token_bytes(32)).decode()
     env.update(
@@ -211,6 +221,8 @@ def rehearse(image, output):
         "BYOK_PREVIOUS_KEYS",
         "BYOK_RETIRED_KEY_IDS",
         "BYOK_RETIRED_KEY_HASHES",
+        "JWT_KEY_ID", "IDENTITY_STATE_URL", "IDENTITY_STATE_KEY_ID",
+        "IDENTITY_STATE_SECRET", "IDENTITY_STATE_CA_FILE",
     ]
     report = {
         "source_sha": env.get("GITHUB_SHA", "local-uncommitted"),
@@ -241,20 +253,39 @@ def rehearse(image, output):
     report["checks"].append("12 actual image startup missing/default negatives")
     project = "j03-synthetic-" + secrets.token_hex(5)
     with tempfile.TemporaryDirectory(prefix="j03-runtime-") as temporary:
-        override = Path(temporary) / "compose.json"
+        runtime = Path(temporary)
+        run(["openssl", "req", "-x509", "-newkey", "rsa:3072", "-nodes", "-sha256", "-days", "1",
+             "-subj", "/CN=j03-authority", "-keyout", str(runtime / "key.pem"), "-out", str(runtime / "cert.pem"),
+             "-addext", "subjectAltName=DNS:j03-authority", "-addext", "basicConstraints=critical,CA:TRUE",
+             "-addext", "keyUsage=critical,keyCertSign,digitalSignature,keyEncipherment"])
+        (runtime / "key.pem").chmod(0o644)
+        ca_mount = str(runtime / "cert.pem") + ":/run/j03/ca.crt:ro"
+        override = runtime / "compose.json"
         override.write_text(
             json.dumps(
                 {
                     "services": {
+                        "j03-authority": {
+                            "image": image, "restart": "no",
+                            "networks": ["jakeai-prod-network"],
+                            "environment": {**{k: env[k] for k in ["JWT_SECRET_KEY", "IDENTITY_STATE_KEY_ID", "IDENTITY_STATE_SECRET"]},
+                                            "J03_SYNTHETIC_AUTHORITY": "1"},
+                            "volumes": [str(ROOT / "scripts/j02_state_fixture.py") + ":/run/j03/state.py:ro",
+                                str(runtime / "cert.pem") + ":/run/j03/cert.pem:ro",
+                                str(runtime / "key.pem") + ":/run/j03/key.pem:ro"],
+                            "command": ["python", "-B", "/run/j03/state.py"],
+                        },
                         "jakeai-backend": {
                             "image": image,
                             "container_name": project + "-api",
                             "restart": "no",
                             "ports": ["127.0.0.1::8000"],
+                            "volumes": [ca_mount],
                         },
                         "jakeai-worker": {
                             "image": image,
                             "container_name": project + "-worker",
+                            "volumes": [ca_mount],
                             "restart": "no",
                         },
                         "redis": {
@@ -301,6 +332,7 @@ def rehearse(image, output):
                     "--no-deps",
                     "byok-redis",
                     "redis",
+                    "j03-authority",
                 ],
                 env=env,
             )

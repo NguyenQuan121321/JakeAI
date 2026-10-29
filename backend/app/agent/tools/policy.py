@@ -94,35 +94,16 @@ class ToolPolicyEngine:
         user_permissions: list[str] | None = None,
     ) -> ToolPolicyDecision:
         """Evaluate authorization and safety rules for a proposed tool execution."""
+        _ = user_roles  # Roles are descriptive, never grants.
         meta = tool.metadata
-        roles = user_roles or []
         perms = set(user_permissions or [])
 
-        # 1. Tenant Permission Verification
-        is_admin = "admin" in roles or "tenant_admin" in roles
-        if meta.permissions and not is_admin:
-            # Check if user roles inherently allow this tool
-            role_allowed = any(
-                meta.name in ROLE_TOOL_ALLOWLIST.get(r, set()) for r in roles
+        # Roles and aliases cannot materialize signed user grants.
+        missing = [p for p in meta.permissions if p not in perms]
+        if missing:
+            return ToolPolicyDecision(
+                allowed=False, reason=f"Forbidden: missing exact permissions: {missing}"
             )
-            if not role_allowed:
-                # Check direct or aliased permission matches
-                effective_perms = set(perms)
-                for p in perms:
-                    effective_perms.update(PERMISSION_ALIASES.get(p, set()))
-
-                missing = []
-                for required in meta.permissions:
-                    accepted_variants = PERMISSION_ALIASES.get(required, {required})
-                    if not (accepted_variants & effective_perms):
-                        missing.append(required)
-
-                if missing:
-                    return ToolPolicyDecision(
-                        allowed=False,
-                        requires_approval=False,
-                        reason=f"Forbidden: Tenant context lacks required permissions: {missing}",
-                    )
 
         # 2. Path Traversal and Argument Injection Safeguards
         def _extract_strings(obj: Any) -> list[str]:

@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import time
 from typing import Any
@@ -12,7 +13,7 @@ def create_test_jwt(
     tenant_id: str = "tenant-fin-corp",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
     secret_key: str | None = None,
     algorithm: str = "HS256",
     token_type: str = "access",
@@ -30,16 +31,26 @@ def create_test_jwt(
         permissions if permissions is not None else ["chat:read", "chat:write"]
     )
 
+    uid = (
+        int(sub)
+        if sub.isdecimal()
+        else int(hashlib.sha256(sub.encode()).hexdigest()[:12], 16) + 1
+    )
     payload: dict[str, Any] = {
-        "sub": sub,
-        "uid": sub,
-        "tenant_id": tenant_id,
+        "contract_ver": 1,
+        "iss": "finnapigo",
+        "aud": ["finnapigo-api", "jakeai-service"],
+        "sub": str(uid),
+        "uid": uid,
         "tid": tenant_id,
         "iat": now,
+        "nbf": now,
         "exp": now + expires_in,
-        "roles": effective_roles,
+        "sid": "synthetic-session-" + str(uid),
+        "jti": "synthetic-token-" + str(uid),
+        "pwdver": 0,
+        "auth_epoch": 0,
         "role": primary_role,
-        "permissions": effective_perms,
         "perms": effective_perms,
         "type": token_type,
     }
@@ -49,9 +60,11 @@ def create_test_jwt(
 
     jwt_headers = dict(headers or {})
     if "kid" not in jwt_headers and isinstance(key, str):
-        jwt_headers["kid"] = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+        jwt_headers["kid"] = settings.JWT_KEY_ID
 
-    return jwt.encode(payload, key, algorithm=algorithm, headers=jwt_headers)
+    return jwt.encode(
+        payload, base64.b64decode(key), algorithm=algorithm, headers=jwt_headers
+    )
 
 
 def generate_agent_jwt(
@@ -59,13 +72,15 @@ def generate_agent_jwt(
     tenant_id: str = "tenant-agent-alpha",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
     """Generate HS256 JWT context for Agent API tests."""
     return create_test_jwt(
         sub=sub,
         tenant_id=tenant_id,
         roles=roles or ["admin", "developer"],
-        permissions=permissions or ["agent:write", "agent:read"],
+        permissions=permissions
+        if permissions is not None
+        else ["agent:write", "agent:read", "agent:execute", "agent:approve"],
         expires_in=expires_in,
     )

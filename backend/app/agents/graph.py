@@ -14,7 +14,6 @@ from app.agents.supervisor import supervisor_node
 from app.agents.synthesizer import synthesizer_node
 from app.agents.verifier import verifier_node
 from app.core.context import TenantContext
-from app.core.security import exchange_obo_token
 
 
 def route_from_supervisor(state: AgentState) -> str:
@@ -145,7 +144,7 @@ async def stream_multi_agent_workflow(
         "permissions": context.permissions,
         "conversation_id": conversation_id,
         "correlation_id": context.correlation_id,
-        "obo_token": exchange_obo_token(context),
+        "obo_token": "",
         "model": model or "gemini-1.5-flash",
         "messages": [f"User query received: '{prompt}'"],
         "tool_calls": [],
@@ -159,7 +158,11 @@ async def stream_multi_agent_workflow(
     # Thread ids are namespaced per tenant: the checkpointer is process-global,
     # so a bare client-supplied conversation id would let one tenant's workflow
     # inherit another tenant's conversation state (retrieved chunks, verdicts).
-    config = {"configurable": {"thread_id": f"{context.tenant_id}:{conversation_id}"}}
+    config = {
+        "configurable": {
+            "thread_id": f"{context.tenant_id}:{context.user_id}:{conversation_id}"
+        }
+    }
     async for event in agent_graph.astream(initial_state, config=config):
         for node_name, node_state in event.items():
             yield {

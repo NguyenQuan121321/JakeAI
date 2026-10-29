@@ -48,6 +48,13 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Provision signing secret}
       - JWT_SECRET_PREVIOUS=${JWT_SECRET_PREVIOUS:-}
       - JWT_ALGORITHM=HS256
+      - JWT_KEY_ID=${JWT_KEY_ID:?Provision explicit Finn signing key ID}
+      - JWT_PREVIOUS_KEY_ID=${JWT_PREVIOUS_KEY_ID:-}
+      - JWT_PREVIOUS_LAST_ISSUED_AT=${JWT_PREVIOUS_LAST_ISSUED_AT:-}
+      - IDENTITY_STATE_URL=${IDENTITY_STATE_URL:?Provision verified HTTPS Finn introspection}
+      - IDENTITY_STATE_KEY_ID=${IDENTITY_STATE_KEY_ID:?Provision state service key ID}
+      - IDENTITY_STATE_SECRET=${IDENTITY_STATE_SECRET:?Provision independent state credential}
+      - IDENTITY_STATE_CA_FILE=${IDENTITY_STATE_CA_FILE:-}
       - FINNAPIGO_SERVICE_SECRET=${FINNAPIGO_SERVICE_SECRET:?Provision independent service secret}
       - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?Provision independent audit secret}
       - BYOK_MASTER_KEY=${BYOK_MASTER_KEY:?Provision base64 AES-256 master}
@@ -97,6 +104,13 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Provision signing secret}
       - JWT_SECRET_PREVIOUS=${JWT_SECRET_PREVIOUS:-}
       - JWT_ALGORITHM=HS256
+      - JWT_KEY_ID=${JWT_KEY_ID:?Provision explicit Finn signing key ID}
+      - JWT_PREVIOUS_KEY_ID=${JWT_PREVIOUS_KEY_ID:-}
+      - JWT_PREVIOUS_LAST_ISSUED_AT=${JWT_PREVIOUS_LAST_ISSUED_AT:-}
+      - IDENTITY_STATE_URL=${IDENTITY_STATE_URL:?Provision verified HTTPS Finn introspection}
+      - IDENTITY_STATE_KEY_ID=${IDENTITY_STATE_KEY_ID:?Provision state service key ID}
+      - IDENTITY_STATE_SECRET=${IDENTITY_STATE_SECRET:?Provision independent state credential}
+      - IDENTITY_STATE_CA_FILE=${IDENTITY_STATE_CA_FILE:-}
       - FINNAPIGO_SERVICE_SECRET=${FINNAPIGO_SERVICE_SECRET:?Provision independent service secret}
       - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?Provision independent audit secret}
       - BYOK_MASTER_KEY=${BYOK_MASTER_KEY:?Provision base64 AES-256 master}

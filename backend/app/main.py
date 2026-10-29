@@ -45,6 +45,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     if get_settings().ENVIRONMENT.lower() == "production":
         await get_byok_manager().check_storage()
+        # Settings validates trust at startup; the client owns its connection pool.
+        from types import SimpleNamespace
+
+        from app.core.identity_state import get_state_client
+
+        get_state_client(SimpleNamespace(app=_app))
     yield
     logger.info("JakeAI platform shutting down, releasing resources...")
     from app.optimizer.semantic_cache import get_semantic_cache_manager
@@ -63,6 +69,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
             manager.redis_client = None
     from app.core import byok
     from app.core.byok_storage import RedisStore
+
+    identity_client = getattr(_app.state, "identity_client", None)
+    if identity_client is not None:
+        await identity_client.close()
+        del _app.state.identity_client
 
     if byok._byok_manager is not None and isinstance(
         byok._byok_manager.store, RedisStore
@@ -324,8 +335,8 @@ def create_application() -> FastAPI:
             "scheme": "bearer",
             "bearerFormat": "JWT",
             "description": (
-                "FinnApiGo asymmetric RS256/HS256 JWT access token. "
-                "Must contain 'sub', 'tenant_id', and authorized roles/scopes."
+                "Finn v1 HS256 access credential with explicit configured kid, "
+                "verified tenant, exact permissions and authoritative live state."
             ),
         }
 
@@ -336,6 +347,9 @@ def create_application() -> FastAPI:
         return app.openapi_schema
 
     app.openapi = custom_openapi  # type: ignore[method-assign]
+    from app.core.route_policy import AuthorizationMiddleware
+
+    app.add_middleware(AuthorizationMiddleware)
     return app
 
 

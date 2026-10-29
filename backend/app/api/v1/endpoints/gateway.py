@@ -134,6 +134,9 @@ async def update_tenant_quota(
     context: TenantContext = Depends(get_current_tenant),
 ) -> Any:
     """Configure monthly token quota limit for a tenant."""
+    from app.core.identity_state import authorize_bound_effect
+
+    await authorize_bound_effect(context.tenant_id, "finops:write")
     quota_mgr = get_quota_manager()
     await quota_mgr.set_quota_limit(context.tenant_id, request.new_limit)
     return await quota_mgr.get_status(context.tenant_id)

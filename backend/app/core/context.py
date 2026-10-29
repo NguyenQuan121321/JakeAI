@@ -33,15 +33,11 @@ class TenantContext(BaseModel):
     )
 
     def has_permission(self, permission: str) -> bool:
-        """Check if tenant context has a specific permission or admin role."""
-        if "admin" in self.roles or "tenant_admin" in self.roles:
-            return True
+        """Only an exact explicit signed grant confers permission."""
         return permission in self.permissions
 
     def has_all_permissions(self, required_permissions: list[str]) -> bool:
         """Check if tenant context has all specified permissions."""
-        if "admin" in self.roles or "tenant_admin" in self.roles:
-            return True
         return all(p in self.permissions for p in required_permissions)
 
 
@@ -55,6 +51,8 @@ def get_current_tenant_context() -> TenantContext | None:
     return _tenant_context_ctx.get()
 
 
-def set_current_tenant_context(ctx: TenantContext) -> Token[TenantContext | None]:
+def set_current_tenant_context(
+    ctx: TenantContext | None,
+) -> Token[TenantContext | None]:
     """Bind a tenant context to the current async task context."""
     return _tenant_context_ctx.set(ctx)

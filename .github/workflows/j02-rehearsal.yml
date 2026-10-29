@@ -1,0 +1,74 @@
+name: J02 actual Finn and Jake identity rehearsal
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j02-rehearsal-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rehearsal:
+    name: J02 actual Finn/Jake TLS rotation, revocation and faults
+    if: >-
+      github.repository == 'NguyenQuan121321/JakeAI' &&
+      github.event.repository.private == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/j02-identity-authorization'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      J02_PROJECT: j02-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout tested merge without persistent credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read-only pinned public Finn source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NguyenQuan121321/FinnApiGo
+          ref: b79b0dbea09cbf1464baa4de9ab76573c8b6fd32
+          path: finn-source
+          persist-credentials: false
+      - name: Verify free public standard runner eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(gh api repos/NguyenQuan121321/JakeAI --jq '.visibility')" = public
+          echo 'USD0: public repository, standard ubuntu-24.04, no new artifact/cache/package uploads.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare owned synthetic secrets and verified TLS
+        run: python3 -B scripts/j02_rehearsal.py prepare
+      - name: Build actual pinned releases
+        run: |
+          set -euo pipefail
+          docker build -t "j02-finn:$J02_PROJECT" finn-source
+          docker build -t "j02-jake:$J02_PROJECT" backend
+      - name: Scan the exact Finn release artifact
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: j02-finn:${{ env.J02_PROJECT }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          cache: 'false'
+      - name: Scan the exact Jake release artifact
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: j02-jake:${{ env.J02_PROJECT }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          cache: 'false'
+      - name: Execute actual releases and real 930-second retirement
+        run: python3 -B scripts/j02_rehearsal.py run
+      - name: Always verify owned resource and private-file cleanup
+        if: ${{ always() }}
+        run: python3 -B scripts/j02_rehearsal.py cleanup

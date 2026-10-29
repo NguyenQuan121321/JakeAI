@@ -78,30 +78,10 @@ class ApprovalManager:
         user_id: str = "anonymous",
     ) -> ApprovalRequest:
         """Record human decision on an approval gate with tenant boundary check."""
-        req = self.get_request(approval_id, tenant_id)
-
-        if req.status != ApprovalStatus.PENDING:
-            raise ValueError(
-                f"Approval '{approval_id}' is already finalized as '{req.status}'."
-            )
-
-        now = time.time()
-        req.decided_at = now
-        req.decided_by = user_id
-        if decision.approved:
-            req.status = ApprovalStatus.APPROVED
-        else:
-            req.status = ApprovalStatus.REJECTED
-            req.rejection_reason = decision.reason or "Rejected by operator"
-
-        logger.info(
-            "Approval %s resolved as %s by user %s (tenant %s)",
-            approval_id,
-            req.status.value,
-            user_id,
-            tenant_id,
-        )
-        return req
+        # This RAM store cannot provide an atomic, durable authorization/consume
+        # boundary across workers. J07 must supply that adapter before effects.
+        _ = approval_id, decision, tenant_id, user_id
+        raise PermissionError("Durable bound approval authority is unavailable")
 
     def list_pending(
         self, tenant_id: str, run_id: str | None = None

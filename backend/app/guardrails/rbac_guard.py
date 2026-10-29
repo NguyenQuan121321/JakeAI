@@ -111,25 +111,11 @@ def check_tool_rbac_guardrail(
             reason=f"Unauthorized: Caller context has no assigned roles or permissions for tool '{tool_name}'.",
         )
 
-    # 4. Check if user holds any authorized role
-    authorized_roles = set(requirements.get("roles", []))
-    if any(r in authorized_roles for r in roles):
-        return GuardrailDecision(allowed=True)
-
-    # 5. Check if user holds required granular permissions (with alias support)
     required_permissions = set(requirements.get("permissions", []))
-    effective_permissions = set(permissions)
-    for p in permissions:
-        effective_permissions.update(_PERMISSION_ALIASES.get(p, set()))
-
-    if any(p in required_permissions for p in effective_permissions):
+    if required_permissions and required_permissions <= set(permissions):
         return GuardrailDecision(allowed=True)
-
     return GuardrailDecision(
         allowed=False,
         violation_type="RBAC_ACCESS_DENIED",
-        reason=(
-            f"Unauthorized: Caller lacks required roles {requirements['roles']} "
-            f"or permissions {requirements['permissions']} for tool '{tool_name}'."
-        ),
+        reason="Unauthorized: exact signed tool permissions required.",
     )

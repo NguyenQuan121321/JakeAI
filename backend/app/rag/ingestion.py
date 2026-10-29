@@ -138,6 +138,22 @@ class DocumentIngestionPipeline:
         tenant_id: str,
     ) -> DocumentIngestResponse:
         """Process, parse, chunk, and index a document for the target tenant."""
+        from app.core.identity_state import (
+            authorize_bound_effect,
+            authorize_effect,
+            current_authority,
+        )
+
+        lease = current_authority.get()
+        await authorize_bound_effect(tenant_id, "rag:write")
+        if lease is not None:
+            await authorize_effect("rag:write")
+            if tenant_id != lease.claims["tid"]:
+                from fastapi import HTTPException
+
+                raise HTTPException(404, "Not found")
+            request = request.model_copy(deep=True)
+            request.metadata = {**request.metadata, "owner_uid": lease.claims["sub"]}
         parser = get_parser(filename=request.source, is_raw_text=True)
         parsed = parser.parse_text(
             text=request.content,
@@ -155,6 +171,13 @@ class DocumentIngestionPipeline:
             chunk_overlap=request.chunk_overlap,
         )
 
+        if lease is not None:
+            for chunk in chunks:
+                chunk.metadata["owner_uid"] = lease.claims["sub"]
+                chunk.chunk_id = hashlib.sha256(
+                    f"{tenant_id}:{lease.claims['sub']}:{chunk.chunk_id}".encode()
+                ).hexdigest()
+            await authorize_effect("rag:write")
         if chunks:
             await self.retriever.index_documents(chunks)
 

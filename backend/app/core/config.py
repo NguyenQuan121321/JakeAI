@@ -34,11 +34,21 @@ class Settings(BaseSettings):
 
     # FinnApiGo JWT & Identity Provider Integration
     FINNAPIGO_JWKS_URL: str = "http://localhost:8080/.well-known/jwks.json"
-    JWT_ALGORITHM: str = "RS256"
+    JWT_ALGORITHM: str = "HS256"
     JWT_SECRET_KEY: str = Field(default="", repr=False, exclude=True)
     JWT_SECRET_PREVIOUS: str | None = Field(default=None, repr=False, exclude=True)
     JWT_AUDIENCE: str = "jakeai-service"
-    JWT_ISSUER: str = "finnapigo-identity-provider"
+    JWT_ISSUER: str = "finnapigo"
+    JWT_KEY_ID: str = ""
+    JWT_PREVIOUS_KEY_ID: str = ""
+    JWT_PREVIOUS_LAST_ISSUED_AT: int | None = None
+    IDENTITY_STATE_URL: str = ""
+    IDENTITY_STATE_KEY_ID: str = ""
+    IDENTITY_STATE_SECRET: str = Field(default="", repr=False, exclude=True)
+    IDENTITY_STATE_CA_FILE: str = ""
+    IDENTITY_STATE_TIMEOUT_SECONDS: float = Field(default=3.0, gt=0, le=5)
+    IDENTITY_STATE_CONCURRENCY: int = Field(default=16, ge=1, le=64)
+    OPERATOR_METRICS_SECRET: str = Field(default="", repr=False, exclude=True)
 
     # State, Caching & Vector Database
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -104,6 +114,11 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
+    @field_validator("JWT_PREVIOUS_LAST_ISSUED_AT", mode="before")
+    @classmethod
+    def empty_rotation_timestamp(cls, value: Any) -> Any:
+        return None if value == "" else value
+
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
         from app.core.secret_material import (
@@ -122,17 +137,41 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT.lower() != "production":
             return self
         try:
+            from urllib.parse import urlsplit
+
+            from app.core.identity import configured_keys, decode_signing_key
+
+            signing = list(configured_keys(self).values())
+            # Include retired-but-still-configured bytes in purpose separation.
+            if self.JWT_SECRET_PREVIOUS:
+                signing.append(decode_signing_key(self.JWT_SECRET_PREVIOUS))
+            service = decode_signing_key(self.IDENTITY_STATE_SECRET)
+            validate_key_id(self.IDENTITY_STATE_KEY_ID)
+            target = urlsplit(self.IDENTITY_STATE_URL)
+            if (
+                target.scheme != "https"
+                or not target.hostname
+                or target.username
+                or target.password
+                or target.query
+                or target.fragment
+                or target.path != "/api/v1/identity/introspect"
+            ):
+                raise ValueError
             material = [
                 decode_secret(value, encoding="hex")
                 for value in (
-                    self.JWT_SECRET_KEY,
                     self.INTERNAL_GATEWAY_SECRET,
                     self.FINNAPIGO_SERVICE_SECRET,
                     self.AUDIT_HMAC_KEY,
                 )
             ]
-            if self.JWT_SECRET_PREVIOUS:
-                material.append(decode_secret(self.JWT_SECRET_PREVIOUS, encoding="hex"))
+            material.extend(dict.fromkeys(signing))
+            material.append(service)
+            if self.OPERATOR_METRICS_SECRET:
+                material.append(
+                    decode_secret(self.OPERATOR_METRICS_SECRET, encoding="hex")
+                )
             material.append(decode_secret(self.BYOK_MASTER_KEY, encoding="base64"))
             validate_key_id(self.BYOK_MASTER_KEY_ID)
             if self.BYOK_MASTER_KEY_ID in self.BYOK_RETIRED_KEY_IDS:

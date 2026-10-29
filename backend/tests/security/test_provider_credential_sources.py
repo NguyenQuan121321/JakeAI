@@ -61,7 +61,14 @@ async def test_every_credential_source_is_redacted_through_http(
     canary = "credential." + secrets.token_urlsafe(24)
     name = provider.upper() + "_API_KEY"
     if source == "byok":
-        await vault.store_key("source-tenant", provider, canary, actor_id="owner")
+        await vault.store_key(
+            "source-tenant",
+            provider,
+            canary,
+            actor_id=str(
+                int(__import__("hashlib").sha256(b"owner").hexdigest()[:12], 16) + 1
+            ),
+        )
     elif source == "configured":
         # Exercise the adapter's configured-provider boundary independently of
         # its existing raw-environment fallback. Authentication is not replaced.
@@ -85,6 +92,11 @@ async def test_every_credential_source_is_redacted_through_http(
             401, json={"error": {"message": canary, "nested": {"credential": canary}}}
         )
 
+    from app.core.route_policy import USER_POLICY
+
+    monkeypatch.setitem(
+        USER_POLICY, ("GET", "/_fixture/provider-error"), ("chat:write",)
+    )
     app = create_application()
     diagnostics = []
 

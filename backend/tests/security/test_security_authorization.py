@@ -27,7 +27,7 @@ from app.agent.tools.base import Tool, ToolMetadata
 from app.agent.tools.builtins.mock_tools import MockDangerousShellTool
 from app.agent.tools.policy import ToolPolicyEngine
 from app.core.context import TenantContext
-from app.core.security import exchange_obo_token, require_permissions
+from app.core.security import require_permissions
 from app.guardrails.rbac_guard import check_tool_rbac_guardrail
 from app.main import app
 
@@ -83,8 +83,9 @@ async def test_authz_require_permissions_dependency_enforcement() -> None:
         roles=["admin"],
         permissions=[],
     )
-    admin_res = await checker(context=admin_ctx)
-    assert admin_res.user_id == "user-admin"
+    with pytest.raises(HTTPException) as error:
+        await checker(context=admin_ctx)
+    assert error.value.status_code == 403
 
 
 # ==============================================================================
@@ -98,7 +99,7 @@ def test_authz_role_mismatch_financial_analyst_vs_developer() -> None:
         tenant_id="tenant-roles",
         user_id="analyst-1",
         roles=["financial_analyst"],
-        permissions=["accounts:read"],
+        permissions=["accounts:read", "transactions:read"],
     )
     developer_ctx = TenantContext(
         tenant_id="tenant-roles",
@@ -202,7 +203,7 @@ def test_authz_tool_policy_engine_aliased_permissions() -> None:
         name="get_account_balance",
         description="Retrieve account balance",
         input_schema={"type": "object", "properties": {}},
-        permissions=["accounts:read"],
+        permissions=["accounts:read", "transactions:read"],
     )
 
     class DummyTool(Tool):
@@ -217,7 +218,7 @@ def test_authz_tool_policy_engine_aliased_permissions() -> None:
     res_direct = ToolPolicyEngine.evaluate(
         tool=tool,
         arguments={},
-        user_permissions=["accounts:read"],
+        user_permissions=["accounts:read", "transactions:read"],
     )
     assert res_direct.allowed is True
 
@@ -227,7 +228,7 @@ def test_authz_tool_policy_engine_aliased_permissions() -> None:
         arguments={},
         user_permissions=["finnapigo:read"],
     )
-    assert res_alias.allowed is True
+    assert res_alias.allowed is False
 
     # User with unrelated permission -> REJECTED
     res_unrelated = ToolPolicyEngine.evaluate(
@@ -308,24 +309,16 @@ def test_authz_finalized_approval_replay_rejected() -> None:
         tool_args={"command": "uptime"},
         reason="Security test",
     )
-    # First decision succeeds
-    decided = app_mgr.decide(
-        req.approval_id,
-        decision=ApprovalDecision(approved=True),
-        tenant_id="tenant-replay",
-        user_id="admin",
-    )
-    assert decided.status.value == "approved"
-
-    # Replaying decision fails
-    with pytest.raises(ValueError) as exc_info:
-        app_mgr.decide(
-            req.approval_id,
-            decision=ApprovalDecision(approved=False),
-            tenant_id="tenant-replay",
-            user_id="admin",
-        )
-    assert "already finalized" in str(exc_info.value).lower()
+    # No RAM-only decision may grant executable approval authority, including replay.
+    for approved in [True, False, True]:
+        with pytest.raises(PermissionError):
+            app_mgr.decide(
+                req.approval_id,
+                ApprovalDecision(approved=approved),
+                "tenant-replay",
+                "admin",
+            )
+        assert req.status.value == "pending"
 
 
 @pytest.mark.asyncio
@@ -383,13 +376,13 @@ async def test_authz_toctou_argument_tampering_defense() -> None:
     approval_id = step_paused.pending_approval_id
     assert approval_id is not None
 
-    # 2. Approve 'uptime'
-    appr_mgr.decide(
-        approval_id=approval_id,
-        decision=ApprovalDecision(approved=True),
-        tenant_id=task_spec.tenant_id,
-        user_id="admin-operator",
-    )
+    # Inject an approved fixture only to exercise the engine's separate action-integrity
+    # check. The disabled RAM approval manager cannot authorize this transition.
+    from app.agent.approvals.models import ApprovalStatus
+
+    appr_mgr.get_request(
+        approval_id, task_spec.tenant_id
+    ).status = ApprovalStatus.APPROVED
 
     # 3. Tamper with arguments before re-execution
     step_paused.tool_args = {"command": "cat /etc/passwd"}
@@ -482,12 +475,10 @@ async def test_authz_http_boundary_approval_cross_run_conflict() -> None:
         reason="Security test gate",
     )
 
-    token = exchange_obo_token(
-        TenantContext(
-            tenant_id="tenant-http-authz",
-            user_id="user-1",
-            roles=["admin"],
-        )
+    from tests.fixtures.auth import create_test_jwt
+
+    token = create_test_jwt(
+        sub="user-1", tenant_id="tenant-http-authz", permissions=["agent:approve"]
     )
 
     async with AsyncClient(
@@ -499,5 +490,5 @@ async def test_authz_http_boundary_approval_cross_run_conflict() -> None:
             headers={"Authorization": f"Bearer {token}"},
             json={"approved": True, "reason": "Authorized by test"},
         )
-        assert resp.status_code == 409
-        assert "not to run" in resp.json()["detail"].lower()
+        assert resp.status_code in {404, 503}
+        assert app_req.status.value == "pending"

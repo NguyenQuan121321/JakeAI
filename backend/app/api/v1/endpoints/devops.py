@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.context import TenantContext
@@ -64,6 +64,8 @@ async def generate_changelog(
     _context: TenantContext = Depends(get_current_tenant),
 ) -> Any:
     """Generate structured markdown release notes and optionally broadcast to Slack/Discord."""
+    if request.webhook_url:
+        raise HTTPException(503, "External webhook effects are disabled in the pilot")
     bot = get_audit_bot()
     changelog = bot.summarize_changelog(
         pr_titles=request.pr_titles,
@@ -71,9 +73,6 @@ async def generate_changelog(
     )
 
     broadcast_sent = False
-    if request.webhook_url:
-        payload = {"text": changelog, "content": changelog}
-        broadcast_sent = await bot.broadcast_to_webhook(request.webhook_url, payload)
 
     return {
         "changelog_markdown": changelog,
