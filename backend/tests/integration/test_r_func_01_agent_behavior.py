@@ -22,7 +22,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -58,7 +57,6 @@ from app.agent.state.models import RunState, RunStatus
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
 from app.agent.tools.registry import ToolRegistry
 from app.agent.verification.verifier import CanonicalVerifier
-from app.core.config import get_settings
 from app.main import app
 
 # ===========================================================================
@@ -188,18 +186,16 @@ def make_agent_jwt(
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
 ) -> str:
-    """Create test HS256 JWT for tenant-scoped requests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": roles or ["admin", "operator"],
-        "permissions": permissions or ["agent:read", "agent:write", "tools:execute"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 # ===========================================================================

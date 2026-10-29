@@ -2,11 +2,14 @@
 
 import asyncio
 import hashlib
+import hmac
 import json
 import ssl
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -15,7 +18,7 @@ import jwt
 from fastapi import HTTPException
 
 from app.core.config import Settings, get_settings
-from app.core.identity import decode_signing_key, unique_object, verify_access
+from app.core.identity import configured_keys, decode_signing_key, unique_object
 from app.core.secret_material import validate_key_id
 
 
@@ -51,7 +54,7 @@ class IdentityStateClient:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def check(self, token: str, claims: dict[str, Any]) -> None:
+    async def check(self, token: str, claims: Mapping[str, Any]) -> None:
         s = self.settings
         try:
             async with asyncio.timeout(s.IDENTITY_STATE_TIMEOUT_SECONDS):
@@ -115,19 +118,52 @@ class AuthorityLease:
     """Request-local state only; raw credentials never serialize or appear in repr."""
 
     token: str = field(repr=False)
-    claims: dict[str, Any] = field(repr=False)
+    claims: Mapping[str, Any] = field(repr=False)
     client: IdentityStateClient = field(repr=False)
     checked_monotonic: float = 0
+    signing_kid: str = field(init=False, repr=False)
+    signing_fingerprint: bytes = field(init=False, repr=False)
+    denial: HTTPException | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # The factory passes signature-verified claims. Retain immutable authority,
+        # rather than re-parsing/re-verifying the same signature on every byte.
+        self.claims = MappingProxyType(
+            {**self.claims, "perms": tuple(self.claims["perms"])}
+        )
+        self.signing_kid = jwt.get_unverified_header(self.token)["kid"]
+        key = configured_keys(self.client.settings)[self.signing_kid]
+        self.signing_fingerprint = hashlib.sha256(key).digest()
 
     async def check(self, *, force: bool = False) -> None:
-        # Re-verify expiry/key retirement even on a recent state result.
+        # Recheck expiry and the configured keyset/deadline even on recent state.
+        if self.denial is not None:
+            raise self.denial
         try:
-            verify_access(self.token, self.client.settings)
+            key = configured_keys(self.client.settings).get(self.signing_kid)
+            now = time.time()
+            if (
+                key is None
+                or not hmac.compare_digest(
+                    hashlib.sha256(key).digest(), self.signing_fingerprint
+                )
+                or now >= self.claims["exp"] + 30
+                or now + 30 < self.claims["nbf"]
+                or now + 30 < self.claims["iat"]
+            ):
+                raise ValueError
         except (ValueError, TypeError, KeyError, UnicodeError, jwt.PyJWTError) as exc:
             # No exception text: token libraries can include attacker-controlled data.
-            raise HTTPException(401, "Invalid access credential") from exc
+            self.denial = HTTPException(401, "Invalid access credential")
+            raise self.denial from exc
         if force or time.monotonic() - self.checked_monotonic >= 10:
-            await self.client.check(self.token, self.claims)
+            try:
+                await self.client.check(self.token, self.claims)
+            except HTTPException as exc:
+                self.denial = exc
+                raise
+            if self.denial is not None:
+                raise self.denial
             self.checked_monotonic = time.monotonic()
 
 

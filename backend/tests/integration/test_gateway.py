@@ -23,25 +23,23 @@ def create_test_jwt(
     tenant_id: str = "tenant-fin-corp",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
     secret_key: str | None = None,
     algorithm: str = "HS256",
 ) -> str:
-    """Generate a test JWT token for test assertions."""
-    settings = get_settings()
-    key = secret_key or settings.JWT_SECRET_KEY
-    now = int(time.time())
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
 
-    payload: dict[str, Any] = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["user"],
-        "permissions": permissions or ["chat:read", "chat:write"],
-    }
-    token: str = jwt.encode(payload, key, algorithm=algorithm)
-    return token
+    token = v1_fixture_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        secret_key=secret_key,
+        algorithm=algorithm,
+        expires_in=expires_in,
+    )
+    return {"Authorization": "Bearer " + token}
 
 
 def test_verify_valid_jwt() -> None:

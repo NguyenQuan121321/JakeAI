@@ -48,23 +48,20 @@ def create_token(
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
     token_type: str = "access",
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
-    """Helper creating valid HS256 JWT access token for tests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "type": token_type,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin"],
-        "permissions": permissions
-        if permissions is not None
-        else ["*", "byok:read", "byok:write"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        token_type=token_type,
+        expires_in=expires_in,
+    )
+    return token
 
 
 def auth_headers(

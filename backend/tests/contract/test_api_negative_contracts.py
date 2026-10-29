@@ -16,12 +16,10 @@ Verifies all 10 legitimately supported negative HTTP status codes:
 - 503 Service Unavailable (Upstream provider outage, circuit breaker open, readiness failure)
 """
 
-import time
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -37,25 +35,20 @@ def create_token(
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
     token_type: str = "access",
-    expires_in: int = 3600,
+    expires_in: int = 900,
     secret_key: str | None = None,
 ) -> str:
-    """Helper generating HS256 JWT access token for negative test verification."""
-    settings = get_settings()
-    key = secret_key or settings.JWT_SECRET_KEY
-    now = int(time.time())
-    payload = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "type": token_type,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin"],
-        "permissions": permissions
-        if permissions is not None
-        else ["*", "byok:read", "byok:write"],
-    }
-    return jwt.encode(payload, key, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    return create_test_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles,
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        expires_in=expires_in,
+        token_type=token_type,
+        secret_key=secret_key,
+    )
 
 
 def auth_headers(

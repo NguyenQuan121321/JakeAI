@@ -5517,7 +5517,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "FinnApiGo asymmetric RS256/HS256 JWT access token. Must contain 'sub', 'tenant_id', and authorized roles/scopes."
+        "description": "Finn v1 HS256 access credential with explicit configured kid, verified tenant, exact permissions and authoritative live state."
       }
     }
   },

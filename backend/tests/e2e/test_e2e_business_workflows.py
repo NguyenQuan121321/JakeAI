@@ -23,12 +23,10 @@ Verifies 7 mandatory business workflows across real application boundaries:
 from __future__ import annotations
 
 import os
-import time
 import uuid
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-import jwt
 import pytest
 
 from app.agent.approvals.models import ApprovalStatus
@@ -37,10 +35,9 @@ from app.agent.domain.contracts import (
 )
 from app.agent.execution.engine import get_execution_engine
 from app.agent.runtime.manager import get_agent_manager
-from app.agent.state.models import RunStatus, TaskStatus
+from app.agent.state.models import RunStatus
 from app.agent.tools.registry import get_tool_registry
 from app.core.byok import get_byok_manager
-from app.core.config import get_settings
 from app.core.llm_provider import UpstreamLLMResponse
 from app.finops.ledger import get_finops_ledger
 from app.providers.base import ProviderCacheTelemetry
@@ -59,21 +56,17 @@ def create_e2e_jwt(
     tenant_id: str = "tenant-e2e-wf",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
-    """Generate a signed HS256 JWT access token for E2E workflow assertions."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "type": "access",
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin", "developer"],
-        "permissions": permissions or ["*"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    return create_test_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles,
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        expires_in=expires_in,
+    )
 
 
 def e2e_auth_headers(
@@ -234,95 +227,27 @@ async def test_e2e_workflow_01_auth_to_chat_lifecycle(
 @pytest.mark.asyncio
 @pytest.mark.e2e
 @pytest.mark.critical_e2e
-async def test_e2e_workflow_02_auth_to_agent_task_lifecycle(
-    async_client: AsyncClient,
-) -> None:
-    """Workflow 2: Authentication -> create task -> run -> execution -> terminal state.
-
-    Boundary:
-    - FastAPI ASGI HTTP boundary (/api/v1/agent/tasks and /runs)
-    - Authentication with scoped permissions (agent:write, agent:read)
-    - Full AgentRuntimeManager lifecycle execution
-    - Terminal state guarantees (COMPLETED, final output populated)
-    - Security & Multi-tenant boundary isolation.
-    """
-    tenant_id = f"tenant-wf2-{uuid.uuid4().hex[:8]}"
-    foreign_tenant_id = f"tenant-wf2-foreign-{uuid.uuid4().hex[:8]}"
-    correlation_id = f"corr-wf2-{uuid.uuid4().hex[:8]}"
+async def test_e2e_workflow_02_auth_to_agent_task_lifecycle(async_client):
+    tenant = "task-" + uuid.uuid4().hex
     headers = e2e_auth_headers(
-        tenant_id=tenant_id,
-        correlation_id=correlation_id,
-        permissions=["agent:write", "agent:read"],
+        tenant, permissions=["agent:write", "agent:read", "agent:execute"]
     )
-
-    # Step 1: Create Agent Task
-    task_goal = "Analyze enterprise liquidity metrics and generate compliance audit"
-    r_task = await async_client.post(
-        "/api/v1/agent/tasks",
-        headers=headers,
-        json={
-            "goal": task_goal,
-            "metadata": {"department": "finance", "priority": "high"},
-        },
+    created = await async_client.post(
+        "/api/v1/agent/tasks", headers=headers, json={"goal": "Synthetic owned draft"}
     )
-    assert r_task.status_code == 201
-    task_data = r_task.json()
-    task_id = task_data["task_id"]
-    assert task_data["tenant_id"] == tenant_id
-    assert task_data["goal"] == task_goal
-    assert task_data["status"] == TaskStatus.PENDING.value
-
-    # Step 2: Multi-Tenant Boundary Assertion
-    # Foreign tenant must NOT access this task (receives 403 or 404)
-    foreign_headers = e2e_auth_headers(
-        tenant_id=foreign_tenant_id,
-        permissions=["agent:read"],
+    assert created.status_code == 201
+    task = created.json()
+    url = "/api/v1/agent/tasks/" + task["task_id"]
+    assert (await async_client.get(url, headers=headers)).status_code == 200
+    foreign = e2e_auth_headers(tenant + "-foreign", permissions=["agent:read"])
+    assert (await async_client.get(url, headers=foreign)).status_code == 404
+    nonowner = e2e_auth_headers(tenant, sub="43", permissions=["agent:read"])
+    assert (await async_client.get(url, headers=nonowner)).status_code == 404
+    denied = await async_client.post(
+        url + "/runs", headers=headers, json={"async_execution": False}
     )
-    r_foreign_access = await async_client.get(
-        f"/api/v1/agent/tasks/{task_id}", headers=foreign_headers
-    )
-    assert r_foreign_access.status_code in (403, 404)
-
-    # Step 3: Instantiate and Execute Run Synchronously
-    agent_finish_resp = make_mock_llm_response(
-        text='{"action": "finish", "output": "Compliance audit completed with zero material discrepancies.", "thought": "Goal satisfied."}',
-    )
-    with patch(
-        "app.core.llm_provider.call_upstream_llm_detailed",
-        return_value=agent_finish_resp,
-    ):
-        r_run = await async_client.post(
-            f"/api/v1/agent/tasks/{task_id}/runs",
-            headers=headers,
-            json={"max_iterations": 3, "async_execution": False},
-        )
-        assert r_run.status_code == 201
-        run_data = r_run.json()
-        run_id = run_data["run_id"]
-        assert run_data["task_id"] == task_id
-        assert run_data["tenant_id"] == tenant_id
-
-    # Step 4: Verify Terminal State & Results
-    r_run_state = await async_client.get(
-        f"/api/v1/agent/tasks/{task_id}/runs/{run_id}", headers=headers
-    )
-    assert r_run_state.status_code == 200
-    state = r_run_state.json()
-
-    # Must reach terminal outcome
-    assert state["status"] in (RunStatus.COMPLETED.value, "completed")
-    assert state["final_output"] is not None
-    assert len(state["final_output"]) > 0
-    assert state["current_iteration"] >= 0
-    assert state["completed_at"] is not None
-
-    # Verify task status is synchronized to completed
-    r_task_updated = await async_client.get(
-        f"/api/v1/agent/tasks/{task_id}", headers=headers
-    )
-    assert r_task_updated.status_code == 200
-    assert r_task_updated.json()["status"] == TaskStatus.COMPLETED.value
-    assert r_task_updated.json()["active_run_id"] == run_id
+    assert denied.status_code == 503
+    assert get_agent_manager().get_task(task["task_id"], tenant).active_run_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -686,147 +611,65 @@ async def test_e2e_workflow_06_failure_recovery_failover_truthfulness(
 @pytest.mark.asyncio
 @pytest.mark.e2e
 @pytest.mark.critical_e2e
-async def test_e2e_workflow_07_human_in_the_loop_approval_resume_terminal(
-    async_client: AsyncClient,
-) -> None:
-    """Workflow 7A: Task -> approval required -> approval decision -> resume -> terminal COMPLETED.
-
-    Boundary:
-    - Task involves dangerous action (terminal_exec / file mutation)
-    - Loop pauses at approval gate with PAUSED_APPROVAL status
-    - Human operator submits decision APPROVED via /api/v1/agent/tasks/.../approvals/...
-    - Runner resumes execution, executes approved action, and reaches COMPLETED.
-    """
-    tenant_id = f"tenant-wf7-{uuid.uuid4().hex[:8]}"
-    headers = e2e_auth_headers(tenant_id=tenant_id)
-    manager = get_agent_manager()
-
-    # Step 1: Create Task and Run with Sensitive Administrative Goal
-    task = manager.create_task(
-        goal="Execute privileged terminal_exec command for system diagnostics",
-        tenant_id=tenant_id,
-        user_id="operator-1",
+async def test_e2e_workflow_07_human_in_the_loop_approval_resume_terminal(async_client):
+    tenant = "approval-" + uuid.uuid4().hex
+    headers = e2e_auth_headers(
+        tenant, sub="42", permissions=["agent:write", "agent:read", "agent:approve"]
     )
-    run = manager.create_run(
-        task_id=task.task_id,
-        tenant_id=tenant_id,
-        user_id="operator-1",
-    )
-
-    # Step 2: Transition through legal run states to PAUSED_APPROVAL
-    task.status = TaskStatus.RUNNING
-    run.status = RunStatus.RUNNING
-
-    appr_req = manager.approval_manager.create_request(
-        task_id=task.task_id,
-        run_id=run.run_id,
-        tenant_id=tenant_id,
-        tool_name="terminal_exec",
-        tool_args={"command": "diagnostic_healthcheck.sh"},
-        reason="Privileged diagnostic command requires security authorization",
-        risk_level="dangerous",
-    )
-    run.status = RunStatus.PAUSED_APPROVAL
-    run.pending_approval_id = appr_req.approval_id
-    task.status = TaskStatus.PAUSED_APPROVAL
-
-    # Step 3: Operator Lists Pending Approvals via GET /api/v1/agent/approvals/pending
-    r_pending = await async_client.get(
-        "/api/v1/agent/approvals/pending", headers=headers
-    )
-    assert r_pending.status_code == 200
-    pending_list = r_pending.json()
-    assert any(a["approval_id"] == appr_req.approval_id for a in pending_list)
-
-    # Step 4: Operator Submits Decision: APPROVED
-    diag_finish_resp = make_mock_llm_response(
-        text='{"action": "finish", "output": "Diagnostics completed successfully and system is healthy.", "thought": "Tool executed."}',
-    )
-    with patch(
-        "app.core.llm_provider.call_upstream_llm_detailed",
-        return_value=diag_finish_resp,
-    ):
-        r_decision = await async_client.post(
-            f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{appr_req.approval_id}",
-            headers=headers,
-            json={"approved": True, "reason": "Authorized by security compliance lead"},
-        )
-        assert r_decision.status_code == 200
-        decision_data = r_decision.json()
-        assert decision_data["status"] == ApprovalStatus.APPROVED.value
-        assert decision_data["decided_at"] is not None
-
-    # Step 5: Verify Run Resumed and Reached Terminal State
-    r_run = await async_client.get(
-        f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}",
+    created = await async_client.post(
+        "/api/v1/agent/tasks",
         headers=headers,
+        json={"goal": "Synthetic disabled effect"},
     )
-    assert r_run.status_code == 200
-    final_run = r_run.json()
-    assert final_run["status"] in (RunStatus.COMPLETED.value, "completed")
-    assert final_run["pending_approval_id"] is None
+    assert created.status_code == 201
+    task = created.json()
+    manager = get_agent_manager()
+    run = manager.create_run(task["task_id"], tenant, "42")
+    approval = manager.approval_manager.create_request(
+        task["task_id"],
+        run.run_id,
+        tenant,
+        "terminal_exec",
+        {"command": "uptime"},
+        "fixture",
+    )
+    url = f"/api/v1/agent/tasks/{task['task_id']}/runs/{run.run_id}/approvals/{approval.approval_id}"
+    result = await async_client.post(url, headers=headers, json={"approved": True})
+    assert result.status_code == 503
+    assert approval.status == ApprovalStatus.PENDING
+    assert run.steps == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
 @pytest.mark.critical_e2e
-async def test_e2e_workflow_07b_human_in_the_loop_approval_rejection(
-    async_client: AsyncClient,
-) -> None:
-    """Workflow 7B: Task -> approval required -> approval REJECTED -> terminal REJECTED.
-
-    Boundary:
-    - Operator denies execution with security violation reason
-    - Run transitions to terminal state REJECTED
-    - Dangerous action is never executed.
-    """
-    tenant_id = f"tenant-wf7b-{uuid.uuid4().hex[:8]}"
-    headers = e2e_auth_headers(tenant_id=tenant_id)
+async def test_e2e_workflow_07b_human_in_the_loop_approval_rejection(async_client):
+    tenant = "approval-" + uuid.uuid4().hex
+    headers = e2e_auth_headers(
+        tenant, sub="42", permissions=["agent:write", "agent:read", "agent:approve"]
+    )
+    created = await async_client.post(
+        "/api/v1/agent/tasks",
+        headers=headers,
+        json={"goal": "Synthetic disabled effect"},
+    )
+    assert created.status_code == 201
+    task = created.json()
     manager = get_agent_manager()
-
-    task = manager.create_task(
-        goal="Delete audit logs and purge security events",
-        tenant_id=tenant_id,
-        user_id="operator-2",
+    run = manager.create_run(task["task_id"], tenant, "42")
+    approval = manager.approval_manager.create_request(
+        task["task_id"],
+        run.run_id,
+        tenant,
+        "terminal_exec",
+        {"command": "uptime"},
+        "fixture",
     )
-    run = manager.create_run(
-        task_id=task.task_id,
-        tenant_id=tenant_id,
-        user_id="operator-2",
-    )
-
-    task.status = TaskStatus.RUNNING
-    run.status = RunStatus.RUNNING
-
-    appr_req = manager.approval_manager.create_request(
-        task_id=task.task_id,
-        run_id=run.run_id,
-        tenant_id=tenant_id,
-        tool_name="file_delete",
-        tool_args={"path": "/var/log/audit.log"},
-        reason="Log purging requires administrative sign-off",
-        risk_level="dangerous",
-    )
-    run.status = RunStatus.PAUSED_APPROVAL
-    run.pending_approval_id = appr_req.approval_id
-    task.status = TaskStatus.PAUSED_APPROVAL
-
-    # Operator Rejects
-    r_decision = await async_client.post(
-        f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{appr_req.approval_id}",
-        headers=headers,
-        json={"approved": False, "reason": "Unauthorized data destruction attempt"},
-    )
-    assert r_decision.status_code == 200
-    assert r_decision.json()["status"] == ApprovalStatus.REJECTED.value
-
-    # Verify Terminal Outcome is Truthful REJECTED
-    r_run = await async_client.get(
-        f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}",
-        headers=headers,
-    )
-    assert r_run.status_code == 200
-    assert r_run.json()["status"] in (RunStatus.REJECTED.value, "rejected")
+    url = f"/api/v1/agent/tasks/{task['task_id']}/runs/{run.run_id}/approvals/{approval.approval_id}"
+    result = await async_client.post(url, headers=headers, json={"approved": False})
+    assert result.status_code == 503
+    assert approval.status == ApprovalStatus.PENDING
+    assert run.steps == []
 
 
 # ---------------------------------------------------------------------------

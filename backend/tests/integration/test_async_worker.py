@@ -12,10 +12,8 @@ Tests:
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
-import jwt
 import pytest
 import pytest_asyncio
 from fastapi import status
@@ -52,18 +50,16 @@ async def clean_worker_environment() -> AsyncGenerator[None, None]:
 
 
 def generate_test_jwt(tenant_id: str, user_id: str = "user-worker-test") -> str:
-    """Generate signed JWT token for worker testing."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": ["admin"],
-        "permissions": ["rag:write", "rag:read"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 @pytest.mark.asyncio

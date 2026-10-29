@@ -92,7 +92,11 @@ async def run_concurrent_sse_scenario(
 ) -> ScenarioResult:
     """Execute concurrent SSE chat stream benchmark."""
     tokens = [
-        create_test_jwt(tenant_id=f"tenant-perf-sse-{i}", roles=["admin"])
+        create_test_jwt(
+            tenant_id=f"tenant-perf-sse-{i}",
+            roles=["admin"],
+            permissions=["chat:read", "chat:write", "rag:read"],
+        )
         for i in range(4)
     ]
     headers_pool = [

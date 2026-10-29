@@ -11,10 +11,8 @@ Verifies end-to-end multi-step critical workflows across the actual FastAPI ASGI
 5. Workflow 5: Human-in-the-Loop Approval Gate, Tool Result & Internal Resume Bridge
 """
 
-import time
 import uuid
 
-import jwt
 import pytest
 from httpx import AsyncClient
 
@@ -28,23 +26,17 @@ def create_token(
     tenant_id: str = "tenant-workflow-01",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
-    """Generate valid test JWT access token."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "type": "access",
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin", "developer"],
-        "permissions": permissions
-        if permissions is not None
-        else ["*", "byok:read", "byok:write"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    return create_test_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles,
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        expires_in=expires_in,
+    )
 
 
 def auth_headers(

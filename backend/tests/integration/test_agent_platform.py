@@ -15,11 +15,9 @@ Covers:
 from __future__ import annotations
 
 import json
-import time
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
-import jwt
 import pytest
 from fastapi import status
 from httpx import AsyncClient, Response
@@ -59,7 +57,6 @@ from app.agent.tools.registry import get_tool_registry
 
 # R-ARCH-03: app.agent.workflows (test-only WorkflowEngine duplicate) removed.
 # See tests/test_r_arch_03_duplicate_abstractions.py.
-from app.core.config import get_settings
 
 # ---------------------------------------------------------------------------
 # Test Auth Helpers
@@ -71,20 +68,19 @@ def generate_agent_jwt(
     tenant_id: str = "tenant-agent-alpha",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
-    """Generate HS256 JWT context for Agent API tests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin", "developer"],
-        "permissions": permissions or ["agent:write", "agent:read"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        expires_in=expires_in,
+    )
+    return token
 
 
 # ===========================================================================

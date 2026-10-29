@@ -7,6 +7,7 @@ import base64
 from datetime import datetime, timezone
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -82,6 +83,25 @@ def compose(*args, data=None, check=True, timeout=180):
                    data=data, check=check, timeout=timeout)
 
 
+def hostname(service):
+    return service + "-" + identity()[0] + ".test"
+
+
+def hosts_update(service=None, address=None):
+    project, _ = identity()
+    script = """import json,pathlib,sys
+project=sys.argv[1];name,address=json.load(sys.stdin);p=pathlib.Path('/etc/hosts')
+marker='# '+project;lines=p.read_text().splitlines()
+if name is None:lines=[line for line in lines if not line.endswith(marker)]
+else:
+ lines=[line for line in lines if not (line.endswith(marker) and name in line.split())]
+ lines.append(address+' '+name+' '+marker)
+p.write_text('\\n'.join(lines)+'\\n')
+"""
+    command(["sudo", "python3", "-c", script, project],
+            data=json.dumps([hostname(service) if service else None, address]).encode())
+
+
 def configuration(root, keys, last=None, *, remove=False, state_old=False):
     current = "old" if last is None else "new"
     finn = {"GIN_MODE": "release", "SERVER_PORT": "8443", "SERVER_TLS_CERT_FILE": "/run/tls/cert.pem",
@@ -143,7 +163,7 @@ def prepare():
         "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-addext", "subjectKeyIdentifier=hash"])
     (tls / "ca.key").chmod(0o600)
     for name in ["finn-a", "jake", "mail"]:
-        private(tls / (name + ".ext"), "subjectAltName=DNS:localhost,DNS:" + name + ",IP:127.0.0.1\n"
+        private(tls / (name + ".ext"), "subjectAltName=DNS:localhost,DNS:" + name + ",DNS:" + hostname(name) + ",IP:127.0.0.1\n"
             "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
             "subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
         command(["openssl", "req", "-new", "-newkey", "rsa:3072", "-nodes", "-subj", "/CN=" + name,
@@ -171,7 +191,7 @@ def prepare():
             "environment": {"MP_SMTP_TLS_CERT": "/run/tls/cert.pem", "MP_SMTP_TLS_KEY": "/run/tls/key.pem", "MP_SMTP_REQUIRE_STARTTLS": "true", "MP_DISABLE_VERSION_CHECK": "true"}},
         "finn-a": {**common, "image": "j02-finn:" + project, "user": "10001:10001", "mem_limit": "384m",
             "env_file": [str(root / "finn.env")], "ports": ["127.0.0.1:18443:8443"], "volumes": tls_mounts("finn-a")},
-        "jake": {**common, "image": "j02-jake:" + project, "user": "1000:1000", "mem_limit": "1200m",
+        "jake": {**common, "image": "j02-jake:" + project, "user": "1000:1000", "mem_limit": "1200m", "healthcheck": {"disable": True},
             "env_file": [str(root / "jake.env")], "ports": ["127.0.0.1:19443:8443"],
             "volumes": [*tls_mounts("jake"), str(REPO / "scripts/j02_provider_fixture.py") + ":/run/j02/j02_provider_fixture.py:ro"],
             "command": ["uvicorn", "j02_provider_fixture:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-certfile", "/run/tls/cert.pem", "--ssl-keyfile", "/run/tls/key.pem", "--no-access-log"]},
@@ -182,6 +202,7 @@ def prepare():
     if actual_finn != FINN_SHA:
         raise RuntimeError("Pinned Finn source mismatch")
     emit("source", finn=actual_finn, tested_merge=command(["git", "rev-parse", "HEAD"]).stdout.decode().strip(),
+        tested_tree=command(["git", "rev-parse", "HEAD^{tree}"]).stdout.decode().strip(),
         head_sha=json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())["pull_request"]["head"]["sha"],
         provider_fixture_sha256=hashlib.sha256((REPO / "scripts/j02_provider_fixture.py").read_bytes()).hexdigest(),
         mysql=MYSQL, redis=REDIS, cost="USD0 public standard ubuntu-24.04; no new uploads/caches")
@@ -217,7 +238,7 @@ class Rehearsal:
         headers = {"Content-Type": "application/json", "X-Tenant-ID": tenant}
         if token:
             headers["Authorization"] = "Bearer " + token
-        origin = "https://127.0.0.1:" + ("18443" if service == "finn" else "19443")
+        origin = "https://" + hostname("finn-a" if service == "finn" else "jake") + ":8443"
         req = urllib.request.Request(origin + path, headers=headers,
             data=json.dumps(body).encode() if body is not None else None, method=method)
         try:
@@ -243,16 +264,46 @@ class Rehearsal:
     def sql(self, sql):
         return compose("exec", "-T", "mysql", "mysql", "--defaults-extra-file=/run/secrets/mysql-client.cnf", "-N", "j02", data=sql.encode()).stdout.decode()
 
+    def diagnostics(self, actual_service, cid, last_status=None, transport=None):
+        raw = compose("logs", "--no-color", "--tail", "60", actual_service, check=False).stdout.decode(errors="replace")
+        state = json.loads(command(["docker", "inspect", cid]).stdout)[0]["State"]
+        emit("readiness_failure", service=actual_service, last_status=last_status, transport_error_type=transport,
+             state={k: state[k] for k in ["Status", "Running", "ExitCode", "OOMKilled"]},
+             progress=[p for p in ["database connected", "store: Redis-backed", "email: SMTP notifier enabled", "server listening", "finnapigo fatal", "server error", "server stopped cleanly"] if p in raw],
+             categories=[p for p in ["permission denied", "certificate", "audit", "jwt", "redis", "mysql", "read-only", "connection refused", "no such file"] if p in raw.lower()])
     def ready(self, service):
+        actual_service = "finn-a" if service == "finn" else "jake"
+        cid = compose("ps", "--all", "-q", actual_service).stdout.decode().strip()
+        info = json.loads(command(["docker", "inspect", cid]).stdout)[0]
+        if info["Config"]["Labels"]["com.docker.compose.project"] != self.project:
+            raise RuntimeError("Owned readiness route guard")
+        if not info["State"]["Running"]:
+            self.diagnostics(actual_service, cid)
+            raise RuntimeError("Actual release exited before readiness")
+        networks = info["NetworkSettings"]["Networks"]
+        if len(networks) != 1:
+            raise RuntimeError("Single private route required")
+        network = next(iter(networks.values()))
+        owned = json.loads(command(["docker", "network", "inspect", network["NetworkID"]]).stdout)[0]
+        address = network["IPAddress"]
+        if (not owned["Internal"] or owned["Labels"]["com.docker.compose.project"] != self.project
+                or not ipaddress.ip_address(address).is_private):
+            raise RuntimeError("Private readiness route required")
+        hosts_update(actual_service, address)
+        emit("owned_direct_route", service=actual_service, container_id=cid,
+             address_sha256=hashlib.sha256(address.encode()).hexdigest())
         deadline = time.monotonic() + 120
+        last_status, transport = None, None
         while time.monotonic() < deadline:
             try:
-                if self.request(service, "/healthz" if service == "finn" else "/health/live")[0] == 200:
+                last_status = self.request(service, "/healthz" if service == "finn" else "/health/live")[0]
+                if last_status == 200:
                     self.inventory("finn-a" if service == "finn" else "jake")
                     return
-            except (OSError, ValueError):
-                pass
+            except (OSError, ValueError) as error:
+                transport = type(error).__name__
             time.sleep(2)
+        self.diagnostics(actual_service, cid, last_status, transport)
         raise RuntimeError("Actual release readiness: " + service)
 
     def inventory(self, service):
@@ -403,7 +454,7 @@ class Rehearsal:
         current, _ = self.login()
         self.check("forced-reauthentication", self.request("jake", "/v1/models", token=current)[0], 200)
         # Long actual gateway delivery with only the external provider replaced.
-        req = urllib.request.Request("https://127.0.0.1:19443/v1/chat/completions",
+        req = urllib.request.Request("https://" + hostname("jake") + ":8443/v1/chat/completions",
             headers={"Content-Type": "application/json", "Authorization": "Bearer " + current},
             data=json.dumps({"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "synthetic stream"}], "stream": True}).encode())
         with self.http.open(req, timeout=30) as stream:
@@ -448,6 +499,8 @@ def cleanup():
     emit("cleanup", project=project, leftovers=counts, status="PASS" if not any(counts.values()) and (down is None or down.returncode == 0) else "FAIL")
     if any(counts.values()) or (down is not None and down.returncode):
         raise RuntimeError("Owned cleanup incomplete; private state retained for correction")
+    hosts_update()
+    emit("hosts_cleanup", status="PASS", only_owned_marker_removed=True)
     shutil.rmtree(root)
     emit("private_cleanup", runtime_root_removed=not root.exists(), secure_erasure_claim=False)
 

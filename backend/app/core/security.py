@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 http_bearer = HTTPBearer(scheme_name="FinnApiGoAuth", auto_error=False)
 
 
-def verify_finnapigo_jwt(
+def _verified_identity(
     token: str,
     secret_key: str | None = None,
     algorithm: str | None = None,
     correlation_id: str | None = None,
-) -> TenantContext:
+) -> tuple[TenantContext, dict[str, Any]]:
     try:
         if secret_key is not None or algorithm is not None:
             raise ValueError("Per-call trust overrides are disabled")
@@ -44,7 +44,16 @@ def verify_finnapigo_jwt(
         correlation_id=correlation_id or str(uuid.uuid4()),
     )
     set_current_tenant_context(context)
-    return context
+    return context, payload
+
+
+def verify_finnapigo_jwt(
+    token: str,
+    secret_key: str | None = None,
+    algorithm: str | None = None,
+    correlation_id: str | None = None,
+) -> TenantContext:
+    return _verified_identity(token, secret_key, algorithm, correlation_id)[0]
 
 
 async def check_token_denylist(token: str) -> None:
@@ -115,11 +124,12 @@ async def get_current_tenant(
         raise HTTPException(
             401, "Access credential required", headers={"WWW-Authenticate": "Bearer"}
         )
-    context = verify_finnapigo_jwt(
+    context, claims = _verified_identity(
         credentials.credentials,
-        correlation_id=getattr(request.state, "correlation_id", None),
+        correlation_id=getattr(request.state, "correlation_id", None)
+        or request.headers.get("x-correlation-id")
+        or request.headers.get("x-request-id"),
     )
-    claims = verify_access(credentials.credentials, get_settings())
     lease = AuthorityLease(credentials.credentials, claims, get_state_client(request))
     await lease.check(force=True)
     current_authority.set(lease)

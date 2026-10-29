@@ -99,6 +99,8 @@ class AuthorizationMiddleware:
 
     def __init__(self, app: Any):
         self.app = app
+        self._schema: Any = None
+        self._patterns: list[Any] = []
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] not in {"http", "websocket"}:
@@ -119,8 +121,14 @@ class AuthorizationMiddleware:
             return
         route_path = None
         params = {}
-        for candidate, operations in request.app.openapi()["paths"].items():
-            regex, _, _ = compile_path(candidate)
+        schema = request.app.openapi()
+        if self._schema is not schema:
+            self._patterns = [
+                (candidate, compile_path(candidate)[0], operations)
+                for candidate, operations in schema["paths"].items()
+            ]
+            self._schema = schema
+        for candidate, regex, operations in self._patterns:
             match = regex.fullmatch(path)
             if match and scope["method"].lower() in operations:
                 route_path, params = candidate, match.groupdict()

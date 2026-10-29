@@ -1,4 +1,5 @@
 import base64
+import binascii
 import hashlib
 import time
 from typing import Any
@@ -6,6 +7,30 @@ from typing import Any
 import jwt
 
 from app.core.config import get_settings
+
+FULL_TEST_PERMISSIONS = [
+    "chat:read",
+    "chat:write",
+    "rag:read",
+    "rag:write",
+    "byok:read",
+    "byok:write",
+    "finops:read",
+    "finops:write",
+    "ops:read",
+    "agent:read",
+    "agent:write",
+    "agent:execute",
+    "agent:approve",
+]
+
+
+def subject_id(sub: str) -> str:
+    return str(
+        int(sub)
+        if sub.isdecimal()
+        else int(hashlib.sha256(sub.encode()).hexdigest()[:12], 16) + 1
+    )
 
 
 def create_test_jwt(
@@ -31,11 +56,7 @@ def create_test_jwt(
         permissions if permissions is not None else ["chat:read", "chat:write"]
     )
 
-    uid = (
-        int(sub)
-        if sub.isdecimal()
-        else int(hashlib.sha256(sub.encode()).hexdigest()[:12], 16) + 1
-    )
+    uid = int(subject_id(sub))
     payload: dict[str, Any] = {
         "contract_ver": 1,
         "iss": "finnapigo",
@@ -62,9 +83,11 @@ def create_test_jwt(
     if "kid" not in jwt_headers and isinstance(key, str):
         jwt_headers["kid"] = settings.JWT_KEY_ID
 
-    return jwt.encode(
-        payload, base64.b64decode(key), algorithm=algorithm, headers=jwt_headers
-    )
+    try:
+        signing_bytes = base64.b64decode(key)
+    except binascii.Error:
+        signing_bytes = key.encode()  # Deliberately invalid-signature fixture keys.
+    return jwt.encode(payload, signing_bytes, algorithm=algorithm, headers=jwt_headers)
 
 
 def generate_agent_jwt(

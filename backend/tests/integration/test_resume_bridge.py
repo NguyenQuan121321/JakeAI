@@ -7,7 +7,6 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock
 
-import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,23 +18,18 @@ client = TestClient(app)
 
 
 def get_auth_headers(
-    tenant_id: str = "tenant-resume-test",
-    user_id: str = "user-resume-1",
+    tenant_id: str = "tenant-resume-test", user_id: str = "user-resume-1"
 ) -> dict[str, str]:
-    """Generate valid JWT authentication headers."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "type": "access",
-        "roles": ["developer"],
-        "permissions": ["chat:read", "chat:write"],
-    }
-    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
-    return {"Authorization": f"Bearer {token}"}
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return {"Authorization": "Bearer " + token}
 
 
 @pytest.mark.asyncio

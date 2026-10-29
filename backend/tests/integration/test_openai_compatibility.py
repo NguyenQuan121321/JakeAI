@@ -1,36 +1,28 @@
 """Tests for OpenAI-compatible API routes (/v1/models and /v1/chat/completions)."""
 
-import time
 import uuid
 from typing import Any
 
-import jwt
 from fastapi.testclient import TestClient
 
-from app.core.config import get_settings
 from app.main import app
 
 client = TestClient(app)
 
 
 def get_auth_headers(
-    tenant_id: str = "tenant-openai-compat",
-    user_id: str = "user-dev-1",
+    tenant_id: str = "tenant-openai-compat", user_id: str = "user-dev-1"
 ) -> dict[str, str]:
-    """Generate authenticated headers with valid HS256 JWT."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "type": "access",
-        "roles": ["developer"],
-        "permissions": ["chat:read", "chat:write"],
-    }
-    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
-    return {"Authorization": f"Bearer {token}"}
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return {"Authorization": "Bearer " + token}
 
 
 def test_models_catalog_unauthenticated() -> None:
