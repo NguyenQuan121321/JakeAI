@@ -74,8 +74,12 @@ class IdentityStateClient:
                             != "identity"
                         ):
                             raise ValueError("Compressed state response is unsupported")
-                        if not response.headers.get("Content-Type", "").startswith(
-                            "application/json"
+                        if (
+                            response.headers.get("Content-Type", "")
+                            .split(";", 1)[0]
+                            .strip()
+                            .lower()
+                            != "application/json"
                         ):
                             raise ValueError("JSON state response required")
                         body = bytearray()
@@ -84,7 +88,11 @@ class IdentityStateClient:
                             if len(body) > 4096:
                                 raise ValueError("Oversize state response")
                         result = unique_object(bytes(body))
-                        if response.status_code == 401 and result == {"active": False}:
+                        if (
+                            response.status_code == 401
+                            and result.keys() == {"active"}
+                            and result["active"] is False
+                        ):
                             raise HTTPException(
                                 401,
                                 "Inactive access credential",

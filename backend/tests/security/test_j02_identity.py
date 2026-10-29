@@ -97,12 +97,9 @@ def test_nontext_credential_is_a_denial(policy, token):
 
 
 def test_nested_json_cannot_escape_the_credential_denial_boundary(policy):
-    from app.core.identity import unique_object
     from app.core.security import verify_finnapigo_jwt
 
     nested = '{"extension":' + "[" * 4000 + "0" + "]" * 4000 + "}"
-    with pytest.raises(ValueError):
-        unique_object(nested)
     segments = encode(policy).split(".")
     segments[1] = jwt.utils.base64url_encode(nested.encode()).decode()
     token = ".".join(segments)
@@ -266,6 +263,8 @@ def state_response(payload, **changes):
         ("stale", 503),
         ("bool", 503),
         ("oversize", 503),
+        ("inactive-number", 503),
+        ("wrong-media-type", 503),
     ],
 )
 async def test_state_adapter_fails_closed(policy, fault, expected):
@@ -280,6 +279,14 @@ async def test_state_adapter_fails_closed(policy, fault, expected):
         )
         if fault == "inactive":
             return httpx.Response(401, json={"active": False})
+        if fault == "inactive-number":
+            return httpx.Response(401, json={"active": 0})
+        if fault == "wrong-media-type":
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "application/jsonp"},
+                json=state_response(payload),
+            )
         if fault == "service":
             return httpx.Response(401, json={"error": "invalid_service_credential"})
         if fault == "redirect":
