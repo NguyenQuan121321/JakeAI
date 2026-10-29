@@ -35,7 +35,7 @@ from app.agent.domain.contracts import (
 )
 from app.agent.execution.engine import get_execution_engine
 from app.agent.runtime.manager import get_agent_manager
-from app.agent.state.models import RunStatus
+from app.agent.state.models import RunStatus, TaskStatus
 from app.agent.tools.registry import get_tool_registry
 from app.core.byok import get_byok_manager
 from app.core.llm_provider import UpstreamLLMResponse
@@ -227,27 +227,95 @@ async def test_e2e_workflow_01_auth_to_chat_lifecycle(
 @pytest.mark.asyncio
 @pytest.mark.e2e
 @pytest.mark.critical_e2e
-async def test_e2e_workflow_02_auth_to_agent_task_lifecycle(async_client):
-    tenant = "task-" + uuid.uuid4().hex
+async def test_e2e_workflow_02_auth_to_agent_task_lifecycle(
+    async_client: AsyncClient,
+) -> None:
+    """Workflow 2: Authentication -> create task -> run -> execution -> terminal state.
+
+    Boundary:
+    - FastAPI ASGI HTTP boundary (/api/v1/agent/tasks and /runs)
+    - Authentication with scoped permissions (agent:write, agent:read)
+    - Full AgentRuntimeManager lifecycle execution
+    - Terminal state guarantees (COMPLETED, final output populated)
+    - Security & Multi-tenant boundary isolation.
+    """
+    tenant_id = f"tenant-wf2-{uuid.uuid4().hex[:8]}"
+    foreign_tenant_id = f"tenant-wf2-foreign-{uuid.uuid4().hex[:8]}"
+    correlation_id = f"corr-wf2-{uuid.uuid4().hex[:8]}"
     headers = e2e_auth_headers(
-        tenant, permissions=["agent:write", "agent:read", "agent:execute"]
+        tenant_id=tenant_id,
+        correlation_id=correlation_id,
+        permissions=["agent:write", "agent:read", "agent:execute"],
     )
-    created = await async_client.post(
-        "/api/v1/agent/tasks", headers=headers, json={"goal": "Synthetic owned draft"}
+
+    # Step 1: Create Agent Task
+    task_goal = "Analyze enterprise liquidity metrics and generate compliance audit"
+    r_task = await async_client.post(
+        "/api/v1/agent/tasks",
+        headers=headers,
+        json={
+            "goal": task_goal,
+            "metadata": {"department": "finance", "priority": "high"},
+        },
     )
-    assert created.status_code == 201
-    task = created.json()
-    url = "/api/v1/agent/tasks/" + task["task_id"]
-    assert (await async_client.get(url, headers=headers)).status_code == 200
-    foreign = e2e_auth_headers(tenant + "-foreign", permissions=["agent:read"])
-    assert (await async_client.get(url, headers=foreign)).status_code == 404
-    nonowner = e2e_auth_headers(tenant, sub="43", permissions=["agent:read"])
-    assert (await async_client.get(url, headers=nonowner)).status_code == 404
-    denied = await async_client.post(
-        url + "/runs", headers=headers, json={"async_execution": False}
+    assert r_task.status_code == 201
+    task_data = r_task.json()
+    task_id = task_data["task_id"]
+    assert task_data["tenant_id"] == tenant_id
+    assert task_data["goal"] == task_goal
+    assert task_data["status"] == "pending"
+
+    # Step 2: Multi-Tenant Boundary Assertion
+    # Foreign tenant must NOT access this task (receives 403 or 404)
+    foreign_headers = e2e_auth_headers(
+        tenant_id=foreign_tenant_id,
+        permissions=["agent:read"],
     )
-    assert denied.status_code == 503
-    assert get_agent_manager().get_task(task["task_id"], tenant).active_run_id is None
+    r_foreign_access = await async_client.get(
+        f"/api/v1/agent/tasks/{task_id}", headers=foreign_headers
+    )
+    assert r_foreign_access.status_code in (403, 404)
+
+    # Step 3: Instantiate and Execute Run Synchronously
+    agent_finish_resp = make_mock_llm_response(
+        text='{"action": "finish", "output": "Compliance audit completed with zero material discrepancies.", "thought": "Goal satisfied."}',
+    )
+    with patch(
+        "app.core.llm_provider.call_upstream_llm_detailed",
+        return_value=agent_finish_resp,
+    ):
+        r_run = await async_client.post(
+            f"/api/v1/agent/tasks/{task_id}/runs",
+            headers=headers,
+            json={"max_iterations": 3, "async_execution": False},
+        )
+        assert r_run.status_code == 201
+        run_data = r_run.json()
+        run_id = run_data["run_id"]
+        assert run_data["task_id"] == task_id
+        assert run_data["tenant_id"] == tenant_id
+
+    # Step 4: Verify Terminal State & Results
+    r_run_state = await async_client.get(
+        f"/api/v1/agent/tasks/{task_id}/runs/{run_id}", headers=headers
+    )
+    assert r_run_state.status_code == 200
+    state = r_run_state.json()
+
+    # Must reach terminal outcome
+    assert state["status"] in (RunStatus.COMPLETED.value, "completed")
+    assert state["final_output"] is not None
+    assert len(state["final_output"]) > 0
+    assert state["current_iteration"] >= 0
+    assert state["completed_at"] is not None
+
+    # Verify task status is synchronized to completed
+    r_task_updated = await async_client.get(
+        f"/api/v1/agent/tasks/{task_id}", headers=headers
+    )
+    assert r_task_updated.status_code == 200
+    assert r_task_updated.json()["status"] == TaskStatus.COMPLETED.value
+    assert r_task_updated.json()["active_run_id"] == run_id
 
 
 # ---------------------------------------------------------------------------

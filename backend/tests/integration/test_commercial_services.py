@@ -8,7 +8,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.config import get_settings
 from app.core.context import TenantContext
-from app.core.security import exchange_obo_token
 from app.main import app
 from app.services.ai_gateway import (
     GatewayChatRequest,
@@ -16,6 +15,7 @@ from app.services.ai_gateway import (
     QuotaManager,
 )
 from app.services.billing import PayOSBillingService
+from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
 
 
 @pytest.fixture
@@ -27,7 +27,12 @@ def auth_headers() -> dict[str, str]:
         scopes=["chat:write", "gateway:use"],
         permissions=["quotas:write", "billing:read"],
     )
-    token = exchange_obo_token(context)
+    token = create_test_jwt(
+        sub=context.user_id,
+        tenant_id=context.tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
     return {"Authorization": f"Bearer {token}"}
 
 

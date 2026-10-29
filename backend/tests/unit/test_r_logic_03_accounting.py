@@ -40,7 +40,6 @@ from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.core.context import TenantContext
-from app.core.security import exchange_obo_token
 from app.finops.budget import FinOpsBudgetManager, get_budget_manager
 from app.finops.ledger import FinOpsLedger
 from app.finops.pricing import calculate_billed_cost
@@ -612,14 +611,12 @@ async def test_gateway_usage_total_equals_prompt_plus_completion() -> None:
 
 
 def _auth_headers(tenant_id: str) -> dict[str, str]:
-    context = TenantContext(
-        tenant_id=tenant_id,
-        user_id="user-rl03",
-        roles=["user"],
-        scopes=["chat:write", "gateway:use"],
-        permissions=["chat:stream"],
+    from tests.fixtures.auth import create_test_jwt
+
+    token = create_test_jwt(
+        sub="user-rl03", tenant_id=tenant_id, permissions=["chat:write", "rag:read"]
     )
-    return {"Authorization": f"Bearer {exchange_obo_token(context)}"}
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio

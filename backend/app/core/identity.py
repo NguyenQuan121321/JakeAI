@@ -163,6 +163,8 @@ def configured_keys(settings: Any) -> dict[str, bytes]:
 
 
 def verify_access(token: str, settings: Any) -> dict[str, Any]:
+    if type(token) is not str:
+        raise ValueError("Text access credential required")
     if len(token) > 12288:
         raise ValueError("Oversize credential")
     parts = token.split(".")

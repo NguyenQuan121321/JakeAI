@@ -34,7 +34,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
-import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -62,7 +61,6 @@ from app.agent.state.models import RunState, RunStatus
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
 from app.agent.tools.registry import ToolRegistry
 from app.core.byok import get_byok_manager
-from app.core.config import get_settings
 from app.finops.budget import FinOpsBudgetManager
 from app.main import app
 from app.optimizer.semantic_cache import SemanticCacheManager
@@ -181,17 +179,15 @@ def make_task_spec(tenant: str = "tenant-logic-00") -> TaskSpec:
 
 
 def make_agent_jwt(tenant_id: str, user_id: str = "user-logic-00") -> str:
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": ["admin", "operator"],
-        "permissions": ["agent:read", "agent:write", "tools:execute"],
-    }
-    return pyjwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 async def collect(engine_events: AsyncGenerator[AgentRunEvent, None]) -> list:

@@ -24,9 +24,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 FINN_SHA = "b79b0dbea09cbf1464baa4de9ab76573c8b6fd32"
-MYSQL = "mysql@sha256:5cf1e1293ea42e077e6a22114e6773b9aae3bb8f9933a2acd5a9721518ff8f5b"
-REDIS = "redis@sha256:a7aad82554197a54c653388bfded882a59d6b4a02468484bc31bae6772dcc42c"
-MAIL = "axllent/mailpit@sha256:938ce54b7b946ef3f45a03e119952cf7e67a7969d61f45a3ed055442a77e00f4"
+MYSQL = "mysql@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7"
+REDIS = "redis@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537"
+MAIL = "axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498"
 
 
 def identity():
@@ -71,7 +71,7 @@ def emit(kind, **fields):
 
 def command(args, *, data=None, timeout=180, check=True):
     result = subprocess.run(
-        args, input=data, capture_output=True, timeout=timeout, cwd=REPO
+        args, input=data, capture_output=True, timeout=timeout, cwd=REPO, check=False
     )
     if check and result.returncode:
         emit(
@@ -378,7 +378,7 @@ def prepare():
 
     services = {
         "mysql": {
-            "image": MYSQL,
+            "image": "j02-mysql:" + project,
             "user": "999:999",
             "networks": ["isolated"],
             "restart": "no",
@@ -501,7 +501,10 @@ def prepare():
         provider_fixture_sha256=hashlib.sha256(
             (REPO / "scripts/j02_provider_fixture.py").read_bytes()
         ).hexdigest(),
-        mysql=MYSQL,
+        mysql_base=MYSQL,
+        mysql_recipe_sha256=hashlib.sha256(
+            (REPO / "scripts/j02/mysql.Dockerfile").read_bytes()
+        ).hexdigest(),
         redis=REDIS,
         cost="USD0 public standard ubuntu-24.04; no new uploads/caches",
     )
@@ -1197,7 +1200,7 @@ if __name__ == "__main__":
         {"prepare": prepare, "run": lambda: Rehearsal().run(), "cleanup": cleanup}[
             sys.argv[1]
         ]()
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - redact arbitrary runtime failures at CLI boundary
         emit(
             "operation_failure",
             error_type=type(error).__name__,

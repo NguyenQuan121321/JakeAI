@@ -19,11 +19,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import get_settings
 from app.main import app
 from app.rag.bm25 import BM25Retriever
 from app.rag.citations import CitationGenerator
@@ -54,18 +52,15 @@ def test_embedding_provider() -> EmbeddingProvider:
 
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    """Generate valid JWT bearer authorization header."""
-    settings = get_settings()
-    token = jwt.encode(
-        {
-            "sub": "test-rag-admin",
-            "tenant_id": "tenant-grounding-test",
-            "roles": ["admin"],
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub="test-rag-admin",
+        tenant_id="tenant-grounding-test",
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + token}
 
 
 # ==============================================================================

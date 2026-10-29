@@ -35,7 +35,6 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -45,7 +44,6 @@ from app.agent.backends.jakeai import JakeAIBackend
 from app.agent.runtime.manager import AgentRuntimeManager
 from app.agent.state.models import RunStatus
 from app.agents.finnapigo_tool import finnapigo_tool_node
-from app.core.config import get_settings
 from app.core.context import TenantContext
 from app.main import app
 from app.optimizer.semantic_cache import (
@@ -66,21 +64,17 @@ def make_jwt(
     permissions: list[str] | None = None,
     scopes: Any = _UNSET,
 ) -> str:
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": roles if roles is not None else ["admin", "operator"],
-        "permissions": permissions
-        if permissions is not None
-        else ["agent:read", "agent:write", "tools:execute"],
-    }
-    if scopes is not _UNSET:
-        payload["scopes"] = scopes  # may be explicitly None (present-but-null claim)
-    return pyjwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    extra = {} if scopes is _UNSET else {"scopes": scopes}
+    token = create_test_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        **extra,
+    )
+    return token
 
 
 def tool_call_payload(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:

@@ -134,6 +134,7 @@ class AuthorityLease:
     signing_kid: str = field(init=False, repr=False)
     signing_fingerprint: bytes = field(init=False, repr=False)
     denial: HTTPException | None = field(default=None, init=False, repr=False)
+    operation_permissions: tuple[str, ...] = field(default=(), init=False)
 
     def __post_init__(self) -> None:
         # The factory passes signature-verified claims. Retain immutable authority,
@@ -187,7 +188,12 @@ async def authorize_effect(*permissions: str) -> None:
     if lease is None:
         raise HTTPException(503, "Fresh user authority required")
     await lease.check(force=True)
-    if any(p not in lease.claims["perms"] for p in permissions):
+    if not lease.operation_permissions:
+        raise HTTPException(503, "Bound route authority required")
+    if any(
+        p not in lease.claims["perms"]
+        for p in (*lease.operation_permissions, *permissions)
+    ):
         raise HTTPException(403, "Insufficient permission")
 
 

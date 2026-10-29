@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -44,48 +43,34 @@ from app.agent.tools.policy import ToolPolicyEngine
 from app.agent.tools.registry import ToolRegistry, get_tool_registry
 from app.agent.verification.verifier import CanonicalVerifier
 from app.agents.finnapigo_tool import finnapigo_tool_node
-from app.core.config import get_settings
 from app.guardrails.rbac_guard import check_tool_rbac_guardrail
 from app.main import app
 
 
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    """Generate valid JWT bearer authorization header."""
-    settings = get_settings()
-    token = jwt.encode(
-        {
-            "sub": "test-admin",
-            "tenant_id": "tenant-tool-test",
-            "roles": ["admin"],
-            "permissions": [
-                "system:execute",
-                "files:read",
-                "accounts:read",
-                "transactions:read",
-            ],
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub="test-admin",
+        tenant_id="tenant-tool-test",
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + token}
 
 
 @pytest.fixture
 def non_admin_headers() -> dict[str, str]:
-    """Generate JWT bearer for a non-admin viewer."""
-    settings = get_settings()
-    token = jwt.encode(
-        {
-            "sub": "test-viewer",
-            "tenant_id": "tenant-tool-test",
-            "roles": ["viewer"],
-            "permissions": ["reports:read"],
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    from tests.fixtures.auth import create_test_jwt
+
+    token = create_test_jwt(
+        sub="test-viewer",
+        tenant_id="tenant-tool-test",
+        roles=["tenant_admin"],
+        permissions=[],
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + token}
 
 
 # ===========================================================================

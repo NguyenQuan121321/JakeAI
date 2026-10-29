@@ -160,6 +160,8 @@ class AuthorizationMiddleware:
                     raise HTTPException(404, "Not found")
                 await self.app(scope, receive, send)
                 return
+            if not isinstance(rule, tuple):
+                raise HTTPException(503, "Invalid route authorization policy")
             auth = request.headers.getlist("authorization")
             if len(auth) != 1 or not auth[0].startswith("Bearer "):
                 raise HTTPException(
@@ -173,6 +175,7 @@ class AuthorizationMiddleware:
             )
             if not context.has_all_permissions(list(rule)):
                 raise HTTPException(403, "Insufficient permissions")
+            request.state.authority_lease.operation_permissions = rule
             if "finops:write" in rule and "tenant_admin" not in context.roles:
                 raise HTTPException(
                     403, "Delegated tenant budget administrator required"
@@ -196,11 +199,7 @@ class AuthorizationMiddleware:
                     raise HTTPException(404, "Not found") from None
             # These surfaces cannot safely convert RAM decisions/checkpoints or
             # caller-supplied identity into durable execution authority (J07).
-            if (
-                "/coding/" in route_path
-                or "/approvals/" in route_path
-                or (scope["method"] == "POST" and route_path.endswith("/runs"))
-            ):
+            if "/coding/" in route_path or "/approvals/" in route_path:
                 raise HTTPException(
                     503, "Durable execution authorization is unavailable"
                 )

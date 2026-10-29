@@ -18,7 +18,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.context import TenantContext
-from app.core.security import exchange_obo_token
 from app.main import app
 from app.optimizer.semantic_cache import SemanticCacheManager, compute_cache_identity
 from app.rag.bm25 import BM25Retriever
@@ -26,6 +25,7 @@ from app.rag.context_envelope import ContextEnvelopeBuilder
 from app.rag.ingestion import DocumentIngestRequest
 from app.rag.models import DocumentChunk
 from app.services.resume_bridge import ResumeBridgeManager
+from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
 
 
 def _make_auth_headers(
@@ -42,7 +42,12 @@ def _make_auth_headers(
         permissions=permissions
         or ["chat:write", "agent:write", "byok:read", "byok:write"],
     )
-    token = exchange_obo_token(ctx)
+    token = create_test_jwt(
+        sub=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        roles=ctx.roles,
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+    )
     return {"Authorization": f"Bearer {token}"}
 
 

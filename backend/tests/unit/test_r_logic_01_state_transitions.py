@@ -34,12 +34,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
-import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -79,7 +77,6 @@ from app.agent.state.models import (
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
 from app.agent.tools.registry import ToolRegistry
 from app.agent.verification.verifier import CanonicalVerifier
-from app.core.config import get_settings
 from app.main import app
 
 # ===========================================================================
@@ -415,17 +412,15 @@ def fresh_engine(
 
 
 def make_agent_jwt(tenant_id: str, user_id: str = "user-logic-01") -> str:
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": ["admin", "operator"],
-        "permissions": ["agent:read", "agent:write", "tools:execute"],
-    }
-    return pyjwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 def tool_call_payload(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
