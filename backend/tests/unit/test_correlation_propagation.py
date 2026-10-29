@@ -2,7 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import jwt
 import pytest
 
 from app.agent.planning.models import NextAction, NextActionType, Plan, PlanStep
@@ -26,11 +25,11 @@ def test_tenant_context_and_obo_token_correlation_id():
         correlation_id=cid,
     )
     assert ctx.correlation_id == cid
-    obo_token = exchange_obo_token(ctx)
-    decoded = jwt.decode(obo_token, options={"verify_signature": False})
-    assert decoded.get("cid") == cid
-    assert decoded.get("sub") == "user_1"
-    assert decoded.get("tenant_id") == "tenant_a"
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as denied:
+        exchange_obo_token(ctx)
+    assert denied.value.status_code == 503
 
 
 def test_router_correlation_id_propagation():
@@ -177,7 +176,8 @@ async def test_finnapigo_tool_node_correlation_id_propagation():
         "tenant_id": "tenant_a",
         "user_id": "user_1",
         "roles": ["developer", "tenant_admin"],
-        "permissions": ["execute"],
+        "permissions": ["tenant:read", "finnapigo:read"],
+        "obo_token": "component-opaque-not-user-authority",
         "correlation_id": cid,
         "tool_calls": [],
         "messages": [],

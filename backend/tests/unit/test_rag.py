@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.agents.verifier import verifier_node
-from app.core.config import get_settings
 from app.rag.bm25 import BM25Retriever
 from app.rag.citations import CitationGenerator
 from app.rag.context_selector import ContextSelector
@@ -414,16 +413,13 @@ async def test_rag_pipeline_generate_grounded_answer() -> None:
 @pytest.mark.asyncio
 async def test_rag_api_endpoints_integration() -> None:
     """Verify /api/v1/rag/query and /api/v1/rag/generate endpoints with HTTP client."""
-    import jwt
     from httpx import ASGITransport, AsyncClient
 
     from app.main import app
+    from tests.fixtures.auth import create_test_jwt
 
-    settings = get_settings()
-    token = jwt.encode(
-        {"sub": "test-user", "tenant_id": "tenant-api-rag", "roles": ["admin"]},
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    token = create_test_jwt(
+        tenant_id="tenant-api-rag", permissions=["rag:read", "rag:write", "chat:write"]
     )
     headers = {"Authorization": f"Bearer {token}"}
 

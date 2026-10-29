@@ -171,71 +171,29 @@ async def test_worker_process_single_run() -> None:
 
 @pytest.mark.asyncio
 async def test_api_async_ingest_and_polling(
-    async_client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
+    async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify API POST /api/v1/rag/ingest?async_mode=true (202) and GET /tasks/{task_id}."""
+    """HTTP cannot queue work without a durable user authority; no task is minted."""
+    from unittest.mock import AsyncMock
+
     task_mgr = get_task_manager()
-    await task_mgr.clear()
-    settings = get_settings()
-    monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
-    token_alpha = generate_test_jwt("tenant-async-api")
-    token_beta = generate_test_jwt("tenant-intruder")
-
-    payload = {
-        "content": (
-            "Asynchronous Task Queue Ingestion Test.\n\n"
-            "This document is submitted with async_mode=True to ensure HTTP 202 Accepted "
-            "and background processing by jakeai-worker."
-        ),
-        "source": "Async_Guide.md",
-        "metadata": {"category": "architecture"},
-    }
-
-    # 1. Post with async_mode=true -> Expect 202 Accepted
-    resp = await async_client.post(
+    enqueue = AsyncMock()
+    monkeypatch.setattr(task_mgr, "enqueue", enqueue)
+    token = generate_test_jwt("tenant-async-api")
+    response = await async_client.post(
         "/api/v1/rag/ingest?async_mode=true",
-        headers={"Authorization": f"Bearer {token_alpha}"},
-        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+        json={"content": "synthetic document", "source": "guide.txt"},
     )
-    assert resp.status_code == status.HTTP_202_ACCEPTED
-    data = resp.json()
-    task_id = data["task_id"]
-    assert data["status"] == "queued"
-    assert f"/api/v1/rag/tasks/{task_id}" == data["poll_url"]
-
-    # 2. Poll task status -> Expect 200 OK (status: queued)
-    poll_resp = await async_client.get(
-        f"/api/v1/rag/tasks/{task_id}",
-        headers={"Authorization": f"Bearer {token_alpha}"},
-    )
-    assert poll_resp.status_code == status.HTTP_200_OK
-    poll_data = poll_resp.json()
-    assert poll_data["task_id"] == task_id
-    assert poll_data["status"] == "queued"
-
-    # 3. Process via worker
-    worker = IngestionWorker()
-    did_work = await worker.run_once()
-    assert did_work is True
-
-    # 4. Poll again -> Expect 200 OK (status: completed)
-    poll_after = await async_client.get(
-        f"/api/v1/rag/tasks/{task_id}",
-        headers={"Authorization": f"Bearer {token_alpha}"},
-    )
-    assert poll_after.status_code == status.HTTP_200_OK
-    completed_data = poll_after.json()
-    assert completed_data["status"] == "completed"
-    assert completed_data["result"] is not None
-    assert completed_data["result"]["indexed_chunks"] >= 1
-
-    # 5. Security Gate: Foreign tenant must receive 404
-    intruder_poll = await async_client.get(
-        f"/api/v1/rag/tasks/{task_id}",
-        headers={"Authorization": f"Bearer {token_beta}"},
-    )
-    assert intruder_poll.status_code == status.HTTP_404_NOT_FOUND
+    assert response.status_code == 503
+    assert "task_id" not in response.json()
+    enqueue.assert_not_called()
+    for tenant in ("tenant-async-api", "tenant-intruder"):
+        poll = await async_client.get(
+            "/api/v1/rag/tasks/unissued-task",
+            headers={"Authorization": f"Bearer {generate_test_jwt(tenant)}"},
+        )
+        assert poll.status_code == 404
 
 
 @pytest.mark.asyncio

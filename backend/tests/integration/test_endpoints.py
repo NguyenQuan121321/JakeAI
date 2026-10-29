@@ -173,7 +173,7 @@ async def test_chat_stream_endpoint_tool_invocation_with_obo(
     monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
     token = generate_endpoint_jwt(
         roles=["financial_analyst"],
-        permissions=["accounts:read"],
+        permissions=["accounts:read", "chat:write", "rag:read"],
     )
 
     response = await async_client.post(
@@ -187,8 +187,8 @@ async def test_chat_stream_endpoint_tool_invocation_with_obo(
 
     assert response.status_code == 200
     body = response.text
-    assert "event: tool_call" in body
-    assert "get_account_balance" in body
+    assert "BLOCKED" in body or "blocked" in body or "event: error" in body
+    assert "authorization_header" not in body
 
 
 @pytest.mark.asyncio
@@ -244,7 +244,7 @@ async def test_chat_stream_rbac_blocking(
     # Viewer role has no accounts:read permission
     token = generate_endpoint_jwt(
         roles=["viewer"],
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     response = await async_client.post(

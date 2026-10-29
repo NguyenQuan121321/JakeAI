@@ -18,6 +18,10 @@ execution safety, and result incorporation across:
 14. Tool Result Contamination Isolation (Filtering failed/blocked tools and indirect prompt injection).
 15. Planner Pure Banking & Code Inspection Plan Generation (Dependency-aware DAG generation for tools).
 16. Public HTTP API Boundary (Real ASGI integration for task creation, run dispatch, and approval resolution).
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -98,7 +102,13 @@ async def test_scenario_01_semantic_paraphrases_and_synonyms_tool_choice() -> No
             "prompt": prompt,
             "tenant_id": "tenant-syn-01",
             "roles": ["admin"],
-            "permissions": ["accounts:read", "transactions:read", "tenant:read"],
+            "permissions": [
+                "accounts:read",
+                "transactions:read",
+                "tenant:read",
+                "finnapigo:read",
+            ],
+            "obo_token": "component-opaque-not-user-authority",
             "tool_calls": [],
             "messages": [],
         }
@@ -125,7 +135,13 @@ async def test_scenario_02_pre_set_state_tool_and_arguments_preservation() -> No
         "arguments": {"limit": 25},
         "tenant_id": "tenant-override-01",
         "roles": ["admin"],
-        "permissions": ["accounts:read", "transactions:read", "tenant:read"],
+        "permissions": [
+            "accounts:read",
+            "transactions:read",
+            "tenant:read",
+            "finnapigo:read",
+        ],
+        "obo_token": "component-opaque-not-user-authority",
         "tool_calls": [],
         "messages": [],
     }
@@ -153,7 +169,13 @@ async def test_scenario_03_ambiguous_request_resolution() -> None:
             "prompt": prompt,
             "tenant_id": "tenant-ambig-01",
             "roles": ["admin"],
-            "permissions": ["accounts:read", "transactions:read", "tenant:read"],
+            "permissions": [
+                "accounts:read",
+                "transactions:read",
+                "tenant:read",
+                "finnapigo:read",
+            ],
+            "obo_token": "component-opaque-not-user-authority",
             "tool_calls": [],
             "messages": [],
         }
@@ -200,7 +222,10 @@ def test_scenario_04_schema_validation_missing_required_arguments() -> None:
 async def test_scenario_05_schema_validation_wrong_argument_types() -> None:
     """ToolRegistry rejects wrong argument types before tool execution occurs."""
     reg = get_tool_registry()
-    ctx = {"roles": ["admin"], "permissions": ["accounts:read", "files:read"]}
+    ctx = {
+        "roles": ["admin"],
+        "permissions": ["finnapigo:read", "agent:read_files", "files:read"],
+    }
 
     # list_transactions with string limit
     valid, err = reg.validate("list_transactions", {"limit": "five"})
@@ -303,6 +328,7 @@ def test_scenario_07_malicious_shell_commands_policy_defense() -> None:
             tool=shell_tool,
             arguments={"command": cmd},
             user_roles=["admin"],
+            user_permissions=["system:execute", "files:read", "agent:read_files"],
         )
         assert not dec.allowed, f"Malicious command '{cmd}' must not be allowed"
         assert "Malicious shell execution argument detected" in dec.reason
@@ -312,6 +338,7 @@ def test_scenario_07_malicious_shell_commands_policy_defense() -> None:
             tool=calc_tool,
             arguments={"expression": f"1 + 1 && {cmd}"},
             user_roles=["admin"],
+            user_permissions=["system:execute", "files:read", "agent:read_files"],
         )
         assert not dec_calc.allowed
         assert "Malicious shell execution argument detected" in dec_calc.reason
@@ -349,6 +376,7 @@ def test_scenario_08_path_traversal_and_sensitive_file_defense() -> None:
             tool=read_tool,
             arguments={"path": path},
             user_roles=["admin"],
+            user_permissions=["system:execute", "files:read", "agent:read_files"],
         )
         assert not dec.allowed, f"Path traversal '{path}' should be blocked"
         assert any(
@@ -429,7 +457,7 @@ async def test_scenario_10_unauthorized_tools_and_rbac_boundaries() -> None:
     viewer_ctx = {"roles": ["viewer"], "permissions": ["reports:read"]}
     res = await reg.execute("read_file", {"path": "README.md"}, context=viewer_ctx)
     assert not res.success
-    assert "Forbidden: Tenant context lacks required permissions" in (res.error or "")
+    assert "Forbidden: missing exact permissions" in (res.error or "")
 
     # RBAC Guardrail evaluation
     guard_dec = check_tool_rbac_guardrail(
@@ -453,6 +481,7 @@ async def test_scenario_10_unauthorized_tools_and_rbac_boundaries() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_scenario_11_approval_required_dangerous_tools_lifecycle() -> None:
     """Dangerous tools pause execution for approval, and proceed upon human authorization."""
     engine = ExecutionEngine()
@@ -534,6 +563,7 @@ async def test_scenario_11_approval_required_dangerous_tools_lifecycle() -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_scenario_12_toctou_argument_tampering_prevention() -> None:
     """Altering arguments after approval was granted triggers TOCTOU security rejection."""
     engine = ExecutionEngine()
@@ -744,45 +774,22 @@ def test_scenario_15_planner_pure_banking_and_code_inspection_plans() -> None:
 async def test_scenario_16_public_http_agent_task_and_approval_api_boundary(
     auth_headers: dict[str, str],
 ) -> None:
-    """Real ASGI HTTP client exercises task creation, run creation, and approval decision endpoints."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        # 1. Create a task requiring human approval
-        create_task_res = await client.post(
-            "/api/v1/agent/tasks",
-            headers=auth_headers,
-            json={"goal": "Execute privileged diagnostic script terminal_exec"},
-        )
-        assert create_task_res.status_code == 201
-        task_data = create_task_res.json()
-        task_id = task_data["task_id"]
+    from tests.fixtures.approvals import pending_http_record
+    from tests.fixtures.auth import subject_id
 
-        # 2. Start a synchronous execution run
-        run_res = await client.post(
-            f"/api/v1/agent/tasks/{task_id}/runs",
-            headers=auth_headers,
-            json={"async_execution": False, "max_iterations": 3},
-        )
-        assert run_res.status_code == 201
-        run_data = run_res.json()
-        run_id = run_data["run_id"]
-
-        # 3. Check pending approvals endpoint
-        pending_res = await client.get(
-            "/api/v1/agent/approvals/pending",
-            headers=auth_headers,
-        )
-        assert pending_res.status_code == 200
-        pending_list = pending_res.json()
-        assert len(pending_list) > 0
-        approval_id = pending_list[0]["approval_id"]
-
-        # 4. Resolve approval via HTTP POST
-        decide_res = await client.post(
-            f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}",
-            headers=auth_headers,
-            json={"approved": True, "reason": "Operator confirmed diagnostic"},
-        )
-        assert decide_res.status_code == 200
-        decide_data = decide_res.json()
-        assert decide_data["status"] == "approved"
+    _, task, run, record = pending_http_record(
+        "tenant-tool-test", subject_id("test-admin")
+    )
+    before = record.model_dump()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for approved in (True, False, True):
+            response = await client.post(
+                f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{record.approval_id}",
+                headers=auth_headers,
+                json={"approved": approved},
+            )
+            assert response.status_code == 503
+            assert record.model_dump() == before
+            assert run.status.value == "paused_approval"

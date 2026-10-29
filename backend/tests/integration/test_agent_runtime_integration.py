@@ -13,6 +13,10 @@ Mandatory failure cases tested across agent runtime:
 - connection failure (tool raises ConnectionError -> caught and recorded in run)
 - partial failure (step failure in DAG -> verifier catches and flags failure)
 - recovery (BoundedRecoveryEngine retries transient errors, stops on non-retryable)
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -198,6 +202,7 @@ class TestAgentRuntimeIntegration:
         assert "verification_started" in event_types
         assert "completed" in event_types
 
+    @pytest.mark.usefixtures("component_decision_store")
     async def test_human_in_the_loop_approval_and_resumption(self) -> None:
         """Integration 3: Sensitive tool pauses in WAITING_APPROVAL, approval resumes run."""
         tool_reg = ToolRegistry()

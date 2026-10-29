@@ -694,19 +694,12 @@ async def test_scenario_14_http_api_endpoints_complete_boundary(
             json=payload_async,
             headers=auth_headers,
         )
-        assert resp_async.status_code == 202
-        async_data = resp_async.json()
-        assert "task_id" in async_data
-        task_id = async_data["task_id"]
-
-        # 3. Poll task status (200 OK)
+        assert resp_async.status_code == 503
+        assert "task_id" not in resp_async.json()
         task_resp = await client.get(
-            f"/api/v1/rag/tasks/{task_id}", headers=auth_headers
+            "/api/v1/rag/tasks/unissued-task", headers=auth_headers
         )
-        assert task_resp.status_code == 200
-        task_info = task_resp.json()
-        assert task_info["task_id"] == task_id
-        assert task_info["tenant_id"] == "tenant-rf2-main"
+        assert task_resp.status_code == 404
 
         # 4. Reject unsupported document type with 400 Bad Request
         payload_invalid = {

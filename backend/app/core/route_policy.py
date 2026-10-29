@@ -189,9 +189,13 @@ class AuthorizationMiddleware:
                     if owned.user_id != context.user_id:
                         raise KeyError
                     if "run_id" in params:
-                        run = manager.get_run(params["run_id"], context.tenant_id)
+                        run = await manager.get_or_restore_run(
+                            params["run_id"], context.tenant_id
+                        )
                         if (
-                            run.task_id != owned.task_id
+                            run.run_id != params["run_id"]
+                            or run.tenant_id != context.tenant_id
+                            or run.task_id != owned.task_id
                             or run.user_id != context.user_id
                         ):
                             raise KeyError

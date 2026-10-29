@@ -307,11 +307,11 @@ async def test_balance_tool_is_single_obo_and_account_authority() -> None:
     assert provided.output["authorization"].startswith("Bearer " + "A" * 15)
     assert provided.output["account_id"] == "ACC-TENANT-A-01"
 
-    self_exchanged = await tool.execute({}, {"tenant_id": "tenant-arch-01"})
-    assert self_exchanged.success
-    assert self_exchanged.output["authorization"].startswith("Bearer ")
-    assert self_exchanged.output["authorization"].endswith("...")
-    assert self_exchanged.output["account_id"] == "ACC-TENANT-A-01"
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as denied:
+        await tool.execute({}, {"tenant_id": "tenant-arch-01"})
+    assert denied.value.status_code == 503
 
 
 @pytest.mark.asyncio

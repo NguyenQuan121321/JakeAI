@@ -7,6 +7,10 @@ Tests the 5 canonical orchestration scenarios:
 4. Tool requiring operator approval boundary
 5. Failure recovery and tenant boundary verification
 Plus LangGraphExecutionAdapter parity.
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from collections.abc import AsyncGenerator
@@ -349,6 +353,7 @@ async def test_scenario_4_approval_pause_boundary(execution_env) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_scenario_4_approval_resume_to_completion(execution_env) -> None:
     """Scenario 4: Dangerous tool execution pauses, then resumes to completion upon approval."""
     engine, _, _ = execution_env
@@ -501,6 +506,7 @@ async def test_scenario_8_cross_tenant_isolation_rejected() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_scenario_9_checkpoint_recovery_process_restart() -> None:
     """Scenario 9: Process restart recovery from durable checkpoint via resume_run."""
     checkpoint_mgr = CheckpointManager()

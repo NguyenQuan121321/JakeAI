@@ -248,6 +248,6 @@ async def test_commercial_api_endpoints(auth_headers: dict[str, str]):
                 "signature": valid_sig,
             },
         )
-        assert good_webhook_res.status_code == 200
-        assert good_webhook_res.json()["status"] == "success"
-        assert good_webhook_res.json()["tier"] == "pro"
+        assert good_webhook_res.status_code == 503
+        after = await client.get("/api/v1/billing/subscription", headers=auth_headers)
+        assert after.json() == sub_res.json()

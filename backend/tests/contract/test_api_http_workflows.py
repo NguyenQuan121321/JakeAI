@@ -17,7 +17,6 @@ import pytest
 from httpx import AsyncClient
 
 from app.agent.runtime.manager import get_agent_manager
-from app.core.config import get_settings
 from app.services.resume_bridge import get_resume_bridge
 
 
@@ -33,7 +32,7 @@ def create_token(
     return create_test_jwt(
         sub=sub,
         tenant_id=tenant_id,
-        roles=roles,
+        roles=roles if roles is not None else ["tenant_admin"],
         permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
         expires_in=expires_in,
     )
@@ -117,11 +116,11 @@ async def test_workflow_1_agent_planning_execution_and_streaming(
 
     # Step 5: Verify Agent Telemetry via GET /api/v1/agent/metrics
     r_metrics = await async_client.get("/api/v1/agent/metrics", headers=headers)
-    assert r_metrics.status_code == 200
+    assert r_metrics.status_code == 503
     metrics_data = r_metrics.json()
-    assert "tasks_created" in metrics_data
-    assert "runs_started" in metrics_data
-    assert metrics_data["tasks_created"] >= 1
+    assert "tasks_created" not in metrics_data
+    assert "runs_started" not in metrics_data
+    assert "detail" in metrics_data
 
 
 # ==============================================================================
@@ -168,17 +167,12 @@ async def test_workflow_2_rag_ingest_query_and_grounded_generation(
             "filename": "orion_addendum.txt",
         },
     )
-    assert r_async.status_code == 202
-    async_data = r_async.json()
-    task_id = async_data["task_id"]
-    assert async_data["status"] in ("queued", "completed", "processing")
-
-    # Step 3: Poll Ingestion Task Status via GET /api/v1/rag/tasks/{task_id}
+    assert r_async.status_code == 503
+    assert "task_id" not in r_async.json()
     r_task_status = await async_client.get(
-        f"/api/v1/rag/tasks/{task_id}", headers=headers
+        "/api/v1/rag/tasks/unissued-task", headers=headers
     )
-    assert r_task_status.status_code == 200
-    assert r_task_status.json()["task_id"] == task_id
+    assert r_task_status.status_code == 404
 
     # Step 4: Hybrid Query via POST /api/v1/rag/query
     r_query = await async_client.post(
@@ -399,88 +393,49 @@ async def test_workflow_4_gateway_inference_and_finops_accounting(
 async def test_workflow_5_human_in_the_loop_and_tool_resume_bridge(
     async_client: AsyncClient,
 ) -> None:
-    """Verify Human-in-the-Loop approval gate -> decision -> tool result -> internal resume."""
-    tenant_id = f"tenant-hitl-{uuid.uuid4().hex[:6]}"
-    headers = auth_headers(tenant_id=tenant_id)
+    """Unbound RAM approvals/checkpoints remain unchanged through repeated HTTP attempts."""
+    from tests.fixtures.auth import subject_id
+
     manager = get_agent_manager()
-    bridge = get_resume_bridge()
-    settings = get_settings()
-
-    # Step 1: Create Task and Run
+    tenant = "contract-disabled-approval-" + uuid.uuid4().hex[:8]
+    headers = auth_headers(tenant_id=tenant, sub="engineer-1")
     task = manager.create_task(
-        goal="Perform automated code refactor requiring human approval",
-        tenant_id=tenant_id,
-        user_id="engineer-1",
+        goal="synthetic pending action",
+        tenant_id=tenant,
+        user_id=subject_id("engineer-1"),
     )
-    run = manager.create_run(task.task_id, tenant_id=tenant_id, user_id="engineer-1")
-
-    # Step 2: Register Dangerous Action Approval Gate
-    appr = manager.approval_manager.create_request(
+    run = manager.create_run(
+        task.task_id, tenant_id=tenant, user_id=subject_id("engineer-1")
+    )
+    approval = manager.approval_manager.create_request(
         task_id=task.task_id,
         run_id=run.run_id,
-        tenant_id=tenant_id,
+        tenant_id=tenant,
         tool_name="shell_execute",
-        tool_args={"command": "rm -rf /tmp/cache"},
-        reason="Purge stale local cache artifacts",
-        risk_level="dangerous",
+        tool_args={"command": "synthetic"},
+        reason="test",
     )
-
-    # Step 3: Operator Lists Pending Approvals via GET /api/v1/agent/approvals/pending
-    r_pending = await async_client.get(
-        "/api/v1/agent/approvals/pending", headers=headers
-    )
-    assert r_pending.status_code == 200
-    pending_list = r_pending.json()
-    assert any(a["approval_id"] == appr.approval_id for a in pending_list)
-
-    # Step 4: Operator Submits Approval via POST /api/v1/agent/tasks/{tid}/runs/{rid}/approvals/{aid}
-    r_decision = await async_client.post(
-        f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{appr.approval_id}",
-        headers=headers,
-        json={"approved": True, "reason": "Authorized by security lead"},
-    )
-    assert r_decision.status_code == 200
-    assert r_decision.json()["status"] == "approved"
-
-    # Step 5: Register tool checkpoint and submit tool result via POST /api/v1/coding/tool-result
-    call_id = f"call_refactor_{uuid.uuid4().hex[:8]}"
+    before = approval.model_dump()
+    for approved in (True, False, True):
+        response = await async_client.post(
+            f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{approval.approval_id}",
+            headers=headers,
+            json={"approved": approved},
+        )
+        assert response.status_code == 503
+        assert approval.model_dump() == before
+    bridge = get_resume_bridge()
+    call_id = "contract-call-" + uuid.uuid4().hex[:8]
     await bridge.save_checkpoint(
-        call_id=call_id,
-        tenant_id=tenant_id,
-        state_data={"tool": "shell_execute", "status": "pending"},
+        call_id=call_id, tenant_id=tenant, state_data={"synthetic": True}
     )
-
-    r_tool_result = await async_client.post(
-        "/api/v1/coding/tool-result",
-        headers=headers,
-        json={
-            "call_id": call_id,
-            "result": {"exit_code": 0, "output": "Cache purged successfully"},
-        },
-    )
-    assert r_tool_result.status_code == 200
-    assert r_tool_result.json()["status"] == "resumed"
-
-    # Step 6: Internal Perimeter Resume via POST /internal/v1/coding/resume
-    call_id_internal = f"call_internal_{uuid.uuid4().hex[:8]}"
-    await bridge.save_checkpoint(
-        call_id=call_id_internal,
-        tenant_id=tenant_id,
-        state_data={"tool": "ast_patch", "status": "pending"},
-    )
-
-    internal_headers = {
-        "x-forwarded-by": "finnapigo",
-        "x-internal-secret": settings.INTERNAL_GATEWAY_SECRET,
-    }
-    r_internal = await async_client.post(
-        "/internal/v1/coding/resume",
-        headers=internal_headers,
-        json={
-            "call_id": call_id_internal,
-            "tenant_id": tenant_id,
-            "result": {"applied_patches": 3},
-        },
-    )
-    assert r_internal.status_code == 200
-    assert r_internal.json()["status"] == "resumed"
+    checkpoint = await bridge.get_checkpoint(call_id)
+    for prefix in ("/api/v1/coding", "/internal/v1/coding"):
+        for _ in range(2):
+            response = await async_client.post(
+                prefix + "/tool-result",
+                headers=headers,
+                json={"call_id": call_id, "result": {}},
+            )
+            assert response.status_code == 503
+            assert await bridge.get_checkpoint(call_id) == checkpoint

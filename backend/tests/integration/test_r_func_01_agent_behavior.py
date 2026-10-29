@@ -13,6 +13,10 @@ Proves the 10 required orchestration scenarios and system boundaries:
 10. Process restart -> resume without duplicating completed steps.
 11. Run cancellation and timeout enforcement.
 12. HTTP REST API endpoints and multi-tenant isolation.
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -601,6 +605,7 @@ async def test_scenario_06_tool_selection_validation_and_execution() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_scenario_07_approval_pause_resume_via_persisted_state(tmp_path) -> None:
     """SCENARIO 7: Dangerous tool triggers approval gate, pauses cleanly, and resumes upon approval."""
     backend = MockControllableBackend()
@@ -1029,6 +1034,6 @@ async def test_scenario_12_http_api_endpoints_and_isolation() -> None:
             "/api/v1/agent/metrics",
             headers={"Authorization": f"Bearer {token_tenant_a}"},
         )
-        assert res_metrics.status_code == 200
+        assert res_metrics.status_code == 503
         metrics = res_metrics.json()
-        assert "tasks_created" in metrics or "runs_started" in metrics
+        assert "tasks_created" not in metrics and "runs_started" not in metrics

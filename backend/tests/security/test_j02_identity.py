@@ -87,6 +87,15 @@ def test_actual_finn_key_bytes_and_empty_grants(policy):
         verify_access(wrong, policy)
 
 
+@pytest.mark.parametrize("token", [None, {}, [], 42, True, b"opaque"])
+def test_nontext_credential_is_a_denial(policy, token):
+    from app.core.security import verify_finnapigo_jwt
+
+    with pytest.raises(HTTPException) as denied:
+        verify_finnapigo_jwt(token)
+    assert denied.value.status_code == 401
+
+
 @pytest.mark.parametrize("name", sorted(MANDATORY))
 @pytest.mark.parametrize("replacement", ["missing", None])
 def test_every_mandatory_claim_is_explicit(policy, name, replacement):
@@ -183,8 +192,9 @@ def test_duplicates_rejected_and_benign_extensions_preserved(policy):
     assert verify_access(encode(policy, extension), policy)["Extension"] == "one"
 
 
-def test_ttl_skew_and_immutable_retirement(policy):
+def test_ttl_skew_and_immutable_retirement(policy, monkeypatch):
     now = int(time.time())
+    monkeypatch.setattr(time, "time", lambda: now + 0.25)
     for payload in [
         claims(exp=now + 901),
         claims(iat=now + 31, nbf=now + 31),
@@ -313,7 +323,7 @@ async def test_every_actual_protected_route_denies_empty_grants(policy):
                     .replace("{approval_id}", "absent")
                     .replace("{provider}", "openai")
                 )
-                for role in ("member", "admin", "tenant_admin", "approver"):
+                for role in ("member", "operator", "admin", "tenant_admin", "approver"):
                     token = encode(policy, claims(perms=[], role=role))
                     response = await client.request(
                         method, url, headers={"Authorization": "Bearer " + token}
@@ -326,6 +336,56 @@ async def test_every_actual_protected_route_denies_empty_grants(policy):
                     )
     assert total >= 40
     await adapter.close()
+
+
+@pytest.mark.parametrize("tenant", ["tenant-a", "tenant-b", "default"])
+@pytest.mark.parametrize(
+    "fault,expected", [("inactive", 401), ("stale", 503), ("outage", 503)]
+)
+async def test_every_protected_route_fails_before_effect_on_authority_loss(
+    policy, tenant, fault, expected
+):
+    """Real application wiring, synthetic state transport; no actual-Finn claim."""
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+
+    app, adapter = await application(policy)
+    await adapter.client.aclose()
+    payload = claims(tid=tenant, perms=FULL_TEST_PERMISSIONS, role="tenant_admin")
+
+    def response(request):
+        if fault == "inactive":
+            return httpx.Response(401, json={"active": False})
+        if fault == "outage":
+            raise httpx.ConnectError("synthetic state outage")
+        return httpx.Response(
+            200, json=state_response(payload, checked_at=int(time.time()) - 16)
+        )
+
+    adapter.client = httpx.AsyncClient(transport=httpx.MockTransport(response))
+    token = encode(policy, payload)
+    checked = 0
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            for path, operations in app.openapi()["paths"].items():
+                for method in operations:
+                    if not isinstance(policy_for(method.upper(), path), tuple):
+                        continue
+                    url = (
+                        path.replace("{task_id}", "absent")
+                        .replace("{run_id}", "absent")
+                        .replace("{approval_id}", "absent")
+                        .replace("{provider}", "openai")
+                    )
+                    result = await client.request(
+                        method, url, headers={"Authorization": "Bearer " + token}
+                    )
+                    assert result.status_code == expected, (method, path, fault, tenant)
+                    checked += 1
+        assert checked == 43
+    finally:
+        await adapter.close()
 
 
 async def test_actual_owner_default_and_alias_paths(policy):
@@ -370,3 +430,58 @@ async def test_actual_owner_default_and_alias_paths(policy):
             )
         ).status_code == 403
     await adapter.close()
+
+
+async def test_agent_only_grants_reach_actual_dispatch_with_fresh_state(
+    policy, monkeypatch
+):
+    """Replace only the external model adapter; retain route/runtime/failover authority."""
+    from app.providers.base import (
+        ModelCapabilityCatalog,
+        ProviderCacheTelemetry,
+        ProviderResponse,
+    )
+    from app.providers.registry import get_provider_registry
+
+    calls = []
+
+    class ProviderFixture:
+        async def complete(self, request, client=None):
+            calls.append(request.tenant_id)
+            return ProviderResponse(
+                text='{"action":"finish","output":"synthetic completion","thought":"done"}',
+                model=request.model,
+                provider="gemini",
+                telemetry=ProviderCacheTelemetry(),
+            )
+
+        def capabilities(self, model):
+            return ModelCapabilityCatalog.get(model)
+
+    monkeypatch.setitem(get_provider_registry()._providers, "gemini", ProviderFixture())
+    app, adapter = await application(policy)
+    headers = {
+        "Authorization": "Bearer "
+        + encode(policy, claims(perms=["agent:write", "agent:read", "agent:execute"]))
+    }
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            task = await client.post(
+                "/api/v1/agent/tasks",
+                headers=headers,
+                json={"goal": "synthetic completion"},
+            )
+            assert task.status_code == 201
+            run = await client.post(
+                f"/api/v1/agent/tasks/{task.json()['task_id']}/runs",
+                headers=headers,
+                json={"async_execution": False, "max_iterations": 2},
+            )
+            assert run.status_code == 201
+            assert run.json()["status"] == "completed"
+            assert run.json()["final_output"] == "synthetic completion"
+            assert calls and set(calls) == {"tenant-a"}
+    finally:
+        await adapter.close()

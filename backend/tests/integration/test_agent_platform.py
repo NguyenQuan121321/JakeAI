@@ -10,6 +10,10 @@ Covers:
 7. Bounded Planning & Multi-step Workflow Engine
 8. Autonomous Execution Loop (events, cooperative cancellation, iteration ceilings)
 9. FastAPI Endpoints & Contract Enforcement (/tasks, /runs, /events, /cancel, /approvals, /metrics)
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -397,58 +401,27 @@ async def test_long_term_memory_tenant_isolation() -> None:
 
 @pytest.mark.asyncio
 async def test_approval_manager_flow_and_isolation() -> None:
-    appr_mgr = ApprovalManager()
-
-    # Request approval for dangerous tool
-    req = appr_mgr.create_request(
-        task_id="task_1",
-        run_id="run_1",
-        tenant_id="tenant-alpha",
+    manager = ApprovalManager()
+    record = manager.create_request(
+        task_id="task",
+        run_id="run",
+        tenant_id="a",
         tool_name="terminal_exec",
         tool_args={"command": "npm install"},
-        reason="Requires server modification",
-        risk_level="dangerous",
+        reason="dangerous",
     )
-
-    assert req.status == ApprovalStatus.PENDING
-    assert req.approval_id is not None
-
-    # Verify pending approvals for tenant-alpha
-    pending_alpha = appr_mgr.list_pending("tenant-alpha")
-    assert len(pending_alpha) == 1
-    assert pending_alpha[0].approval_id == req.approval_id
-
-    # Negative test: Tenant-beta cannot see tenant-alpha's approvals
-    pending_beta = appr_mgr.list_pending("tenant-beta")
-    assert len(pending_beta) == 0
-
-    # Negative test: Tenant-beta cannot decide tenant-alpha's approval
-    with pytest.raises(PermissionError, match=r"Tenant mismatch"):
-        appr_mgr.decide(
-            req.approval_id,
-            ApprovalDecision(approved=True, reason="Unauthorized approve"),
-            tenant_id="tenant-beta",
-            user_id="hacker",
-        )
-
-    # Positive test: Tenant-alpha approves
-    decided = appr_mgr.decide(
-        req.approval_id,
-        ApprovalDecision(approved=True, reason="Approved by admin"),
-        tenant_id="tenant-alpha",
-        user_id="admin_user",
-    )
-    assert decided.status == ApprovalStatus.APPROVED
-    assert decided.decided_by == "admin_user"
-
-    # Idempotency / conflict check
-    with pytest.raises(ValueError, match=r"already finalized"):
-        appr_mgr.decide(
-            req.approval_id,
-            ApprovalDecision(approved=False, reason="Too late"),
-            tenant_id="tenant-alpha",
-            user_id="admin_user",
-        )
+    assert manager.list_pending("b") == []
+    for tenant in ("a", "b"):
+        for approved in (True, False):
+            with pytest.raises(PermissionError, match="Durable bound approval"):
+                manager.decide(
+                    record.approval_id,
+                    ApprovalDecision(approved=approved),
+                    tenant,
+                    "42",
+                )
+            assert record.status == ApprovalStatus.PENDING
+            assert record.decided_by is None
 
 
 # ===========================================================================
@@ -583,6 +556,7 @@ async def test_agent_execution_loop_normal_finish() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_agent_execution_loop_approval_gate_and_resume() -> None:
     backend = MockToolUsingBackend()
     planner = BoundedPlanner(backend=backend, max_iterations=5)
@@ -773,13 +747,13 @@ async def test_api_approvals_and_metrics_endpoints(async_client: AsyncClient) ->
     res_appr = await async_client.get(
         "/api/v1/agent/approvals/pending", headers=headers
     )
-    assert res_appr.status_code == status.HTTP_200_OK
-    assert isinstance(res_appr.json(), list)
+    assert res_appr.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert not isinstance(res_appr.json(), list)
 
     # Check metrics endpoint
     res_metrics = await async_client.get("/api/v1/agent/metrics", headers=headers)
-    assert res_metrics.status_code == status.HTTP_200_OK
+    assert res_metrics.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     metrics = res_metrics.json()
-    assert "tasks_created" in metrics
-    assert "runs_started" in metrics
-    assert "total_cost_usd" in metrics
+    assert "tasks_created" not in metrics
+    assert "runs_started" not in metrics
+    assert "total_cost_usd" not in metrics

@@ -25,6 +25,10 @@ DF-F  Scope correctness: the resume bridge fails closed when a checkpoint
 Classification: HTTP/API behavior is exercised through the real FastAPI app
 (ASGI transport + real JWT auth); upstream model calls are controlled doubles
 at the module boundary (they verify data flow, not live provider integration).
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -53,6 +57,7 @@ from app.optimizer.semantic_cache import (
 )
 from app.providers.base import ProviderCacheTelemetry, UpstreamLLMResponse
 from app.services.resume_bridge import ResumeBridgeManager
+from tests.fixtures.auth import FULL_TEST_PERMISSIONS
 
 _UNSET = object()
 
@@ -135,7 +140,7 @@ async def test_http_run_carries_request_identity() -> None:
     with patch(
         "app.agent.backends.jakeai.call_upstream_llm_detailed",
         new_callable=AsyncMock,
-        side_effect=[tool_call_payload("terminal_exec", {"command": "ls /tmp"})],
+        side_effect=[finish_payload("synthetic safe completion")],
     ):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
@@ -165,10 +170,10 @@ async def test_http_run_carries_request_identity() -> None:
     assert run["correlation_id"] == correlation_id, (
         f"run lost the caller correlation_id: {run['correlation_id']!r}"
     )
-    assert run["roles"] == ["admin", "operator"], (
+    assert run["roles"] == ["tenant_admin"], (
         f"run lost the caller roles: {run['roles']!r}"
     )
-    assert run["permissions"] == ["agent:read", "agent:write", "tools:execute"], (
+    assert run["permissions"] == FULL_TEST_PERMISSIONS, (
         f"run lost the caller permissions: {run['permissions']!r}"
     )
 
@@ -197,7 +202,7 @@ async def test_run_identity_survives_checkpoint_restore_roundtrip() -> None:
     with patch(
         "app.agent.backends.jakeai.call_upstream_llm_detailed",
         new_callable=AsyncMock,
-        side_effect=[tool_call_payload("terminal_exec", {"command": "ls /tmp"})],
+        side_effect=[finish_payload("synthetic safe completion")],
     ):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
@@ -227,16 +232,23 @@ async def test_run_identity_survives_checkpoint_restore_roundtrip() -> None:
         )
         assert res.status_code == 200, res.text
         restored = res.json()
+        foreign = await client.get(
+            f"/api/v1/agent/tasks/{task_id}/runs/{run_id}",
+            headers={
+                "Authorization": "Bearer " + make_jwt(tenant, user_id="other-user")
+            },
+        )
+        assert foreign.status_code == 404
 
     assert restored["run_id"] == run_id
-    assert restored["status"] == RunStatus.PAUSED_APPROVAL.value
+    assert restored["status"] == RunStatus.COMPLETED.value
     assert restored["correlation_id"] == correlation_id, (
         f"checkpoint restore lost correlation_id: {restored['correlation_id']!r}"
     )
-    assert restored["roles"] == ["admin", "operator"], (
+    assert restored["roles"] == ["tenant_admin"], (
         f"checkpoint restore lost roles: {restored['roles']!r}"
     )
-    assert restored["permissions"] == ["agent:read", "agent:write", "tools:execute"], (
+    assert restored["permissions"] == FULL_TEST_PERMISSIONS, (
         f"checkpoint restore lost permissions: {restored['permissions']!r}"
     )
 
@@ -311,6 +323,7 @@ async def test_tool_context_receives_run_correlation_id() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_approval_decision_rejects_cross_run_binding() -> None:
     """An approval decision must be bound to the run in the request path
     (RL02-F-06).
@@ -774,7 +787,7 @@ async def test_jwt_null_scopes_claim_handled_gracefully() -> None:
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         res = await client.get("/api/v1/agent/approvals/pending", headers=headers)
-    assert res.status_code == 200, (
+    assert res.status_code == 401, (
         f"null scopes claim produced {res.status_code} instead of a handled "
         f"response: {res.text}"
     )

@@ -53,7 +53,9 @@ def create_test_jwt(
     effective_roles = roles if roles is not None else ["user"]
     primary_role = effective_roles[0] if effective_roles else "user"
     effective_perms = (
-        permissions if permissions is not None else ["chat:read", "chat:write"]
+        permissions
+        if permissions is not None
+        else ["chat:read", "chat:write", "rag:read"]
     )
 
     uid = int(subject_id(sub))

@@ -30,6 +30,16 @@ __all__ = [
 ]
 
 
+@pytest.fixture
+def component_decision_store(monkeypatch):
+    """Opt-in only: exercise orchestration from a pre-decided component record."""
+    from app.agent.approvals.manager import ApprovalManager
+    from tests.fixtures.approvals import component_decision
+
+    monkeypatch.setattr(ApprovalManager, "decide", component_decision)
+    monkeypatch.setattr(ApprovalManager, "decide_request", component_decision)
+
+
 @pytest.fixture(autouse=True)
 def offline_identity_transport(monkeypatch, request):
     """Ordinary suites isolate Finn state, never token verification or grants.

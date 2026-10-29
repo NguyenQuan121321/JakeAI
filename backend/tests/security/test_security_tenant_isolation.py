@@ -91,7 +91,7 @@ async def test_tenant_isolation_agent_tasks_and_runs() -> None:
             f"/api/v1/agent/tasks/{task_a_id}",
             headers=headers_b,
         )
-        assert b_get_task.status_code == 403
+        assert b_get_task.status_code == 404
         assert "$50M" not in b_get_task.text
         assert "confidential" not in b_get_task.text
 
@@ -101,7 +101,7 @@ async def test_tenant_isolation_agent_tasks_and_runs() -> None:
             headers=headers_b,
             json={"async_execution": False},
         )
-        assert b_start_run.status_code == 403
+        assert b_start_run.status_code == 404
         assert run_a_id not in b_start_run.text
 
         # 5. Tenant B attempts to read Tenant A's run -> 403 Forbidden
@@ -109,21 +109,21 @@ async def test_tenant_isolation_agent_tasks_and_runs() -> None:
             f"/api/v1/agent/tasks/{task_a_id}/runs/{run_a_id}",
             headers=headers_b,
         )
-        assert b_get_run.status_code == 403
+        assert b_get_run.status_code == 404
 
         # 6. Tenant B attempts to cancel Tenant A's run -> 403 Forbidden
         b_cancel_run = await client.post(
             f"/api/v1/agent/tasks/{task_a_id}/runs/{run_a_id}/cancel",
             headers=headers_b,
         )
-        assert b_cancel_run.status_code == 403
+        assert b_cancel_run.status_code == 404
 
         # 7. Tenant B attempts to stream events of Tenant A's run -> 403 Forbidden
         b_events = await client.get(
             f"/api/v1/agent/tasks/{task_a_id}/runs/{run_a_id}/events",
             headers=headers_b,
         )
-        assert b_events.status_code == 403
+        assert b_events.status_code == 404
 
         # 8. Tenant B attempts to decide approval on Tenant A's run -> 403 Forbidden
         b_approval = await client.post(
@@ -131,7 +131,7 @@ async def test_tenant_isolation_agent_tasks_and_runs() -> None:
             headers=headers_b,
             json={"approved": True, "comment": "hacked"},
         )
-        assert b_approval.status_code == 403
+        assert b_approval.status_code == 404
 
 
 # ==============================================================================

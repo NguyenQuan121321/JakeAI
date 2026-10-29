@@ -150,13 +150,15 @@ def create_application() -> FastAPI:
         credential_token = begin_credentials()
         try:
             response: Response = await call_next(request)
-        except Exception:
-            duration_ms = (time.perf_counter() - start_time) * 1000.0
-            metrics.record_http_request(
-                request.method, request.url.path, 500, duration_ms
+        except Exception as exc:
+            # Keep the same tracing/redaction envelope on unexpected authority
+            # or store failures. Exception messages can contain credentials.
+            logger.error("Unhandled request failure category=%s", type(exc).__name__)
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+                headers={"Cache-Control": "no-store"},
             )
-            set_current_trace_context(None)
-            raise
         finally:
             end_credentials(credential_token)
 

@@ -25,7 +25,6 @@ import time
 import uuid
 from unittest.mock import AsyncMock, patch
 
-import jwt
 import pytest
 from fastapi import HTTPException
 
@@ -316,28 +315,17 @@ class TestRedisIntegrationAuthorities:
             await mgr.clear()
 
     async def test_token_denylist_revocation(self) -> None:
-        """Authority 8: check_token_denylist JTI check."""
-        settings = get_settings()
-        jti = uuid.uuid4().hex
-        token = jwt.encode(
-            {"sub": "user1", "jti": jti}, settings.JWT_SECRET_KEY, algorithm="HS256"
-        )
+        from app.core.identity_state import current_authority
+        from tests.fixtures.auth import create_test_jwt
 
-        # Un-denylisted token passes
-        await check_token_denylist(token)
-
-        # If Redis reachable, test revocation denial
-        if REDIS_AVAILABLE:
-            import redis.asyncio as aioredis
-
-            client = aioredis.from_url(settings.REDIS_URL)
-            await client.set(f"denylist:jti:{jti}", "revoked", ex=60)
-            await client.aclose()
-
-            with pytest.raises(HTTPException) as exc_info:
+        token = create_test_jwt()
+        binding = current_authority.set(None)
+        try:
+            with pytest.raises(HTTPException) as denied:
                 await check_token_denylist(token)
-            assert exc_info.value.status_code == 401
-            assert "revoked" in exc_info.value.detail.lower()
+            assert denied.value.status_code == 503
+        finally:
+            current_authority.reset(binding)
 
 
 @pytest.mark.asyncio
