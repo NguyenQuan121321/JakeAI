@@ -104,6 +104,10 @@ def create_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    from app.core.route_policy import AuthorizationMiddleware
+
+    # The size/tracing middleware registered below surrounds authorization too.
+    app.add_middleware(AuthorizationMiddleware)
 
     # Request Size Limiting and Tracing Middleware
     @app.middleware("http")
@@ -347,9 +351,6 @@ def create_application() -> FastAPI:
         return app.openapi_schema
 
     app.openapi = custom_openapi  # type: ignore[method-assign]
-    from app.core.route_policy import AuthorizationMiddleware
-
-    app.add_middleware(AuthorizationMiddleware)
     return app
 
 

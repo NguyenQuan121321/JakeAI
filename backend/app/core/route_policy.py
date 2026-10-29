@@ -111,7 +111,11 @@ class AuthorizationMiddleware:
             await send({"type": "websocket.close", "code": 1008})
             return
         request = Request(scope, receive)
-        if scope["method"] == "OPTIONS":
+        if (
+            scope["method"] == "OPTIONS"
+            and "origin" in request.headers
+            and "access-control-request-method" in request.headers
+        ):
             # CORS emits only its origin/method/header negotiation response.
             await self.app(scope, receive, send)
             return

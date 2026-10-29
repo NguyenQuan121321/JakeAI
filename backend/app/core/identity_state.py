@@ -65,11 +65,21 @@ class IdentityStateClient:
                         headers={
                             "Authorization": "Bearer " + s.IDENTITY_STATE_SECRET,
                             "X-Service-Key-ID": s.IDENTITY_STATE_KEY_ID,
+                            "Accept-Encoding": "identity",
                         },
                         json={"token": token, "tenant_id": claims["tid"]},
                     ) as response:
+                        if (
+                            response.headers.get("Content-Encoding", "identity")
+                            != "identity"
+                        ):
+                            raise ValueError("Compressed state response is unsupported")
+                        if not response.headers.get("Content-Type", "").startswith(
+                            "application/json"
+                        ):
+                            raise ValueError("JSON state response required")
                         body = bytearray()
-                        async for chunk in response.aiter_bytes():
+                        async for chunk in response.aiter_bytes(chunk_size=4097):
                             body.extend(chunk)
                             if len(body) > 4096:
                                 raise ValueError("Oversize state response")

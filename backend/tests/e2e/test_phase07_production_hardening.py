@@ -426,6 +426,9 @@ def test_global_exception_handler_normalizes_provider_error(monkeypatch) -> None
     """Verify ProviderError raised during request is normalized to safe JSON without secrets."""
     from app.main import app
 
+    monkeypatch.setattr(app.router, "routes", list(app.router.routes))
+    monkeypatch.setattr(app, "openapi_schema", None)
+
     @app.get("/test-provider-error")
     async def raise_provider_error() -> None:
         raise ProviderUnavailableError(
@@ -498,6 +501,9 @@ async def test_chat_sse_stream_provider_error_mid_stream() -> None:
 def test_global_exception_handler_provider_timeout_and_408(monkeypatch) -> None:
     """Verify ProviderTimeoutError maps to HTTP 408 Request Timeout."""
     from app.main import app
+
+    monkeypatch.setattr(app.router, "routes", list(app.router.routes))
+    monkeypatch.setattr(app, "openapi_schema", None)
 
     @app.get("/test-provider-timeout")
     async def raise_timeout() -> None:
