@@ -108,13 +108,16 @@ def unique_object(
             result[key] = value
         return result
 
-    obj = json.loads(
-        raw,
-        object_pairs_hook=pairs,
-        parse_constant=lambda _: (_ for _ in ()).throw(
-            ValueError("Invalid JSON number")
-        ),
-    )
+    try:
+        obj = json.loads(
+            raw,
+            object_pairs_hook=pairs,
+            parse_constant=lambda _: (_ for _ in ()).throw(
+                ValueError("Invalid JSON number")
+            ),
+        )
+    except RecursionError:
+        raise ValueError("JSON nesting exceeds parser bounds") from None
     if not isinstance(obj, dict):
         raise ValueError("JSON object required")
     if any(

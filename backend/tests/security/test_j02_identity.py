@@ -96,6 +96,22 @@ def test_nontext_credential_is_a_denial(policy, token):
     assert denied.value.status_code == 401
 
 
+def test_nested_json_cannot_escape_the_credential_denial_boundary(policy):
+    from app.core.identity import unique_object
+    from app.core.security import verify_finnapigo_jwt
+
+    nested = '{"extension":' + "[" * 4000 + "0" + "]" * 4000 + "}"
+    with pytest.raises(ValueError):
+        unique_object(nested)
+    segments = encode(policy).split(".")
+    segments[1] = jwt.utils.base64url_encode(nested.encode()).decode()
+    token = ".".join(segments)
+    assert len(token) < 12288
+    with pytest.raises(HTTPException) as denied:
+        verify_finnapigo_jwt(token)
+    assert denied.value.status_code == 401
+
+
 @pytest.mark.parametrize("name", sorted(MANDATORY))
 @pytest.mark.parametrize("replacement", ["missing", None])
 def test_every_mandatory_claim_is_explicit(policy, name, replacement):
