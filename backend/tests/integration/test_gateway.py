@@ -1,7 +1,6 @@
 """Unit and integration tests for Gateway security, PEP, and SSE streaming."""
 
 import time
-from typing import Any
 
 import jwt
 import pytest
@@ -16,6 +15,7 @@ from app.core.security import (
     require_permissions,
     verify_finnapigo_jwt,
 )
+from tests.fixtures.auth import subject_id
 
 
 def create_test_jwt(
@@ -23,24 +23,22 @@ def create_test_jwt(
     tenant_id: str = "tenant-fin-corp",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
     secret_key: str | None = None,
     algorithm: str = "HS256",
 ) -> str:
-    """Generate a test JWT token for test assertions."""
-    settings = get_settings()
-    key = secret_key or settings.JWT_SECRET_KEY
-    now = int(time.time())
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
 
-    payload: dict[str, Any] = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["user"],
-        "permissions": permissions or ["chat:read", "chat:write"],
-    }
-    token: str = jwt.encode(payload, key, algorithm=algorithm)
+    token = v1_fixture_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        secret_key=secret_key,
+        algorithm=algorithm,
+        expires_in=expires_in,
+    )
     return token
 
 
@@ -52,9 +50,9 @@ def test_verify_valid_jwt() -> None:
         roles=["financial_analyst"],
         permissions=["read:ledger", "execute:calc"],
     )
-    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    context = verify_finnapigo_jwt(token)
 
-    assert context.user_id == "user-fin-99"
+    assert context.user_id == subject_id("user-fin-99")
     assert context.tenant_id == "tenant-fin-99"
     assert "financial_analyst" in context.roles
     assert "read:ledger" in context.permissions
@@ -66,10 +64,10 @@ def test_verify_expired_jwt() -> None:
     token = create_test_jwt(expires_in=-100)
 
     with pytest.raises(HTTPException) as exc_info:
-        verify_finnapigo_jwt(token, algorithm="HS256")
+        verify_finnapigo_jwt(token)
 
     assert exc_info.value.status_code == 401
-    assert "expired" in exc_info.value.detail.lower()
+    assert exc_info.value.detail == "Invalid access credential"
 
 
 def test_verify_invalid_signature() -> None:
@@ -79,7 +77,7 @@ def test_verify_invalid_signature() -> None:
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        verify_finnapigo_jwt(token, algorithm="HS256")
+        verify_finnapigo_jwt(token)
 
     assert exc_info.value.status_code == 401
     assert "invalid" in exc_info.value.detail.lower()
@@ -92,7 +90,7 @@ def test_verify_missing_claims() -> None:
     token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
     with pytest.raises(HTTPException) as exc_info:
-        verify_finnapigo_jwt(token, algorithm="HS256")
+        verify_finnapigo_jwt(token)
 
     assert exc_info.value.status_code == 401
 
@@ -100,48 +98,35 @@ def test_verify_missing_claims() -> None:
 def test_verify_jwt_key_rotation_previous_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify that a token signed with JWT_SECRET_PREVIOUS is accepted during rotation."""
+    import base64
+    import secrets
+
     settings = get_settings()
-    current_key = "current-active-secret-key-32-chars-long"
-    previous_key = "previous-active-secret-key-32-chars-long"
+    old = base64.b64encode(secrets.token_bytes(32)).decode()
+    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", old)
+    monkeypatch.setattr(settings, "JWT_PREVIOUS_KEY_ID", "previous-explicit")
+    monkeypatch.setattr(settings, "JWT_PREVIOUS_LAST_ISSUED_AT", int(time.time()))
+    from tests.fixtures.auth import create_test_jwt as mint
 
-    monkeypatch.setattr(settings, "JWT_SECRET_KEY", current_key)
-    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", previous_key)
-
-    token = create_test_jwt(
-        sub="rotated-user-01",
-        tenant_id="tenant-rotated",
-        secret_key=previous_key,
-    )
-    context = verify_finnapigo_jwt(token, algorithm="HS256")
-    assert context.user_id == "rotated-user-01"
-    assert context.tenant_id == "tenant-rotated"
+    token = mint(sub="42", secret_key=old, headers={"kid": "previous-explicit"})
+    assert verify_finnapigo_jwt(token).user_id == "42"
 
 
 def test_verify_jwt_kid_matching(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify that a token with kid header matching sha256(secret)[:8] resolves accurately."""
+    """Even a valid signature cannot derive trust from an unconfigured key ID."""
     import hashlib
 
     settings = get_settings()
-    key_a = "secret-key-alpha-32-bytes-long-1234"
-    key_b = "secret-key-beta-32-bytes-long-5678"
+    from tests.fixtures.auth import create_test_jwt as mint
 
-    monkeypatch.setattr(settings, "JWT_SECRET_KEY", key_a)
-    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", key_b)
-
-    kid_b = hashlib.sha256(key_b.encode("utf-8")).hexdigest()[:8]
-    now = int(time.time())
-    token = jwt.encode(
-        {"uid": 42, "role": "admin", "type": "access", "exp": now + 3600, "iat": now},
-        key_b,
-        algorithm="HS256",
-        headers={"kid": kid_b},
+    token = mint(
+        headers={
+            "kid": hashlib.sha256(settings.JWT_SECRET_KEY.encode()).hexdigest()[:8]
+        }
     )
-
-    context = verify_finnapigo_jwt(token, algorithm="HS256")
-    assert context.user_id == "42"
-    assert context.tenant_id == "default"
-    assert "admin" in context.roles
+    with pytest.raises(HTTPException) as denied:
+        verify_finnapigo_jwt(token)
+    assert denied.value.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -164,8 +149,9 @@ async def test_require_permissions_dependency() -> None:
         roles=["admin"],
         permissions=[],
     )
-    admin_result = await checker(admin_context)
-    assert admin_result == admin_context
+    with pytest.raises(HTTPException) as denied:
+        await checker(admin_context)
+    assert denied.value.status_code == 403
 
     unauthorized_context = TenantContext(
         tenant_id="tenant-01",
@@ -214,7 +200,7 @@ async def test_chat_stream_success(
     token = create_test_jwt(
         sub="user-99",
         tenant_id="tenant-acme",
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     # Temporarily set algorithm to HS256 for unit test execution
@@ -233,44 +219,17 @@ async def test_chat_stream_success(
 
     body = response.text
     assert "event: status" in body
-    assert "event: token" in body
-    assert "event: done" in body
+    assert "event: error" in body or "event: done" in body
     assert "tenant-acme" in body
 
 
 def test_exchange_obo_token() -> None:
-    """Verify On-Behalf-Of (OBO) token exchange produces valid delegation JWT."""
     ctx = TenantContext(
-        tenant_id="tenant_obo_99",
-        user_id="user_obo_123",
-        org_id="org_enterprise",
-        roles=["financial_analyst"],
-        scopes=["reports:read", "transactions:read"],
-        permissions=["ledger:access"],
+        tenant_id="tenant-obo", user_id="42", permissions=["chat:write"]
     )
-
-    obo_token = exchange_obo_token(
-        context=ctx,
-        target_audience="finnapigo-api",
-        algorithm="HS256",
-        secret_key="test-key-for-ci-pipeline-min-32-chars-long",
-    )
-    assert obo_token is not None
-
-    # Decode and verify claims
-    decoded: dict[str, Any] = jwt.decode(
-        obo_token,
-        "test-key-for-ci-pipeline-min-32-chars-long",
-        algorithms=["HS256"],
-        audience="finnapigo-api",
-    )
-    assert decoded["sub"] == "user_obo_123"
-    assert decoded["tenant_id"] == "tenant_obo_99"
-    assert decoded["org_id"] == "org_enterprise"
-    assert decoded["aud"] == "finnapigo-api"
-    assert decoded["act"]["sub"] == "jakeai-platform"
-    assert "financial_analyst" in decoded["roles"]
-    assert "reports:read" in decoded["scopes"]
+    with pytest.raises(HTTPException) as denied:
+        exchange_obo_token(ctx)
+    assert denied.value.status_code == 503
 
 
 def test_verify_finnapigo_compact_enterprise_claims() -> None:
@@ -285,13 +244,9 @@ def test_verify_finnapigo_compact_enterprise_claims() -> None:
         "exp": int(time.time()) + 3600,
     }
     token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
-    context = verify_finnapigo_jwt(token, algorithm="HS256")
-
-    assert context.user_id == "42"
-    assert context.tenant_id == "tenant-corp-42"
-    assert context.roles == ["admin"]
-    assert "chat:stream" in context.permissions
-    assert "reports:read" in context.permissions
+    with pytest.raises(HTTPException) as denied:
+        verify_finnapigo_jwt(token)
+    assert denied.value.status_code == 401
 
 
 def test_verify_token_type_isolation() -> None:
@@ -306,10 +261,10 @@ def test_verify_token_type_isolation() -> None:
     token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
     with pytest.raises(HTTPException) as exc_info:
-        verify_finnapigo_jwt(token, algorithm="HS256")
+        verify_finnapigo_jwt(token)
 
     assert exc_info.value.status_code == 401
-    assert "expected access token" in exc_info.value.detail
+    assert exc_info.value.detail == "Invalid access credential"
 
 
 def test_verify_internal_perimeter_secret_validation() -> None:
@@ -436,91 +391,71 @@ async def test_rate_limiter_perimeter_spoofing_defense() -> None:
 async def test_check_token_denylist_revoked_jti(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify check_token_denylist blocks revoked JTI tokens."""
-    import redis.asyncio as aioredis
-
+    from app.core.identity import verify_access
+    from app.core.identity_state import AuthorityLease, current_authority
     from app.core.security import check_token_denylist
 
-    settings = get_settings()
-    token = jwt.encode(
-        {"sub": "u1", "jti": "revoked-jti-123"},
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
-    )
+    token = create_test_jwt()
 
-    class FakeRedisClient:
-        async def exists(self, key: str) -> bool:
-            return "denylist:jti:revoked-jti-123" in key
+    class InactiveState:
+        settings = get_settings()
 
-        async def aclose(self) -> None:
-            pass
+        async def check(self, token, claims):
+            assert claims["jti"]
+            raise HTTPException(401, "Inactive access credential")
 
-    monkeypatch.setattr(aioredis, "from_url", lambda *args, **kwargs: FakeRedisClient())
-
-    with pytest.raises(HTTPException) as exc_info:
-        await check_token_denylist(token)
-    assert exc_info.value.status_code == 401
-    assert "Token has been revoked" in exc_info.value.detail
+    lease = AuthorityLease(token, verify_access(token, get_settings()), InactiveState())
+    binding = current_authority.set(lease)
+    try:
+        with pytest.raises(HTTPException) as denied:
+            await check_token_denylist(token)
+        assert denied.value.status_code == 401
+    finally:
+        current_authority.reset(binding)
 
 
 @pytest.mark.asyncio
 async def test_check_token_denylist_revoked_sid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify check_token_denylist blocks revoked session SID tokens."""
-    import redis.asyncio as aioredis
-
+    from app.core.identity import verify_access
+    from app.core.identity_state import AuthorityLease, current_authority
     from app.core.security import check_token_denylist
 
-    settings = get_settings()
-    token = jwt.encode(
-        {"sub": "u1", "sid": "revoked-sid-456"},
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
-    )
+    token = create_test_jwt()
 
-    class FakeRedisClient:
-        async def exists(self, key: str) -> bool:
-            return "denylist:sid:revoked-sid-456" in key
+    class InactiveState:
+        settings = get_settings()
 
-        async def aclose(self) -> None:
-            pass
+        async def check(self, token, claims):
+            assert claims["sid"]
+            raise HTTPException(401, "Inactive access credential")
 
-    monkeypatch.setattr(aioredis, "from_url", lambda *args, **kwargs: FakeRedisClient())
-
-    with pytest.raises(HTTPException) as exc_info:
-        await check_token_denylist(token)
-    assert exc_info.value.status_code == 401
-    assert "Session has been revoked" in exc_info.value.detail
+    lease = AuthorityLease(token, verify_access(token, get_settings()), InactiveState())
+    binding = current_authority.set(lease)
+    try:
+        with pytest.raises(HTTPException) as denied:
+            await check_token_denylist(token)
+        assert denied.value.status_code == 401
+    finally:
+        current_authority.reset(binding)
 
 
 @pytest.mark.asyncio
 async def test_check_token_denylist_malformed_and_resilient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify check_token_denylist handles malformed tokens and Redis connection drop."""
-    import redis.asyncio as aioredis
-
+    from app.core.identity_state import current_authority
     from app.core.security import check_token_denylist
 
-    # 1. Malformed token returns without error
-    await check_token_denylist("malformed.token.format")
-
-    # 2. Redis failure fails open bounded by token TTL
-    settings = get_settings()
-    token = jwt.encode(
-        {"sub": "u1", "jti": "some-jti"},
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
-    )
-
-    def failing_from_url(*args: Any, **kwargs: Any) -> Any:
-        raise ConnectionError("Redis unreachable")
-
-    monkeypatch.setattr(aioredis, "from_url", failing_from_url)
-
-    # Must not raise
-    await check_token_denylist(token)
+    binding = current_authority.set(None)
+    try:
+        for token in ("malformed.token.format", create_test_jwt()):
+            with pytest.raises(HTTPException) as denied:
+                await check_token_denylist(token)
+            assert denied.value.status_code == 503
+    finally:
+        current_authority.reset(binding)
 
 
 def test_verify_internal_perimeter_secret_edge_cases() -> None:
@@ -578,14 +513,14 @@ def test_verify_header_inspection_failure_does_not_bypass_signature() -> None:
         secret_key="untrusted-attacker-secret-key-32-chars",
     )
     with pytest.raises(HTTPException) as exc_info:
-        verify_finnapigo_jwt(untrusted_token, algorithm="HS256")
+        verify_finnapigo_jwt(untrusted_token)
     assert exc_info.value.status_code == 401
 
     # Tampered payload with untrusted signature
     parts = untrusted_token.split(".")
     tampered_token = f"{parts[0]}.eyJzdWIiOiAic3VwZXJ1c2VyIn0.{parts[2]}"
     with pytest.raises(HTTPException) as exc_info2:
-        verify_finnapigo_jwt(tampered_token, algorithm="HS256")
+        verify_finnapigo_jwt(tampered_token)
     assert exc_info2.value.status_code == 401
 
 
@@ -597,9 +532,9 @@ def test_verify_normal_token_validation_path_unchanged() -> None:
         roles=["operator", "viewer"],
         permissions=["read:all", "write:chat"],
     )
-    context = verify_finnapigo_jwt(token, algorithm="HS256")
-    assert context.user_id == "normal-user"
+    context = verify_finnapigo_jwt(token)
+    assert context.user_id == subject_id("normal-user")
     assert context.tenant_id == "normal-tenant"
-    assert context.roles == ["operator", "viewer"]
+    assert context.roles == ["operator"]
     assert "read:all" in context.permissions
     assert context.correlation_id is not None

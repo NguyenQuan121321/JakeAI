@@ -54,7 +54,7 @@ class DummyTool(Tool):
 
 
 def test_tool_policy_admin_role_bypasses_permissions() -> None:
-    """Users with 'admin' or 'tenant_admin' roles bypass permission requirements."""
+    """Role names cannot satisfy missing permissions."""
     tool = DummyTool(
         name="restricted_tool",
         permissions=["super_admin:delete_universe"],
@@ -69,18 +69,18 @@ def test_tool_policy_admin_role_bypasses_permissions() -> None:
     dec_admin = ToolPolicyEngine.evaluate(
         tool=tool, arguments={}, user_roles=["admin"], user_permissions=[]
     )
-    assert dec_admin.allowed is True
+    assert dec_admin.allowed is False
     assert dec_admin.requires_approval is False
 
     # Tenant admin role -> Authorized
     dec_t_admin = ToolPolicyEngine.evaluate(
         tool=tool, arguments={}, user_roles=["tenant_admin"], user_permissions=[]
     )
-    assert dec_t_admin.allowed is True
+    assert dec_t_admin.allowed is False
 
 
 def test_tool_policy_role_allowlist() -> None:
-    """Built-in roles (e.g. developer, financial_analyst) allow specific tools inherently."""
+    """Built-in roles cannot add tool grants."""
     dev_tool = DummyTool(name="read_file", permissions=["files:read"])
     fin_tool = DummyTool(name="get_account_balance", permissions=["finnapigo:read"])
 
@@ -88,7 +88,7 @@ def test_tool_policy_role_allowlist() -> None:
     dec_dev = ToolPolicyEngine.evaluate(
         tool=dev_tool, arguments={}, user_roles=["developer"], user_permissions=[]
     )
-    assert dec_dev.allowed is True
+    assert dec_dev.allowed is False
 
     # Developer role does NOT have get_account_balance
     dec_dev_denied = ToolPolicyEngine.evaluate(
@@ -103,11 +103,11 @@ def test_tool_policy_role_allowlist() -> None:
         user_roles=["financial_analyst"],
         user_permissions=[],
     )
-    assert dec_fin.allowed is True
+    assert dec_fin.allowed is False
 
 
 def test_tool_policy_permission_aliases() -> None:
-    """Permission aliases satisfy required permissions (e.g. accounts:read -> finnapigo:read)."""
+    """Permission aliases cannot satisfy a different exact grant."""
     tool = DummyTool(name="custom_fin_tool", permissions=["finnapigo:read"])
 
     # User possessing aliased permission accounts:read
@@ -117,7 +117,7 @@ def test_tool_policy_permission_aliases() -> None:
         user_roles=["user"],
         user_permissions=["accounts:read"],
     )
-    assert dec.allowed is True
+    assert dec.allowed is False
 
     # User possessing code:read for search
     search_tool = DummyTool(name="search_symbols", permissions=["agent:search"])
@@ -127,7 +127,7 @@ def test_tool_policy_permission_aliases() -> None:
         user_roles=["user"],
         user_permissions=["code:read"],
     )
-    assert dec_search.allowed is True
+    assert dec_search.allowed is False
 
 
 # ==============================================================================

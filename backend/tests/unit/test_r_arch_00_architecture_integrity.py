@@ -340,15 +340,14 @@ async def test_chat_sse_executes_canonical_orchestration_chain(
 
 
 @pytest.mark.asyncio
-async def test_chat_tool_path_funnels_through_canonical_tool_registry(
+async def test_chat_unsupported_finn_tool_is_blocked_before_dispatch(
     async_client: AsyncClient,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Tool execution in the chat graph must go through ToolRegistry (no bypass).
+    """Unsupported Finn delegation cannot reach a registry effect.
 
-    W-ORC-03 requires every tool call to route through the canonical registry
-    (RBAC + schema validation). This proves it over real HTTP by wrapping the
-    registry's execute method and observing exactly one delegated call.
+    Actual HTTP route policy still requires signed chat/RAG grants. An alias
+    or role cannot create a scoped Finn tool credential or execution success.
     """
     settings = get_settings()
     monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
@@ -372,7 +371,7 @@ async def test_chat_tool_path_funnels_through_canonical_tool_registry(
         sub="user-arch-tool",
         tenant_id="tenant-arch",
         roles=["admin"],
-        permissions=["accounts:read"],
+        permissions=["accounts:read", "chat:write", "rag:read"],
     )
     response = await async_client.post(
         "/api/v1/chat/stream",
@@ -385,10 +384,8 @@ async def test_chat_tool_path_funnels_through_canonical_tool_registry(
 
     assert response.status_code == 200
     body = response.text
-    assert "event: tool_call" in body, "Tool execution event missing from stream"
-    assert funnel_calls == ["get_account_balance"], (
-        f"Tool execution bypassed the canonical ToolRegistry: {funnel_calls}"
-    )
+    assert "event: error" in body and "OBO issuance is disabled" in body
+    assert funnel_calls == []  # No scoped Finn tool delegation contract is available.
 
     # Ownership boundary: tool *authorization* lives in the RBAC guardrail,
     # strictly before the registry. An unprivileged caller must be blocked
@@ -408,8 +405,7 @@ async def test_chat_tool_path_funnels_through_canonical_tool_registry(
             "conversation_id": f"conv-arch-denied-{uuid.uuid4().hex[:8]}",
         },
     )
-    assert blocked.status_code == 200
-    assert "BLOCKED" in blocked.text
+    assert blocked.status_code == 403
     assert funnel_calls == [], (
         "Blocked tool invocation must never reach the canonical ToolRegistry"
     )
@@ -516,7 +512,7 @@ async def test_agent_rest_enforces_canonical_state_machine_and_isolation(
     # Canonical tenant isolation on the task/run store.
     other = {"Authorization": f"Bearer {generate_agent_jwt(tenant_id='tenant-other')}"}
     forbidden = await async_client.get(f"/api/v1/agent/tasks/{task_id}", headers=other)
-    assert forbidden.status_code == 403
+    assert forbidden.status_code == 404
 
     run_created = await async_client.post(
         f"/api/v1/agent/tasks/{task_id}/runs",

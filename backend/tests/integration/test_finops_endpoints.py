@@ -4,9 +4,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.context import TenantContext
-from app.core.security import exchange_obo_token
 from app.finops.service import get_finops_service
 from app.main import app
+from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
 
 
 @pytest.fixture
@@ -18,7 +18,12 @@ def finops_auth_headers() -> dict[str, str]:
         scopes=["chat:write", "gateway:use", "finops:read"],
         permissions=["quotas:write", "billing:read", "finops:admin"],
     )
-    token = exchange_obo_token(context)
+    token = create_test_jwt(
+        sub=context.user_id,
+        tenant_id=context.tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
     return {"Authorization": f"Bearer {token}"}
 
 

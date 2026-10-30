@@ -25,6 +25,10 @@ INV-H  Selected model actually used: FinOps ledger records the model that
 Classification notes: provider/upstream calls are controlled test doubles at
 the module boundary; persistence (checkpoints, caches, quota counters) runs on
 the real in-process managers (Redis/Qdrant paths activate in CI).
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -34,7 +38,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
-import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -62,7 +65,6 @@ from app.agent.state.models import RunState, RunStatus
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
 from app.agent.tools.registry import ToolRegistry
 from app.core.byok import get_byok_manager
-from app.core.config import get_settings
 from app.finops.budget import FinOpsBudgetManager
 from app.main import app
 from app.optimizer.semantic_cache import SemanticCacheManager
@@ -181,17 +183,15 @@ def make_task_spec(tenant: str = "tenant-logic-00") -> TaskSpec:
 
 
 def make_agent_jwt(tenant_id: str, user_id: str = "user-logic-00") -> str:
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": ["admin", "operator"],
-        "permissions": ["agent:read", "agent:write", "tools:execute"],
-    }
-    return pyjwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 async def collect(engine_events: AsyncGenerator[AgentRunEvent, None]) -> list:
@@ -428,6 +428,7 @@ async def test_inv_a6_cancel_of_active_run_still_cancels() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_inv_b10_rejection_on_paused_run_terminates_rejected() -> None:
     """Rejecting a gate on a genuinely paused run terminates it REJECTED.
 
@@ -482,6 +483,7 @@ async def test_inv_b10_rejection_on_paused_run_terminates_rejected() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_inv_b1_approving_one_tool_does_not_unlock_sibling_tool() -> None:
     """Each dangerous tool call requires its own approved approval record.
 
@@ -624,6 +626,7 @@ async def test_inv_b3_rejection_via_resume_marks_rejected() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_inv_b4_cross_run_approval_rejected_in_resume() -> None:
     """An approval bound to run A must not authorize resuming run B.
 
@@ -688,6 +691,7 @@ async def test_inv_b4_cross_run_approval_rejected_in_resume() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_inv_b5_late_approval_decision_preserves_terminal_run() -> None:
     """A late rejection on an already-terminal run must not resurrect it.
 
@@ -852,6 +856,7 @@ async def test_inv_b7_repausing_step_reuses_pending_gate_without_duplicates() ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_inv_b8_rejected_gate_fails_step_closed() -> None:
     """A step whose bound approval was rejected must fail closed, never execute."""
     tracker: dict[str, int] = {}
@@ -1300,8 +1305,14 @@ async def test_inv_e1_cross_tenant_agent_run_access_forbidden(monkeypatch) -> No
     manager.engine = _NoopEngine()  # type: ignore[assignment]
     monkeypatch.setattr(manager_mod, "_agent_manager", manager)
 
-    task = manager.create_task(goal="secret goal", tenant_id="tenant-a", user_id="u")
-    run = manager.create_run(task_id=task.task_id, tenant_id="tenant-a", user_id="u")
+    from tests.fixtures.auth import subject_id
+
+    task = manager.create_task(
+        goal="secret goal", tenant_id="tenant-a", user_id=subject_id("user-logic-00")
+    )
+    run = manager.create_run(
+        task_id=task.task_id, tenant_id="tenant-a", user_id=subject_id("user-logic-00")
+    )
     run.status = RunStatus.RUNNING
     run.status = RunStatus.COMPLETED
 

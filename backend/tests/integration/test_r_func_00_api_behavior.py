@@ -48,23 +48,20 @@ def create_token(
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
     token_type: str = "access",
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
-    """Helper creating valid HS256 JWT access token for tests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "type": token_type,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin"],
-        "permissions": permissions
-        if permissions is not None
-        else ["*", "byok:read", "byok:write"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        token_type=token_type,
+        expires_in=expires_in,
+    )
+    return token
 
 
 def auth_headers(
@@ -119,10 +116,17 @@ async def test_all_51_endpoints_accounted_in_openapi() -> None:
     ],
 )
 async def test_health_endpoints_http_boundary(
-    async_client: AsyncClient, path: str
+    async_client: AsyncClient, path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify all 6 health probe endpoints return 200 OK with HealthResponse schema."""
-    response = await async_client.get(path)
+    monkeypatch.setattr(
+        get_settings(), "OPERATOR_METRICS_SECRET", "synthetic-operator-only"
+    )
+    if path.endswith("/ready"):
+        assert (await async_client.get(path)).status_code == 404
+    response = await async_client.get(
+        path, headers={"X-Operator-Secret": "synthetic-operator-only"}
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
@@ -146,7 +150,12 @@ async def test_health_readiness_redis_connected(
     mock_client.aclose = AsyncMock(return_value=None)
     monkeypatch.setattr(aioredis, "from_url", lambda *args, **kwargs: mock_client)
 
-    response = await async_client.get("/api/v1/health/ready")
+    monkeypatch.setattr(
+        get_settings(), "OPERATOR_METRICS_SECRET", "synthetic-operator-only"
+    )
+    response = await async_client.get(
+        "/api/v1/health/ready", headers={"X-Operator-Secret": "synthetic-operator-only"}
+    )
     assert response.status_code == 200
     assert response.json()["components"]["redis"] == "connected"
 
@@ -159,9 +168,16 @@ async def test_health_readiness_redis_connected(
 @pytest.mark.asyncio
 async def test_prometheus_metrics_endpoint_http_boundary(
     async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify GET /metrics returns Prometheus exposition format."""
-    response = await async_client.get("/metrics")
+    assert (await async_client.get("/metrics")).status_code == 404
+    monkeypatch.setattr(
+        get_settings(), "OPERATOR_METRICS_SECRET", "synthetic-operator-only"
+    )
+    response = await async_client.get(
+        "/metrics", headers={"X-Operator-Secret": "synthetic-operator-only"}
+    )
     assert response.status_code == 200
     assert "text/plain" in response.headers.get("content-type", "")
     assert "version=0.0.4" in response.headers.get("content-type", "")
@@ -325,13 +341,10 @@ async def test_rag_pipeline_endpoints(async_client: AsyncClient) -> None:
             "content": "This document is processed through the bounded background task queue.",
         },
     )
-    assert r_async.status_code == 202
-    task_id = r_async.json()["task_id"]
-
-    # 3. Task Status Polling (200 OK)
-    r_poll = await async_client.get(f"/api/v1/rag/tasks/{task_id}", headers=headers)
-    assert r_poll.status_code == 200
-    assert r_poll.json()["task_id"] == task_id
+    assert r_async.status_code == 503
+    assert "task_id" not in r_async.json()
+    r_poll = await async_client.get("/api/v1/rag/tasks/unissued-task", headers=headers)
+    assert r_poll.status_code == 404
 
     # 4. RAG Query
     r_query = await async_client.post(
@@ -508,8 +521,8 @@ async def test_devops_endpoints(async_client: AsyncClient) -> None:
                 "webhook_url": "https://hooks.slack.com/services/T00/B00/X00",
             },
         )
-        assert r_log_webhook.status_code == 200
-        assert r_log_webhook.json()["broadcast_sent"] is True
+        assert r_log_webhook.status_code == 503
+        bot.broadcast_to_webhook.assert_not_called()
     finally:
         bot.broadcast_to_webhook = original_broadcast  # type: ignore[method-assign]
 
@@ -557,8 +570,9 @@ async def test_billing_endpoints(async_client: AsyncClient) -> None:
         "/api/v1/billing/webhook",
         json={"code": "00", "desc": "success", "data": data, "signature": sig},
     )
-    assert r_good.status_code == 200
-    assert r_good.json()["tier"] == "enterprise"
+    assert r_good.status_code == 503
+    after = await async_client.get("/api/v1/billing/subscription", headers=headers)
+    assert after.json() == r_sub.json()
 
 
 # ==============================================================================
@@ -578,8 +592,8 @@ async def test_analytics_endpoints(async_client: AsyncClient) -> None:
 
     # 2. Telemetry metrics snapshot
     r_met = await async_client.get("/api/v1/analytics/metrics", headers=headers)
-    assert r_met.status_code == 200
-    assert "uptime_seconds" in r_met.json()
+    assert r_met.status_code == 503
+    assert "uptime_seconds" not in r_met.json()
 
 
 # ==============================================================================
@@ -641,7 +655,7 @@ async def test_coding_tool_result_endpoints(
         headers=headers,
         json={"call_id": "call-nonexistent-123", "result": {"output": "ok"}},
     )
-    assert response.status_code == 404
+    assert response.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -654,7 +668,7 @@ async def test_coding_resume_perimeter_auth(
 
     # Missing perimeter headers -> 403 Forbidden
     r_unauth = await async_client.post(f"{prefix}/resume", json=payload)
-    assert r_unauth.status_code == 403
+    assert r_unauth.status_code == 401
 
     # Valid perimeter secret -> passes perimeter auth and reaches bridge (404 for unknown call_id)
     settings = get_settings()
@@ -665,7 +679,12 @@ async def test_coding_resume_perimeter_auth(
     r_auth = await async_client.post(
         f"{prefix}/resume", headers=perimeter_headers, json=payload
     )
-    assert r_auth.status_code == 404
+    assert r_auth.status_code == 401
+    perimeter_headers.update(auth_headers())
+    bound = await async_client.post(
+        f"{prefix}/resume", headers=perimeter_headers, json=payload
+    )
+    assert bound.status_code == 503
 
 
 # ==============================================================================
@@ -765,8 +784,8 @@ async def test_agent_platform_approvals_and_metrics(async_client: AsyncClient) -
     r_appr_list = await async_client.get(
         "/api/v1/agent/approvals/pending", headers=headers
     )
-    assert r_appr_list.status_code == 200
-    assert isinstance(r_appr_list.json(), list)
+    assert r_appr_list.status_code == 503
+    assert not isinstance(r_appr_list.json(), list)
 
     # 2. Decide non-existent approval gate -> 404
     r_decide = await async_client.post(
@@ -778,8 +797,8 @@ async def test_agent_platform_approvals_and_metrics(async_client: AsyncClient) -
 
     # 3. Agent telemetry metrics snapshot
     r_metrics = await async_client.get("/api/v1/agent/metrics", headers=headers)
-    assert r_metrics.status_code == 200
-    assert "runs_started" in r_metrics.json()
+    assert r_metrics.status_code == 503
+    assert "runs_started" not in r_metrics.json()
 
 
 @pytest.mark.asyncio
@@ -940,7 +959,7 @@ async def test_unauthenticated_request_rejected_with_401(
     for path in protected_paths:
         res = await async_client.get(path)
         assert res.status_code == 401, f"{path} did not reject unauthenticated request"
-        assert res.json().get("detail") == "Not authenticated"
+        assert res.json().get("detail") == "Access credential required"
 
 
 @pytest.mark.asyncio
@@ -954,7 +973,7 @@ async def test_expired_and_invalid_token_rejected_with_401(
         headers={"Authorization": "Bearer totally-invalid-token-signature"},
     )
     assert res_inv.status_code == 401
-    assert "Invalid authentication token" in res_inv.json()["detail"]
+    assert "Invalid access credential" in res_inv.json()["detail"]
 
     # 2. Expired token
     settings = get_settings()
@@ -969,7 +988,7 @@ async def test_expired_and_invalid_token_rejected_with_401(
         headers={"Authorization": f"Bearer {expired_token}"},
     )
     assert res_exp.status_code == 401
-    assert "Authentication token has expired" in res_exp.json()["detail"]
+    assert "Invalid access credential" in res_exp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -991,8 +1010,8 @@ async def test_tenant_isolation_cross_tenant_access_rejected(
     r_cross_task = await async_client.get(
         f"/api/v1/agent/tasks/{task_id_a}", headers=h_tenant_b
     )
-    assert r_cross_task.status_code == 403
-    assert "Tenant mismatch" in r_cross_task.json()["detail"]
+    assert r_cross_task.status_code == 404
+    assert r_cross_task.json()["detail"] == "Not found"
 
     # 2. BYOK key isolation (404)
     await async_client.post(
@@ -1011,7 +1030,8 @@ async def test_tenant_isolation_cross_tenant_access_rejected(
         headers=h_tenant_a,
         json={"content": "Alpha trade secrets"},
     )
-    rag_task_id = r_rag_a.json()["task_id"]
+    assert r_rag_a.status_code == 503
+    rag_task_id = "unissued-task"
 
     r_cross_rag = await async_client.get(
         f"/api/v1/rag/tasks/{rag_task_id}", headers=h_tenant_b
@@ -1093,9 +1113,15 @@ async def test_schema_bound_violations_return_422(async_client: AsyncClient) -> 
     )
     assert r2.status_code == 422
 
+    owned = await async_client.post(
+        "/api/v1/agent/tasks", headers=headers, json={"goal": "validation owner"}
+    )
+    task_id = owned.json()["task_id"]
     # Exceeding integer upper ceiling: max_iterations > 50
     r3 = await async_client.post(
-        "/api/v1/agent/tasks/t1/runs", headers=headers, json={"max_iterations": 99}
+        f"/api/v1/agent/tasks/{task_id}/runs",
+        headers=headers,
+        json={"max_iterations": 99},
     )
     assert r3.status_code == 422
 

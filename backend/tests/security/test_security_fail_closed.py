@@ -242,7 +242,7 @@ def test_fail_closed_unmapped_permission_rejects_execution() -> None:
     )
 
     assert decision.allowed is False
-    assert "Forbidden: Tenant context lacks required permissions" in decision.reason
+    assert "Forbidden: missing exact permissions" in decision.reason
 
 
 def test_fail_closed_empty_context_rejects_privileged_tool() -> None:

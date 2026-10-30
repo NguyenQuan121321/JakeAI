@@ -40,7 +40,9 @@ async def handle_payment_webhook(
             detail="Invalid HMAC signature: payload authenticity could not be verified",
         )
 
-    return await billing_svc.process_payment_webhook(request.model_dump())
+    raise HTTPException(
+        503, "Payment effects require a bound service-to-tenant contract"
+    )
 
 
 @router.get("/subscription", response_model=SubscriptionInfo)

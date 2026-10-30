@@ -32,7 +32,7 @@ def test_local_jwt_verification_fallback_contract() -> None:
     tenant_id = f"tenant-finn-local-{uuid.uuid4().hex[:6]}"
     token = create_test_jwt(tenant_id=tenant_id, roles=["admin"])
 
-    context = verify_finnapigo_jwt(token, algorithm="HS256")
+    context = verify_finnapigo_jwt(token)
     assert context is not None
     assert context.tenant_id == tenant_id
     assert "admin" in context.roles

@@ -13,10 +13,6 @@ Tests:
      - Token bucket rate limit exhaustion (429).
 """
 
-import time
-from typing import Any
-
-import jwt
 import pytest
 from fastapi import status
 from httpx import AsyncClient
@@ -29,20 +25,19 @@ def generate_endpoint_jwt(
     tenant_id: str = "tenant-enterprise-01",
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
-    expires_in: int = 3600,
+    expires_in: int = 900,
 ) -> str:
-    """Helper generating valid HS256 JWT for endpoint integration tests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["financial_analyst"],
-        "permissions": permissions or ["chat:stream", "accounts:read"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        expires_in=expires_in,
+    )
+    return token
 
 
 @pytest.mark.asyncio
@@ -178,7 +173,7 @@ async def test_chat_stream_endpoint_tool_invocation_with_obo(
     monkeypatch.setattr(settings, "JWT_ALGORITHM", "HS256")
     token = generate_endpoint_jwt(
         roles=["financial_analyst"],
-        permissions=["accounts:read"],
+        permissions=["accounts:read", "chat:write", "rag:read"],
     )
 
     response = await async_client.post(
@@ -192,8 +187,8 @@ async def test_chat_stream_endpoint_tool_invocation_with_obo(
 
     assert response.status_code == 200
     body = response.text
-    assert "event: tool_call" in body
-    assert "get_account_balance" in body
+    assert "BLOCKED" in body or "blocked" in body or "event: error" in body
+    assert "authorization_header" not in body
 
 
 @pytest.mark.asyncio
@@ -249,7 +244,7 @@ async def test_chat_stream_rbac_blocking(
     # Viewer role has no accounts:read permission
     token = generate_endpoint_jwt(
         roles=["viewer"],
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     response = await async_client.post(

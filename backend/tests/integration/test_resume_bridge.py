@@ -7,7 +7,6 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock
 
-import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,23 +18,18 @@ client = TestClient(app)
 
 
 def get_auth_headers(
-    tenant_id: str = "tenant-resume-test",
-    user_id: str = "user-resume-1",
+    tenant_id: str = "tenant-resume-test", user_id: str = "user-resume-1"
 ) -> dict[str, str]:
-    """Generate valid JWT authentication headers."""
-    settings = get_settings()
-    now = int(time.time())
-    payload: dict[str, Any] = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "type": "access",
-        "roles": ["developer"],
-        "permissions": ["chat:read", "chat:write"],
-    }
-    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
-    return {"Authorization": f"Bearer {token}"}
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return {"Authorization": "Bearer " + token}
 
 
 @pytest.mark.asyncio
@@ -150,141 +144,64 @@ async def test_resume_bridge_redis_mock_paths() -> None:
 
 
 def test_api_submit_tool_result_lifecycle() -> None:
-    """POST /api/v1/coding/tool-result lifecycle with 200, 404, 409, and 403 codes."""
-    headers = get_auth_headers(tenant_id="tenant-coding-api")
-    call_id = f"call-api-{uuid.uuid4().hex[:12]}"
+    """Repeated HTTP submissions cannot consume an unbound checkpoint."""
     bridge = get_resume_bridge()
-
-    # Pre-populate checkpoint
+    call_id = f"call-disabled-{uuid.uuid4().hex[:8]}"
     asyncio.run(
         bridge.save_checkpoint(
             call_id=call_id,
             tenant_id="tenant-coding-api",
-            state_data={"step": "ast_search"},
+            state_data={"synthetic": True},
         )
     )
-
-    # 1. Successful tool result submission
-    payload = {
-        "call_id": call_id,
-        "result": {"matches": 3, "symbols": ["create_application"]},
-    }
-    response = client.post(
-        "/api/v1/coding/tool-result",
-        headers=headers,
-        json=payload,
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "resumed"
-    assert data["call_id"] == call_id
-    assert data["tool_acknowledged"] is True
-
-    # 2. Duplicate submission triggers 409 Conflict
-    dup_res = client.post(
-        "/api/v1/coding/tool-result",
-        headers=headers,
-        json=payload,
-    )
-    assert dup_res.status_code == 409
-
-    # 3. Non-existent call_id triggers 404 Not Found
-    missing_res = client.post(
-        "/api/v1/coding/tool-result",
-        headers=headers,
-        json={"call_id": "call-does-not-exist-999", "result": {}},
-    )
-    assert missing_res.status_code == 404
-
-    # 4. Cross-tenant submission triggers 403 Forbidden
-    cross_call_id = f"call-cross-{uuid.uuid4().hex[:12]}"
-    asyncio.run(
-        bridge.save_checkpoint(
-            call_id=cross_call_id,
-            tenant_id="tenant-other-owner",
-            state_data={"secret": "abc"},
+    before = asyncio.run(bridge.get_checkpoint(call_id))
+    headers = get_auth_headers("tenant-coding-api")
+    for _ in range(2):
+        response = client.post(
+            "/api/v1/coding/tool-result",
+            headers=headers,
+            json={"call_id": call_id, "result": {}},
         )
-    )
-    cross_res = client.post(
-        "/api/v1/coding/tool-result",
-        headers=headers,  # belongs to tenant-coding-api
-        json={"call_id": cross_call_id, "result": {}},
-    )
-    assert cross_res.status_code == 403
+        assert response.status_code == 503
+    assert asyncio.run(bridge.get_checkpoint(call_id)) == before
 
 
 def test_internal_resume_perimeter_security() -> None:
-    """POST /internal/v1/coding/resume enforces Invariant 4 perimeter credentials and error mapping."""
-    call_id = f"call-int-{uuid.uuid4().hex[:12]}"
+    call_id = f"call-disabled-{uuid.uuid4().hex[:8]}"
     bridge = get_resume_bridge()
-
     asyncio.run(
         bridge.save_checkpoint(
             call_id=call_id,
             tenant_id="tenant-internal-test",
-            state_data={"task": "diff_prune"},
+            state_data={"synthetic": True},
         )
     )
-
-    payload = {
-        "call_id": call_id,
-        "tenant_id": "tenant-internal-test",
-        "result": {"pruned_bytes": 1024},
-    }
-
-    # 1. Missing perimeter headers -> 403 Forbidden
-    res_no_sec = client.post("/internal/v1/coding/resume", json=payload)
-    assert res_no_sec.status_code == 403
-
-    # 2. Valid internal perimeter headers -> 200 OK
-    settings = get_settings()
-    perimeter_headers = {
+    before = asyncio.run(bridge.get_checkpoint(call_id))
+    perimeter = {
         "X-Forwarded-By": "FinnApiGo",
-        "X-Internal-Secret": settings.INTERNAL_GATEWAY_SECRET,
+        "X-Internal-Secret": get_settings().INTERNAL_GATEWAY_SECRET,
     }
-    res_valid = client.post(
-        "/internal/v1/coding/resume",
-        headers=perimeter_headers,
-        json=payload,
+    payload = {"call_id": call_id, "tenant_id": "tenant-internal-test", "result": {}}
+    assert client.post("/internal/v1/coding/resume", json=payload).status_code == 401
+    assert (
+        client.post(
+            "/internal/v1/coding/resume", headers=perimeter, json=payload
+        ).status_code
+        == 401
     )
-    assert res_valid.status_code == 200
-    assert res_valid.json()["status"] == "resumed"
+    from tests.fixtures.auth import create_test_jwt
 
-    # 3. Duplicate internal resume -> 409 Conflict
-    res_dup = client.post(
-        "/internal/v1/coding/resume",
-        headers=perimeter_headers,
-        json=payload,
+    perimeter["Authorization"] = "Bearer " + create_test_jwt(
+        tenant_id="tenant-internal-test", permissions=["agent:execute"]
     )
-    assert res_dup.status_code == 409
-
-    # 4. Non-existent call_id -> 404 Not Found
-    res_404 = client.post(
-        "/internal/v1/coding/resume",
-        headers=perimeter_headers,
-        json={
-            "call_id": "call-unknown-9999",
-            "tenant_id": "tenant-internal-test",
-            "result": {},
-        },
-    )
-    assert res_404.status_code == 404
-
-    # 5. Cross-tenant mismatch -> 403 Forbidden
-    cross_id = f"call-mismatch-{uuid.uuid4().hex[:12]}"
-    asyncio.run(
-        bridge.save_checkpoint(
-            call_id=cross_id,
-            tenant_id="tenant-alpha",
-            state_data={},
+    for _ in range(2):
+        assert (
+            client.post(
+                "/internal/v1/coding/resume", headers=perimeter, json=payload
+            ).status_code
+            == 503
         )
-    )
-    res_mismatch = client.post(
-        "/internal/v1/coding/resume",
-        headers=perimeter_headers,
-        json={"call_id": cross_id, "tenant_id": "tenant-beta", "result": {}},
-    )
-    assert res_mismatch.status_code == 403
+    assert asyncio.run(bridge.get_checkpoint(call_id)) == before
 
 
 @pytest.mark.asyncio

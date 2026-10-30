@@ -16,18 +16,15 @@ Contract Requirements:
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import time
-import uuid
 
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.core.security import verify_internal_perimeter_secret
 from app.main import app
-from app.services.resume_bridge import get_resume_bridge
 
 client = TestClient(app)
 
@@ -170,122 +167,35 @@ def test_perimeter_auth_hmac_replay_and_drift_window() -> None:
 # -----------------------------------------------------------------------------
 
 
-def test_internal_resume_perimeter_http_contract() -> None:
-    """HTTP Contract: /internal/v1/coding/resume enforces perimeter auth, idempotency, and error mapping."""
+def test_internal_resume_perimeter_http_contract():
+    from tests.fixtures.auth import create_test_jwt
+
     settings = get_settings()
-    bridge = get_resume_bridge()
-    tenant_id = f"tenant-contract-{uuid.uuid4().hex[:8]}"
-    call_id = f"call-contract-{uuid.uuid4().hex[:8]}"
-
-    # Save a valid checkpoint for resumption
-    asyncio.run(
-        bridge.save_checkpoint(
-            call_id=call_id,
-            tenant_id=tenant_id,
-            state_data={"contract": "mutual_auth_v1"},
-        )
-    )
-
     payload = {
-        "call_id": call_id,
-        "tenant_id": tenant_id,
-        "result": {"status": "success", "data": "tool executed cleanly"},
+        "call_id": "call-contract-unavailable",
+        "tenant_id": "forged",
+        "result": {"status": "success"},
     }
-
-    # 1. Reject call with missing perimeter headers -> 403 Forbidden
-    res_no_headers = client.post("/internal/v1/coding/resume", json=payload)
-    assert res_no_headers.status_code == 403
-    assert "Perimeter bypass rejected" in res_no_headers.json()["detail"]
-
-    # 2. Reject call with spoofed X-Forwarded-By -> 403 Forbidden
-    res_spoofed = client.post(
-        "/internal/v1/coding/resume",
-        headers={"X-Forwarded-By": "FinnApiGo"},
-        json=payload,
-    )
-    assert res_spoofed.status_code == 403
-
-    # 3. Reject call with invalid secret -> 403 Forbidden
-    res_bad_secret = client.post(
-        "/internal/v1/coding/resume",
-        headers={
-            "X-Forwarded-By": "FinnApiGo",
-            "X-Internal-Secret": "wrong-secret",
-        },
-        json=payload,
-    )
-    assert res_bad_secret.status_code == 403
-
-    # 4. Accept call with valid HMAC signature -> 200 OK
-    now = int(time.time())
-    sig = _compute_hmac_sig(
-        settings.INTERNAL_GATEWAY_SECRET,
-        "POST",
-        "/internal/v1/coding/resume",
-        now,
-    )
-    res_hmac = client.post(
-        "/internal/v1/coding/resume",
-        headers={
-            "X-Forwarded-By": "FinnApiGo",
-            "X-Internal-Sig": f"t={now};v1={sig}",
-        },
-        json=payload,
-    )
-    assert res_hmac.status_code == 200
-    res_data = res_hmac.json()
-    assert res_data["call_id"] == call_id
-    assert res_data["status"] == "resumed"
-    assert res_data["tool_acknowledged"] is True
-
-    # 5. Duplicate call with valid credentials -> 409 Conflict (Idempotency Guard)
-    res_dup = client.post(
-        "/internal/v1/coding/resume",
-        headers={
-            "X-Forwarded-By": "FinnApiGo",
-            "X-Internal-Secret": settings.INTERNAL_GATEWAY_SECRET,
-        },
-        json=payload,
-    )
-    assert res_dup.status_code == 409
-    assert "already being processed or completed" in res_dup.json()["detail"]
-
-    # 6. Non-existent call ID with valid credentials -> 404 Not Found
-    res_not_found = client.post(
-        "/internal/v1/coding/resume",
-        headers={
-            "X-Forwarded-By": "FinnApiGo",
-            "X-Internal-Secret": settings.INTERNAL_GATEWAY_SECRET,
-        },
-        json={
-            "call_id": "call-nonexistent-99999",
-            "tenant_id": tenant_id,
-            "result": {},
-        },
-    )
-    assert res_not_found.status_code == 404
-    assert "No active interrupt checkpoint found" in res_not_found.json()["detail"]
-
-    # 7. Cross-tenant mismatch with valid credentials -> 403 Forbidden
-    cross_call_id = f"call-cross-{uuid.uuid4().hex[:8]}"
-    asyncio.run(
-        bridge.save_checkpoint(
-            call_id=cross_call_id,
-            tenant_id="owner-tenant-alice",
-            state_data={},
+    perimeter = {
+        "X-Forwarded-By": "FinnApiGo",
+        "X-Internal-Secret": settings.INTERNAL_GATEWAY_SECRET,
+    }
+    # Perimeter provenance cannot substitute for user authority, including valid HMAC.
+    for headers in [{}, perimeter, {"X-Forwarded-By": "FinnApiGo"}]:
+        assert (
+            client.post(
+                "/internal/v1/coding/resume", headers=headers, json=payload
+            ).status_code
+            == 401
         )
+    token = create_test_jwt(
+        sub="42", tenant_id="verified", permissions=["agent:execute"]
     )
-    res_cross = client.post(
-        "/internal/v1/coding/resume",
-        headers={
-            "X-Forwarded-By": "FinnApiGo",
-            "X-Internal-Secret": settings.INTERNAL_GATEWAY_SECRET,
-        },
-        json={
-            "call_id": cross_call_id,
-            "tenant_id": "different-tenant-bob",
-            "result": {},
-        },
-    )
-    assert res_cross.status_code == 403
-    assert "Tenant mismatch" in res_cross.json()["detail"]
+    for path in ["/internal/v1/coding/resume", "/api/v1/coding/resume"]:
+        response = client.post(
+            path,
+            headers={**perimeter, "Authorization": "Bearer " + token},
+            json=payload,
+        )
+        assert response.status_code == 503
+        assert "Durable" in response.json()["detail"]

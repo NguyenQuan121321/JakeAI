@@ -45,6 +45,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     if get_settings().ENVIRONMENT.lower() == "production":
         await get_byok_manager().check_storage()
+        # Settings validates trust at startup; the client owns its connection pool.
+        from types import SimpleNamespace
+
+        from app.core.identity_state import get_state_client
+
+        get_state_client(SimpleNamespace(app=_app))
     yield
     logger.info("JakeAI platform shutting down, releasing resources...")
     from app.optimizer.semantic_cache import get_semantic_cache_manager
@@ -63,6 +69,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
             manager.redis_client = None
     from app.core import byok
     from app.core.byok_storage import RedisStore
+
+    identity_client = getattr(_app.state, "identity_client", None)
+    if identity_client is not None:
+        await identity_client.close()
+        del _app.state.identity_client
 
     if byok._byok_manager is not None and isinstance(
         byok._byok_manager.store, RedisStore
@@ -93,6 +104,10 @@ def create_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    from app.core.route_policy import AuthorizationMiddleware
+
+    # The size/tracing middleware registered below surrounds authorization too.
+    app.add_middleware(AuthorizationMiddleware)
 
     # Request Size Limiting and Tracing Middleware
     @app.middleware("http")
@@ -135,13 +150,15 @@ def create_application() -> FastAPI:
         credential_token = begin_credentials()
         try:
             response: Response = await call_next(request)
-        except Exception:
-            duration_ms = (time.perf_counter() - start_time) * 1000.0
-            metrics.record_http_request(
-                request.method, request.url.path, 500, duration_ms
+        except Exception as exc:
+            # Keep the same tracing/redaction envelope on unexpected authority
+            # or store failures. Exception messages can contain credentials.
+            logger.error("Unhandled request failure category=%s", type(exc).__name__)
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+                headers={"Cache-Control": "no-store"},
             )
-            set_current_trace_context(None)
-            raise
         finally:
             end_credentials(credential_token)
 
@@ -324,8 +341,8 @@ def create_application() -> FastAPI:
             "scheme": "bearer",
             "bearerFormat": "JWT",
             "description": (
-                "FinnApiGo asymmetric RS256/HS256 JWT access token. "
-                "Must contain 'sub', 'tenant_id', and authorized roles/scopes."
+                "Finn v1 HS256 access credential with explicit configured kid, "
+                "verified tenant, exact permissions and authoritative live state."
             ),
         }
 

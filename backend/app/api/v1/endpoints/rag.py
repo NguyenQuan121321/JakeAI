@@ -160,23 +160,21 @@ async def ingest_document(
     tenant_ctx: TenantContext = Depends(get_current_tenant),
 ) -> DocumentIngestResponse | IngestionTaskResponse:
     """Ingest document text synchronously or enqueue into the bounded task queue."""
-    if not async_mode:
-        response.status_code = status.HTTP_201_CREATED
-        try:
-            return await default_ingestion_pipeline.ingest(
-                request=request,
-                tenant_id=tenant_ctx.tenant_id,
-            )
-        except (UnsupportedDocumentTypeError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-
-    task_mgr = get_task_manager()
-    task_res = await task_mgr.enqueue(request, tenant_ctx.tenant_id)
-    response.status_code = status.HTTP_202_ACCEPTED
-    return task_res
+    if async_mode:
+        raise HTTPException(
+            503, "Queued ingestion requires durable user authority (J08)"
+        )
+    response.status_code = status.HTTP_201_CREATED
+    try:
+        return await default_ingestion_pipeline.ingest(
+            request=request,
+            tenant_id=tenant_ctx.tenant_id,
+        )
+    except (UnsupportedDocumentTypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get(
@@ -193,7 +191,7 @@ async def get_ingestion_task(
     """Poll status of an asynchronous document ingestion job, enforcing tenant isolation."""
     task_mgr = get_task_manager()
     task = await task_mgr.get_task(task_id, tenant_id=tenant_ctx.tenant_id)
-    if task is None:
+    if task is None or task.metadata.get("owner_uid") != tenant_ctx.user_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task '{task_id}' not found for tenant '{tenant_ctx.tenant_id}'.",

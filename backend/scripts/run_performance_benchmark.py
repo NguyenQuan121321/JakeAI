@@ -66,6 +66,12 @@ def parse_args() -> argparse.Namespace:
 
 async def async_main() -> int:
     args = parse_args()
+    from tests.fixtures.identity import configure_asgi_benchmark_identity
+
+    configure_asgi_benchmark_identity()
+    print(
+        "Scope: ASGI overhead with synthetic Finn state and model effects; no real authority/capacity claim."
+    )
 
     print("\n" + "=" * 80)
     print("           JAKEAI PERFORMANCE REGRESSION AUTOMATION (TEST-09)")

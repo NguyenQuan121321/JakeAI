@@ -16,7 +16,6 @@ import time
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
-import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -43,25 +42,19 @@ client = TestClient(app)
 
 
 def create_test_auth_headers(
-    tenant_id: str = "tenant-phase07",
-    user_id: str = "user-phase07",
-    roles: list[str] | None = None,
-    permissions: list[str] | None = None,
-) -> dict[str, str]:
-    """Generate authenticated bearer header for test assertions."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "type": "access",
-        "roles": roles or ["developer"],
-        "permissions": permissions or ["chat:read", "chat:write", "chat:stream"],
-    }
-    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
-    return {"Authorization": f"Bearer {token}"}
+    tenant_id="tenant-phase07", user_id="user-phase07", roles=None, permissions=None
+):
+    from tests.fixtures.auth import create_test_jwt
+
+    token = create_test_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=roles,
+        permissions=permissions
+        if permissions is not None
+        else ["chat:read", "chat:write", "rag:read", "ops:read"],
+    )
+    return {"Authorization": "Bearer " + token}
 
 
 # ==============================================================================
@@ -88,8 +81,7 @@ def test_health_endpoints_backward_compatibility() -> None:
 
     # 3. Readiness probe
     res_ready = client.get("/health/ready")
-    assert res_ready.status_code == 200
-    assert "components" in res_ready.json()
+    assert res_ready.status_code == 404
 
 
 def test_correlation_id_and_response_time_middleware() -> None:
@@ -122,19 +114,21 @@ def test_request_size_limit_middleware() -> None:
     assert "Request entity too large" in response.json()["detail"]
 
 
-def test_runtime_telemetry_metrics_endpoint() -> None:
-    """Verify /api/v1/analytics/metrics returns operational snapshot without sensitive data."""
-    headers = create_test_auth_headers()
-    response = client.get("/api/v1/analytics/metrics", headers=headers)
+def test_runtime_telemetry_metrics_endpoint(monkeypatch):
+    import secrets
+
+    secret = secrets.token_hex(32)
+    monkeypatch.setattr(get_settings(), "OPERATOR_METRICS_SECRET", secret)
+    assert (
+        client.get(
+            "/api/v1/analytics/metrics", headers=create_test_auth_headers()
+        ).status_code
+        == 503
+    )
+    assert client.get("/metrics").status_code == 404
+    response = client.get("/metrics", headers={"X-Operator-Secret": secret})
     assert response.status_code == 200
-    data = response.json()
-    assert "http_requests_total" in data
-    assert "uptime_seconds" in data
-    assert "active_streams" in data
-    # Ensure zero secret keys or authorization headers appear in metrics
-    raw_text = response.text
-    assert "sk-" not in raw_text
-    assert "Bearer" not in raw_text
+    assert secret not in response.text and "Bearer" not in response.text
 
 
 # ==============================================================================
@@ -181,7 +175,7 @@ async def test_chat_sse_stream_cancellation_and_token_accounting() -> None:
         tenant_id="tenant-cancel-test",
         user_id="user-cancel",
         roles=["user"],
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     class MockDisconnectRequest:
@@ -239,7 +233,7 @@ async def test_chat_sse_stream_timeout() -> None:
         tenant_id="tenant-timeout-test",
         user_id="user-timeout",
         roles=["user"],
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     with patch("app.api.v1.endpoints.chat.get_settings") as mock_settings:
@@ -428,9 +422,12 @@ def test_sanitize_error_message_redacts_credentials() -> None:
     assert "[REDACTED_SECRET]" in clean_message
 
 
-def test_global_exception_handler_normalizes_provider_error() -> None:
+def test_global_exception_handler_normalizes_provider_error(monkeypatch) -> None:
     """Verify ProviderError raised during request is normalized to safe JSON without secrets."""
     from app.main import app
+
+    monkeypatch.setattr(app.router, "routes", list(app.router.routes))
+    monkeypatch.setattr(app, "openapi_schema", None)
 
     @app.get("/test-provider-error")
     async def raise_provider_error() -> None:
@@ -442,7 +439,11 @@ def test_global_exception_handler_normalizes_provider_error() -> None:
             retry_after_seconds=5.0,
         )
 
-    res = client.get("/test-provider-error")
+    from app.core.route_policy import USER_POLICY
+
+    monkeypatch.setitem(USER_POLICY, ("GET", "/test-provider-error"), ("chat:read",))
+    app.openapi_schema = None
+    res = client.get("/test-provider-error", headers=create_test_auth_headers())
     assert res.status_code == 503
     assert res.headers.get("retry-after") == "5"
 
@@ -462,7 +463,7 @@ async def test_chat_sse_stream_provider_error_mid_stream() -> None:
         tenant_id="tenant-midstream-err",
         user_id="user-midstream",
         roles=["user"],
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     async def failing_workflow(*args: Any, **kwargs: Any) -> Any:
@@ -497,9 +498,12 @@ async def test_chat_sse_stream_provider_error_mid_stream() -> None:
     assert "[REDACTED_SECRET]" in error_events[0]
 
 
-def test_global_exception_handler_provider_timeout_and_408() -> None:
+def test_global_exception_handler_provider_timeout_and_408(monkeypatch) -> None:
     """Verify ProviderTimeoutError maps to HTTP 408 Request Timeout."""
     from app.main import app
+
+    monkeypatch.setattr(app.router, "routes", list(app.router.routes))
+    monkeypatch.setattr(app, "openapi_schema", None)
 
     @app.get("/test-provider-timeout")
     async def raise_timeout() -> None:
@@ -509,7 +513,11 @@ def test_global_exception_handler_provider_timeout_and_408() -> None:
             model="gpt-4o",
         )
 
-    res = client.get("/test-provider-timeout")
+    from app.core.route_policy import USER_POLICY
+
+    monkeypatch.setitem(USER_POLICY, ("GET", "/test-provider-timeout"), ("chat:read",))
+    app.openapi_schema = None
+    res = client.get("/test-provider-timeout", headers=create_test_auth_headers())
     assert res.status_code == 408
     data = res.json()
     assert data["error"]["type"] == "retryable"
@@ -537,7 +545,7 @@ async def test_chat_sse_stream_slow_provider_bounded() -> None:
         tenant_id="tenant-slow-test",
         user_id="user-slow",
         roles=["user"],
-        permissions=["chat:stream"],
+        permissions=["chat:write", "rag:read"],
     )
 
     async def slow_workflow(*args: Any, **kwargs: Any) -> Any:

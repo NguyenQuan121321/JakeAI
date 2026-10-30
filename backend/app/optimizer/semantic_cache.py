@@ -613,6 +613,10 @@ class SemanticCacheManager:
         When ``exact_only=True``, only Tier 1 exact matches are queried and
         Tier 2 semantic vector search is bypassed.
         """
+        from app.core.identity_state import authorize_bound_effect, principal_namespace
+
+        await authorize_bound_effect(tenant_id)
+        tenant_id = principal_namespace(tenant_id)
         self.metrics.total_requests += 1
 
         # Build canonical messages ensuring current prompt is included
@@ -886,6 +890,10 @@ class SemanticCacheManager:
         a single ``user`` message from ``prompt`` is synthesized for backward
         compatibility.
         """
+        from app.core.identity_state import authorize_bound_effect, principal_namespace
+
+        await authorize_bound_effect(tenant_id)
+        tenant_id = principal_namespace(tenant_id)
         ttl = ttl_seconds or self.default_ttl
 
         # Build canonical messages ensuring current prompt is included

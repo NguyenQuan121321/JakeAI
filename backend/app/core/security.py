@@ -1,6 +1,5 @@
-"""Security utilities and FinnApiGo JWT policy enforcement."""
+"""Strict Finn identity dependencies and explicit backend permission checks."""
 
-import binascii
 import hashlib
 import hmac
 import logging
@@ -10,33 +9,42 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 import jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
 from app.core.context import TenantContext, set_current_tenant_context
-from app.core.secret_material import signing_key_is_retired
+from app.core.identity import verify_access
+from app.core.identity_state import AuthorityLease, current_authority, get_state_client
 
 logger = logging.getLogger(__name__)
-
-# Retired synthetic admin JWT formerly shipped in both widget playgrounds.
-# Compare decoded signature bytes so equivalent base64 padding cannot bypass
-# revocation. This applies before key/environment selection, including explicit
-# key overrides. Only a digest is retained; see docs/security/ci-secret-dispositions.md.
-_RETIRED_PLAYGROUND_SIGNATURE_SHA256 = (
-    "aaf884500d7d25e5ca1504276b3f8050a82f02c3950bcb7c6456a40f7e943a34"
-)
-
-http_bearer = HTTPBearer(
-    scheme_name="FinnApiGoAuth",
-    description="Bearer JWT issued by FinnApiGo upstream identity provider",
-    auto_error=True,
-)
+http_bearer = HTTPBearer(scheme_name="FinnApiGoAuth", auto_error=False)
 
 
-def _kid_for(secret: str) -> str:
-    """Derive key identifier matching FinnApiGo's kid: first 8 hex chars of SHA-256(secret)."""
-    return hashlib.sha256(secret.encode("utf-8")).hexdigest()[:8]
+def _verified_identity(
+    token: str,
+    secret_key: str | None = None,
+    algorithm: str | None = None,
+    correlation_id: str | None = None,
+) -> tuple[TenantContext, dict[str, Any]]:
+    try:
+        if secret_key is not None or algorithm is not None:
+            raise ValueError("Per-call trust overrides are disabled")
+        payload = verify_access(token, get_settings())
+    except (ValueError, TypeError, KeyError, UnicodeError, jwt.PyJWTError):
+        raise HTTPException(
+            401, "Invalid access credential", headers={"WWW-Authenticate": "Bearer"}
+        ) from None
+    context = TenantContext(
+        tenant_id=payload["tid"],
+        user_id=payload["sub"],
+        explicit_tenant=True,
+        roles=[payload["role"]] if payload.get("role") else [],
+        permissions=payload["perms"],
+        correlation_id=correlation_id or str(uuid.uuid4()),
+    )
+    set_current_tenant_context(context)
+    return context, payload
 
 
 def verify_finnapigo_jwt(
@@ -45,188 +53,15 @@ def verify_finnapigo_jwt(
     algorithm: str | None = None,
     correlation_id: str | None = None,
 ) -> TenantContext:
-    """Decode and validate a FinnApiGo JWT access token.
-
-    Verifies signature (supporting key rotation and kid matching identical to FinnApiGo),
-    expiration, and extracts claims supporting both FinnApiGo compact enterprise schema
-    (tid, perms, role, uid) and standard expanded claims (tenant_id, permissions, roles, sub).
-    Preserves single correlation ID (OPS-04).
-    """
-    try:
-        signature = jwt.utils.base64url_decode(token.rsplit(".", 1)[-1].encode("ascii"))
-    except (binascii.Error, ValueError, UnicodeEncodeError):
-        signature = b""
-    if hashlib.sha256(signature).hexdigest() == _RETIRED_PLAYGROUND_SIGNATURE_SHA256:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Retired playground demo token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    settings = get_settings()
-    algo = algorithm or settings.JWT_ALGORITHM
-
-    # Build candidate keys
-    if secret_key:
-        candidate_keys = [secret_key]
-    else:
-        candidate_keys = []
-        if settings.JWT_SECRET_KEY:
-            candidate_keys.append(settings.JWT_SECRET_KEY)
-        if (
-            settings.JWT_SECRET_PREVIOUS
-            and settings.JWT_SECRET_PREVIOUS not in candidate_keys
-        ):
-            candidate_keys.append(settings.JWT_SECRET_PREVIOUS)
-
-    # J01 reviewed retirement invariant: no development or explicit-key bypass.
-    candidate_keys = [key for key in candidate_keys if not signing_key_is_retired(key)]
-
-    # Inspect token header for kid and alg
-    header_kid: str | None = None
-    try:
-        header = jwt.get_unverified_header(token)
-        header_kid = header.get("kid")
-        if header.get("alg") == "HS256" and algo.startswith("RS"):
-            algo = "HS256"
-    except jwt.PyJWTError as exc:
-        logger.debug("Failed to inspect JWT header: %s", exc)
-
-    if header_kid:
-        candidate_keys.sort(
-            key=lambda k: 0 if isinstance(k, str) and _kid_for(k) == header_kid else 1
-        )
-
-    payload: dict[str, Any] | None = None
-    last_error: Exception | None = None
-
-    for key in candidate_keys:
-        current_algo = algo
-        if current_algo.startswith("RS") and not (
-            isinstance(key, str) and key.strip().startswith("-----BEGIN")
-        ):
-            current_algo = "HS256"
-
-        try:
-            payload = jwt.decode(
-                token,
-                key,
-                algorithms=[current_algo],
-                options={
-                    "verify_signature": True,
-                    "verify_exp": True,
-                    "verify_aud": False,
-                },
-            )
-            break
-        except jwt.ExpiredSignatureError as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication token has expired",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from e
-        except jwt.InvalidTokenError as e:
-            last_error = e
-            continue
-
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from last_error
-
-    # Invariant 5: Token Type Isolation
-    token_type = payload.get("type")
-    if token_type and token_type != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token type '{token_type}': expected access token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Invariant 5: Dual Claim Schema Resolution
-    sub = str(payload.get("sub") or payload.get("uid") or "")
-    tenant_id = str(payload.get("tenant_id") or payload.get("tid") or "default")
-
-    if not sub:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing mandatory subject (sub/uid)",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    raw_roles = payload.get("roles") or payload.get("role") or []
-    roles = [raw_roles] if isinstance(raw_roles, str) else list(raw_roles)
-
-    # `or []` also absorbs a present-but-null claim (same as roles/perms).
-    scopes = payload.get("scopes") or []
-    if isinstance(scopes, str):
-        scopes = scopes.split(" ")
-
-    raw_perms = payload.get("permissions") or payload.get("perms") or []
-    permissions = [raw_perms] if isinstance(raw_perms, str) else list(raw_perms)
-
-    # Preserve single correlation ID (TASK OPS-04)
-    cid = correlation_id or payload.get("cid") or str(uuid.uuid4())
-    context = TenantContext(
-        tenant_id=tenant_id,
-        user_id=sub,
-        explicit_tenant=bool(payload.get("tenant_id") or payload.get("tid")),
-        org_id=payload.get("org_id"),
-        roles=[str(r) for r in roles],
-        scopes=[str(s) for s in scopes],
-        permissions=[str(p) for p in permissions],
-        correlation_id=cid,
-    )
-    set_current_tenant_context(context)
-    return context
+    return _verified_identity(token, secret_key, algorithm, correlation_id)[0]
 
 
 async def check_token_denylist(token: str) -> None:
-    """Verify that caller token JTI or session UUID is not denylisted in Redis."""
-    try:
-        payload = jwt.decode(
-            token,
-            options={"verify_signature": False, "verify_exp": False},
-        )
-    except jwt.PyJWTError:
-        return
-
-    jti = str(payload.get("jti") or payload.get("id") or "")
-    sid = str(payload.get("sid") or "")
-    if not jti and not sid:
-        return
-
-    settings = get_settings()
-    try:
-        import redis.asyncio as aioredis
-
-        client = aioredis.from_url(
-            settings.REDIS_URL,
-            socket_connect_timeout=0.2,
-            socket_timeout=0.2,
-        )
-        if jti and await client.exists(f"denylist:jti:{jti}"):
-            await client.aclose()
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been revoked",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        if sid and await client.exists(f"denylist:sid:{sid}"):
-            await client.aclose()
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session has been revoked",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        await client.aclose()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        # Bounded resilience: if Redis is unreachable, fail open bounded by access token TTL
-        logger.warning("Redis token denylist check unavailable, failing open: %s", exc)
+    """Compatibility entry point requires actual Finn authority, never local Redis absence."""
+    lease = current_authority.get()
+    if lease is None or lease.token != token:
+        raise HTTPException(503, "Identity authority unavailable")
+    await lease.check(force=True)
 
 
 def verify_internal_perimeter_secret(request: Request | None) -> bool:
@@ -280,37 +115,38 @@ def verify_internal_perimeter_secret(request: Request | None) -> bool:
 
 async def get_current_tenant(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
 ) -> TenantContext:
-    """FastAPI security dependency resolving and validating TenantContext (TASK OPS-04)."""
-    cid = (
-        getattr(request.state, "correlation_id", None)
-        if hasattr(request, "state")
-        else None
-    )
-    if not cid and hasattr(request, "headers"):
-        cid = request.headers.get("x-correlation-id") or request.headers.get(
-            "x-request-id"
+    existing = getattr(request.state, "verified_tenant", None)
+    if isinstance(existing, TenantContext):
+        return existing
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            401, "Access credential required", headers={"WWW-Authenticate": "Bearer"}
         )
-    context = verify_finnapigo_jwt(credentials.credentials, correlation_id=cid)
-    await check_token_denylist(credentials.credentials)
+    context, claims = _verified_identity(
+        credentials.credentials,
+        correlation_id=getattr(request.state, "correlation_id", None)
+        or request.headers.get("x-correlation-id")
+        or request.headers.get("x-request-id"),
+    )
+    lease = AuthorityLease(credentials.credentials, claims, get_state_client(request))
+    await lease.check(force=True)
+    current_authority.set(lease)
+    request.state.verified_tenant = context
+    request.state.authority_lease = lease
     return context
 
 
 def require_permissions(
     *required_permissions: str,
 ) -> Callable[..., Coroutine[Any, Any, TenantContext]]:
-    """Dependency factory enforcing granular permissions on routes."""
-
     async def permission_checker(
         context: TenantContext = Depends(get_current_tenant),
     ) -> TenantContext:
         if not context.has_all_permissions(list(required_permissions)):
             missing = [p for p in required_permissions if not context.has_permission(p)]
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Insufficient permissions. Required: {', '.join(missing)}",
-            )
+            raise HTTPException(403, "Insufficient permissions: " + ", ".join(missing))
         return context
 
     return permission_checker
@@ -324,40 +160,13 @@ def exchange_obo_token(
     secret_key: str | None = None,
     algorithm: str | None = None,
 ) -> str:
-    """Exchange caller TenantContext for a signed On-Behalf-Of (OBO) JWT token.
-
-    Adheres to RFC 8693 token exchange standards with an 'act' (actor) claim
-    identifying JakeAI Platform as the authorized executor on behalf of the user.
-    """
-    settings = get_settings()
-    key = secret_key or settings.JWT_SECRET_KEY
-    algo = algorithm or settings.JWT_ALGORITHM
-
-    # If algorithm is RSA but key is a symmetric secret string, fall back to HS256
-    if algo.startswith("RS") and not (
-        isinstance(key, str) and key.strip().startswith("-----BEGIN")
-    ):
-        algo = "HS256"
-
-    now = int(time.time())
-    scopes = requested_scopes if requested_scopes is not None else context.scopes
-
-    payload: dict[str, Any] = {
-        "sub": context.user_id,
-        "tenant_id": context.tenant_id,
-        "org_id": context.org_id,
-        "roles": context.roles,
-        "scopes": scopes,
-        "permissions": context.permissions,
-        "cid": context.correlation_id,
-        "aud": target_audience,
-        "iss": "jakeai-gateway",
-        "act": {
-            "sub": "jakeai-platform",
-            "client_id": "jakeai-gateway",
-        },
-        "iat": now,
-        "exp": now + expires_in_seconds,
-    }
-
-    return jwt.encode(payload, key, algorithm=algo)
+    """No broad service-to-user or OBO issuance is authorized by Finn v1."""
+    _ = (
+        context,
+        target_audience,
+        requested_scopes,
+        expires_in_seconds,
+        secret_key,
+        algorithm,
+    )
+    raise HTTPException(503, "OBO issuance is disabled pending a scoped tool contract")

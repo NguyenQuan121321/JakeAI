@@ -14,12 +14,13 @@ Automated verification covering:
 - Webhook HMAC signature verification
 """
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
 import time
 from typing import Any
-from unittest.mock import AsyncMock
 
 import jwt
 import pytest
@@ -45,22 +46,37 @@ def _mint_jwt(
 ) -> str:
     """Helper to mint deterministic synthetic JWTs for security tests (no hardcoded secrets)."""
     settings = get_settings()
-    key = secret or settings.JWT_SECRET_KEY
+    try:
+        key = base64.b64decode(secret or settings.JWT_SECRET_KEY)
+    except binascii.Error:
+        key = (secret or settings.JWT_SECRET_KEY).encode()
     now = int(time.time())
     payload: dict[str, Any] = {
-        "sub": "user-sec-auth",
-        "tenant_id": "tenant-sec-auth",
+        "contract_ver": 1,
+        "iss": "finnapigo",
+        "aud": ["finnapigo-api", "jakeai-service"],
+        "sub": "42",
+        "uid": 42,
+        "tid": "tenant-sec-auth",
         "type": "access",
-        "roles": ["developer"],
-        "permissions": ["chat:read", "agent:read"],
+        "role": "developer",
+        "perms": ["chat:read", "agent:read"],
         "iat": now,
-        "exp": now + 3600,
-        "iss": "finnapigo-idp",
-        "aud": "jakeai-api",
+        "nbf": now,
+        "exp": now + 900,
+        "sid": "session",
+        "jti": "token",
+        "pwdver": 0,
+        "auth_epoch": 0,
     }
     if payload_overrides:
         payload.update(payload_overrides)
-    return jwt.encode(payload, key, algorithm=algorithm, headers=headers)
+    return jwt.encode(
+        payload,
+        key,
+        algorithm=algorithm,
+        headers=headers or {"kid": settings.JWT_KEY_ID},
+    )
 
 
 # ==============================================================================
@@ -145,14 +161,14 @@ def test_auth_invalid_token_missing_subject() -> None:
     with pytest.raises(HTTPException) as exc_info:
         verify_finnapigo_jwt(token)
     assert exc_info.value.status_code == 401
-    assert "missing mandatory subject" in exc_info.value.detail.lower()
+    assert "invalid access credential" in exc_info.value.detail.lower()
 
     # Token with empty string subject
     empty_sub_token = _mint_jwt(payload_overrides={"sub": "", "uid": ""})
     with pytest.raises(HTTPException) as exc_info:
         verify_finnapigo_jwt(empty_sub_token)
     assert exc_info.value.status_code == 401
-    assert "missing mandatory subject" in exc_info.value.detail.lower()
+    assert "invalid access credential" in exc_info.value.detail.lower()
 
 
 def test_auth_wrong_token_type_rejected() -> None:
@@ -162,7 +178,7 @@ def test_auth_wrong_token_type_rejected() -> None:
     with pytest.raises(HTTPException) as exc_info:
         verify_finnapigo_jwt(refresh_token)
     assert exc_info.value.status_code == 401
-    assert "invalid token type" in exc_info.value.detail.lower()
+    assert "invalid access credential" in exc_info.value.detail.lower()
 
     # ID token passed
     id_token = _mint_jwt(payload_overrides={"type": "id_token"})
@@ -182,7 +198,7 @@ def test_auth_expired_token_rejected_with_401() -> None:
     with pytest.raises(HTTPException) as exc_info:
         verify_finnapigo_jwt(expired_token)
     assert exc_info.value.status_code == 401
-    assert "expired" in exc_info.value.detail.lower()
+    assert "invalid access credential" in exc_info.value.detail.lower()
 
 
 @pytest.mark.asyncio
@@ -197,7 +213,7 @@ async def test_auth_expired_token_http_boundary() -> None:
             headers={"Authorization": f"Bearer {expired_token}"},
         )
         assert resp.status_code == 401
-        assert "expired" in resp.json()["detail"].lower()
+        assert "invalid access credential" in resp.json()["detail"].lower()
 
 
 # ==============================================================================
@@ -212,7 +228,7 @@ def test_auth_invalid_signature_fails_closed() -> None:
     with pytest.raises(HTTPException) as exc_info:
         verify_finnapigo_jwt(token)
     assert exc_info.value.status_code == 401
-    assert "invalid authentication token" in exc_info.value.detail.lower()
+    assert "invalid access credential" in exc_info.value.detail.lower()
 
 
 def test_auth_tampered_payload_fails_signature_check() -> None:
@@ -251,29 +267,24 @@ def test_auth_algorithm_none_rejected() -> None:
 # ==============================================================================
 
 
-def test_auth_key_rotation_accepts_previous_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """JWT signed with previous valid secret is verified during rolling rotation."""
+def test_auth_key_rotation_accepts_previous_secret(monkeypatch):
+    import secrets
+
     settings = get_settings()
-    prev_secret = "previous-rolling-secret-key-for-rotation-audit-32b"
-    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", prev_secret)
-
-    token = _mint_jwt(secret=prev_secret)
+    previous = base64.b64encode(secrets.token_bytes(32)).decode()
+    monkeypatch.setattr(settings, "JWT_SECRET_PREVIOUS", previous)
+    monkeypatch.setattr(settings, "JWT_PREVIOUS_KEY_ID", "previous")
+    monkeypatch.setattr(settings, "JWT_PREVIOUS_LAST_ISSUED_AT", int(time.time()))
+    token = _mint_jwt(secret=previous, headers={"kid": "previous"})
     context = verify_finnapigo_jwt(token)
-    assert context.user_id == "user-sec-auth"
-    assert context.tenant_id == "tenant-sec-auth"
+    assert context.user_id == "42" and context.tenant_id == "tenant-sec-auth"
 
 
-def test_auth_kid_header_matching(monkeypatch: pytest.MonkeyPatch) -> None:
-    """JWT carrying kid header correctly sorts and resolves matching candidate secret."""
-    settings = get_settings()
-    current_key = settings.JWT_SECRET_KEY
-    current_kid = hashlib.sha256(current_key.encode("utf-8")).hexdigest()[:8]
-
-    token = _mint_jwt(headers={"kid": current_kid})
-    context = verify_finnapigo_jwt(token)
-    assert context.user_id == "user-sec-auth"
+def test_auth_kid_header_matching():
+    assert verify_finnapigo_jwt(_mint_jwt()).user_id == "42"
+    with pytest.raises(HTTPException) as error:
+        verify_finnapigo_jwt(_mint_jwt(headers={"kid": "unknown"}))
+    assert error.value.status_code == 401
 
 
 # ==============================================================================
@@ -281,70 +292,25 @@ def test_auth_kid_header_matching(monkeypatch: pytest.MonkeyPatch) -> None:
 # ==============================================================================
 
 
-def test_auth_obo_token_exchange_and_claims_verification() -> None:
-    """OBO token exchange produces valid RFC 8693 tokens with canonical issuer, audience, and actor."""
-    caller_ctx = TenantContext(
-        tenant_id="tenant-obo-sec",
-        user_id="user-obo-sec",
-        roles=["financial_analyst"],
-        scopes=["reports:read"],
-        permissions=["accounts:read"],
-        correlation_id="corr-obo-12345",
+def test_auth_obo_token_exchange_and_claims_verification():
+    caller = TenantContext(
+        tenant_id="tenant-obo-sec", user_id="42", roles=["admin"], permissions=["*"]
     )
-    token = exchange_obo_token(
-        context=caller_ctx,
-        target_audience="finnapigo-api",
-        expires_in_seconds=300,
-    )
-
-    settings = get_settings()
-    # Decode and verify exact OBO claims
-    decoded = jwt.decode(
-        token,
-        settings.JWT_SECRET_KEY,
-        algorithms=["HS256"],
-        audience="finnapigo-api",
-        issuer="jakeai-gateway",
-    )
-    assert decoded["iss"] == "jakeai-gateway"
-    assert decoded["aud"] == "finnapigo-api"
-    assert decoded["sub"] == "user-obo-sec"
-    assert decoded["tenant_id"] == "tenant-obo-sec"
-    assert decoded["act"]["sub"] == "jakeai-platform"
-    assert decoded["act"]["client_id"] == "jakeai-gateway"
+    with pytest.raises(HTTPException) as error:
+        exchange_obo_token(caller, target_audience="finnapigo-api")
+    assert error.value.status_code == 503
 
 
-def test_auth_wrong_audience_rejected_when_audience_enforced() -> None:
-    """Token with wrong audience fails audience verification."""
-    caller_ctx = TenantContext(
-        tenant_id="tenant-aud-sec",
-        user_id="user-aud-sec",
-    )
-    token = exchange_obo_token(caller_ctx, target_audience="finnapigo-api")
-
-    settings = get_settings()
-    # Decoding expecting a different audience should raise InvalidAudienceError
-    with pytest.raises(jwt.InvalidAudienceError):
-        jwt.decode(
-            token,
-            settings.JWT_SECRET_KEY,
-            algorithms=["HS256"],
-            audience="unauthorized-foreign-service",
-        )
+def test_auth_wrong_audience_rejected_when_audience_enforced():
+    with pytest.raises(HTTPException) as error:
+        verify_finnapigo_jwt(_mint_jwt({"aud": ["finnapigo-api"]}))
+    assert error.value.status_code == 401
 
 
-def test_auth_wrong_issuer_rejected_when_issuer_enforced() -> None:
-    """Token with wrong issuer fails issuer verification."""
-    token = _mint_jwt(payload_overrides={"iss": "untrusted-rogue-issuer"})
-    settings = get_settings()
-    with pytest.raises(jwt.InvalidIssuerError):
-        jwt.decode(
-            token,
-            settings.JWT_SECRET_KEY,
-            algorithms=["HS256"],
-            issuer="trusted-finnapigo-authority",
-            options={"verify_aud": False},
-        )
+def test_auth_wrong_issuer_rejected_when_issuer_enforced():
+    with pytest.raises(HTTPException) as error:
+        verify_finnapigo_jwt(_mint_jwt({"iss": "rogue"}))
+    assert error.value.status_code == 401
 
 
 # ==============================================================================
@@ -353,46 +319,53 @@ def test_auth_wrong_issuer_rejected_when_issuer_enforced() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auth_revoked_token_jti_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Revoked token with JTI in Redis denylist raises HTTP 401."""
-    revoked_token = _mint_jwt(payload_overrides={"jti": "revoked-token-jti-9999"})
+async def test_auth_revoked_token_jti_rejected():
+    from app.core.identity import verify_access
+    from app.core.identity_state import AuthorityLease, current_authority
 
-    # Mock Redis client
-    mock_redis = AsyncMock()
-    mock_redis.exists.side_effect = lambda key: (
-        key == "denylist:jti:revoked-token-jti-9999"
+    token = _mint_jwt({"jti": "revoked"})
+
+    class State:
+        settings = get_settings()
+
+        async def check(self, candidate, claims):
+            assert candidate == token and claims["jti"] == "revoked"
+            raise HTTPException(401, "Inactive access credential")
+
+    binding = current_authority.set(
+        AuthorityLease(token, verify_access(token, get_settings()), State())
     )
-
-    import redis.asyncio as aioredis
-
-    monkeypatch.setattr(aioredis, "from_url", lambda *a, **kw: mock_redis)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await check_token_denylist(revoked_token)
-    assert exc_info.value.status_code == 401
-    assert "revoked" in exc_info.value.detail.lower()
+    try:
+        with pytest.raises(HTTPException) as error:
+            await check_token_denylist(token)
+        assert error.value.status_code == 401
+    finally:
+        current_authority.reset(binding)
 
 
 @pytest.mark.asyncio
-async def test_auth_revoked_session_sid_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Revoked session SID in Redis denylist raises HTTP 401."""
-    revoked_token = _mint_jwt(payload_overrides={"sid": "revoked-session-sid-5555"})
+async def test_auth_revoked_session_sid_rejected():
+    from app.core.identity import verify_access
+    from app.core.identity_state import AuthorityLease, current_authority
 
-    mock_redis = AsyncMock()
-    mock_redis.exists.side_effect = lambda key: (
-        key == "denylist:sid:revoked-session-sid-5555"
+    token = _mint_jwt({"sid": "revoked"})
+
+    class State:
+        settings = get_settings()
+
+        async def check(self, candidate, claims):
+            assert candidate == token and claims["sid"] == "revoked"
+            raise HTTPException(401, "Inactive access credential")
+
+    binding = current_authority.set(
+        AuthorityLease(token, verify_access(token, get_settings()), State())
     )
-
-    import redis.asyncio as aioredis
-
-    monkeypatch.setattr(aioredis, "from_url", lambda *a, **kw: mock_redis)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await check_token_denylist(revoked_token)
-    assert exc_info.value.status_code == 401
-    assert "session has been revoked" in exc_info.value.detail.lower()
+    try:
+        with pytest.raises(HTTPException) as error:
+            await check_token_denylist(token)
+        assert error.value.status_code == 401
+    finally:
+        current_authority.reset(binding)
 
 
 # ==============================================================================
@@ -523,6 +496,6 @@ def test_retired_playground_token_is_inert(
     # Original signature only, retained to regress explicit revocation; no signing key.
     signature = "vjTAyaIxrc6JwGmere5k8Up9kADaamq27HPSVU6wi3c"
     retired = f"{header}.{body}.{signature}{padding}"
-    with pytest.raises(HTTPException, match="Retired playground demo token") as error:
+    with pytest.raises(HTTPException, match="Invalid access credential") as error:
         verify_finnapigo_jwt(retired, secret_key=explicit_key)
     assert error.value.status_code == 401

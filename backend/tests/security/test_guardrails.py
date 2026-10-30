@@ -45,7 +45,7 @@ def test_rbac_guardrail_authorization() -> None:
         tenant_id="tenant_fin",
         user_id="user_123",
         roles=["financial_analyst"],
-        permissions=["reports:read"],
+        permissions=["reports:read", "accounts:read"],
     )
 
     readonly_context = TenantContext(
@@ -64,13 +64,13 @@ def test_rbac_guardrail_authorization() -> None:
     assert rejected.allowed is False
     assert rejected.violation_type == "RBAC_ACCESS_DENIED"
 
-    # Admin role has full bypass
+    # Admin role cannot create a payment grant
     admin_context = TenantContext(
         tenant_id="tenant_fin",
         user_id="admin_01",
         roles=["admin"],
     )
-    assert check_tool_rbac_guardrail("transfer_funds", admin_context).allowed is True
+    assert check_tool_rbac_guardrail("transfer_funds", admin_context).allowed is False
 
     # Empty context -> Fail closed (DENY)
     empty_context = TenantContext(

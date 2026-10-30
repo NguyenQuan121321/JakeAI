@@ -31,6 +31,10 @@ class HybridRetriever:
         """Index document chunks into both dense vector store and sparse BM25 index."""
         if not chunks:
             return
+        from app.core.identity_state import authorize_bound_effect
+
+        for tenant in {c.tenant_id for c in chunks}:
+            await authorize_bound_effect(tenant, "rag:write")
         self.bm25.add_documents(chunks)
         await self.vector_store.upsert(chunks)
 
@@ -42,6 +46,20 @@ class HybridRetriever:
         candidate_pool: int | None = None,
     ) -> RetrievalResult:
         """Execute concurrent hybrid retrieval, enforce tenant filter, and rerank."""
+        from app.core.identity_state import (
+            authorize_bound_effect,
+            authorize_effect,
+            current_authority,
+        )
+
+        lease = current_authority.get()
+        await authorize_bound_effect(tenant_id, "rag:read")
+        if lease is not None:
+            await authorize_effect("rag:read")
+            if tenant_id != lease.claims["tid"]:
+                from fastapi import HTTPException
+
+                raise HTTPException(404, "Not found")
         start_time = time.time()
         pool_size = candidate_pool if candidate_pool is not None else max(15, 3 * top_k)
 
@@ -91,6 +109,20 @@ class HybridRetriever:
         # 2. Defense-in-depth Tenant Boundary Filter Guardrail
         valid_dense = [c for c in dense_candidates if c.tenant_id == tenant_id]
         valid_sparse = [c for c in sparse_candidates if c.tenant_id == tenant_id]
+        if lease is not None:
+            # Legacy unowned chunks fail closed. Caller document metadata never
+            # selects owner; ingestion overwrites it from verified Finn identity.
+            valid_dense = [
+                c
+                for c in valid_dense
+                if c.metadata.get("owner_uid") == lease.claims["sub"]
+            ]
+            valid_sparse = [
+                c
+                for c in valid_sparse
+                if c.metadata.get("owner_uid") == lease.claims["sub"]
+            ]
+            await authorize_effect("rag:read")
 
         dense_count = len(valid_dense)
         sparse_count = len(valid_sparse)

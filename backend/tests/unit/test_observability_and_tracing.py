@@ -151,13 +151,24 @@ def test_prometheus_metrics_generation():
 
 
 @pytest.mark.asyncio
-async def test_get_metrics_endpoint_and_w3c_header():
+async def test_get_metrics_endpoint_and_w3c_header(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(
+        get_settings(), "OPERATOR_METRICS_SECRET", "synthetic-operator-only"
+    )
     app = create_application()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Inbound request with traceparent
         inbound_tp = "00-11112222333344445555666677778888-aaaabbbbccccdddd-01"
-        resp = await client.get("/metrics", headers={"traceparent": inbound_tp})
+        resp = await client.get(
+            "/metrics",
+            headers={
+                "traceparent": inbound_tp,
+                "X-Operator-Secret": "synthetic-operator-only",
+            },
+        )
         assert resp.status_code == 200
         assert "text/plain" in resp.headers["content-type"]
         assert "jakeai_http_requests_total" in resp.text

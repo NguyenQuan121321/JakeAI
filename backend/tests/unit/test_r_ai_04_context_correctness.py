@@ -32,12 +32,10 @@ import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.agent.memory.base import MemoryEntry, MemoryScope
-from app.core.config import get_settings
 from app.main import app
 from app.optimizer.bpe_tokenizer import (
     ContextBudgetExceededError,
@@ -54,20 +52,15 @@ from app.rag.pipeline import RAGPipeline
 
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    """Generate valid JWT bearer authorization header."""
-    settings = get_settings()
-    token = jwt.encode(
-        {
-            "sub": "user_context_test",
-            "tenant_id": "tenant-context-test",
-            "roles": ["admin"],
-            "permissions": ["rag:read", "rag:write"],
-            "exp": int(time.time()) + 3600,
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub="user_context_test",
+        tenant_id="tenant-context-test",
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + token}
 
 
 # ==============================================================================

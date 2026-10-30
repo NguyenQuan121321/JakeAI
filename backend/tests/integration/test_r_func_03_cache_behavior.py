@@ -25,7 +25,6 @@ import time
 import uuid
 from typing import Any
 
-import jwt
 import pytest
 from httpx import AsyncClient
 
@@ -92,26 +91,18 @@ def parse_sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
 
 
 def auth_headers(
-    tenant_id: str,
-    roles: list[str] | None = None,
-    permissions: list[str] | None = None,
+    tenant_id: str, roles: list[str] | None = None, permissions: list[str] | None = None
 ) -> dict[str, str]:
-    """Generate valid HS256 JWT Authorization headers for HTTP tests."""
-    settings = get_settings()
-    now = int(time.time())
-    token = jwt.encode(
-        {
-            "sub": "user-rfunc03",
-            "tenant_id": tenant_id,
-            "iat": now,
-            "exp": now + 3600,
-            "roles": roles or ["financial_analyst"],
-            "permissions": permissions or ["chat:stream", "chat:write"],
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub="user-rfunc03",
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + token}
 
 
 # ---------------------------------------------------------------------------

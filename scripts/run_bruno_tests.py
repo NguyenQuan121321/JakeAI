@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -283,8 +281,22 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 sub="16",
                 tenant_id="default",
                 roles=["admin"],
-                permissions=["*", "byok:read", "byok:write"],
-                expires_in=3600,
+                permissions=[
+                    "chat:read",
+                    "chat:write",
+                    "rag:read",
+                    "rag:write",
+                    "byok:read",
+                    "byok:write",
+                    "finops:read",
+                    "finops:write",
+                    "agent:read",
+                    "agent:write",
+                    "agent:execute",
+                    "agent:approve",
+                    "ops:read",
+                ],
+                expires_in=900,
                 secret_key=secret,
                 jti=f"test-token-16-{now}",
             ),
@@ -293,7 +305,7 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 tenant_id="tenant_beta",
                 roles=["user"],
                 permissions=["read"],
-                expires_in=3600,
+                expires_in=900,
                 secret_key=secret,
                 jti=f"test-token-user-beta-{now}",
             ),
@@ -301,57 +313,30 @@ def generate_runtime_dev_jwts(repo_root: Path | None = None) -> dict[str, str]:
                 sub="16",
                 tenant_id="default",
                 roles=["admin"],
-                permissions=["*", "byok:read", "byok:write"],
+                permissions=[
+                    "chat:read",
+                    "chat:write",
+                    "rag:read",
+                    "rag:write",
+                    "byok:read",
+                    "byok:write",
+                    "finops:read",
+                    "finops:write",
+                    "agent:read",
+                    "agent:write",
+                    "agent:execute",
+                    "agent:approve",
+                    "ops:read",
+                ],
                 expires_in=-3600,
                 secret_key=secret,
                 jti=f"test-token-16-{now}",
             ),
         }
     except ImportError:
-        now = int(time.time())
-
-        def _b64url(b: bytes) -> str:
-            return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
-
-        def _make_jwt(
-            sub: str, tenant_id: str, exp_offset: int, role: str = "admin"
-        ) -> str:
-            kid = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:8]
-            header = {"alg": "HS256", "typ": "JWT", "kid": kid}
-            payload = {
-                "sub": sub,
-                "uid": sub,
-                "tenant_id": tenant_id,
-                "tid": tenant_id,
-                "role": role,
-                "roles": [role],
-                "permissions": ["*", "byok:read", "byok:write"]
-                if role == "admin"
-                else ["read"],
-                "perms": ["*", "byok:read", "byok:write"]
-                if role == "admin"
-                else ["read"],
-                "type": "access",
-                "iat": now,
-                "exp": now + exp_offset,
-                "jti": f"dev-token-{sub}-{now}",
-            }
-            h_str = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-            p_str = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-            sig = hmac.new(
-                secret.encode("utf-8"),
-                f"{h_str}.{p_str}".encode(),
-                hashlib.sha256,
-            ).digest()
-            return f"{h_str}.{p_str}.{_b64url(sig)}"
-
-        return {
-            "token_a": _make_jwt("16", "default", exp_offset=3600, role="admin"),
-            "token_b": _make_jwt(
-                "user-beta", "tenant_beta", exp_offset=3600, role="user"
-            ),
-            "token_expired": _make_jwt("16", "default", exp_offset=-3600, role="admin"),
-        }
+        raise RuntimeError(
+            "Strict v1 synthetic token fixtures are required; no legacy minting fallback"
+        ) from None
 
 
 def run_bruno_cli_target(
@@ -700,7 +685,8 @@ def main() -> int:
             parser.error("Synthetic fixture is limited to local non-live suites")
         os.environ.update(
             ENVIRONMENT="test",
-            JWT_SECRET_KEY=secrets.token_hex(32),
+            JWT_SECRET_KEY=base64.b64encode(secrets.token_bytes(32)).decode(),
+            JWT_KEY_ID="bruno-synthetic",
             INTERNAL_GATEWAY_SECRET=secrets.token_hex(32),
             BYOK_MASTER_KEY=base64.b64encode(secrets.token_bytes(32)).decode(),
             BYOK_MASTER_KEY_ID="bruno-synthetic",

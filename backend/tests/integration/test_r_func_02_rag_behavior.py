@@ -29,11 +29,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import get_settings
 from app.main import app
 from app.rag.bm25 import BM25Retriever
 from app.rag.citations import CitationGenerator
@@ -72,18 +70,16 @@ def test_embedding_provider() -> EmbeddingProvider:
 
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
-    """Generate valid JWT bearer authorization header."""
-    settings = get_settings()
-    token = jwt.encode(
-        {
-            "sub": "test-rag-admin",
-            "tenant_id": "tenant-rf2-main",
-            "roles": ["admin"],
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm="HS256",
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub="test-rag-admin",
+        tenant_id="tenant-rf2-main",
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": "Bearer " + token}
 
 
 # ==============================================================================
@@ -698,19 +694,12 @@ async def test_scenario_14_http_api_endpoints_complete_boundary(
             json=payload_async,
             headers=auth_headers,
         )
-        assert resp_async.status_code == 202
-        async_data = resp_async.json()
-        assert "task_id" in async_data
-        task_id = async_data["task_id"]
-
-        # 3. Poll task status (200 OK)
+        assert resp_async.status_code == 503
+        assert "task_id" not in resp_async.json()
         task_resp = await client.get(
-            f"/api/v1/rag/tasks/{task_id}", headers=auth_headers
+            "/api/v1/rag/tasks/unissued-task", headers=auth_headers
         )
-        assert task_resp.status_code == 200
-        task_info = task_resp.json()
-        assert task_info["task_id"] == task_id
-        assert task_info["tenant_id"] == "tenant-rf2-main"
+        assert task_resp.status_code == 404
 
         # 4. Reject unsupported document type with 400 Bad Request
         payload_invalid = {

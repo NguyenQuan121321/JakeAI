@@ -34,12 +34,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
-import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -79,7 +77,6 @@ from app.agent.state.models import (
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
 from app.agent.tools.registry import ToolRegistry
 from app.agent.verification.verifier import CanonicalVerifier
-from app.core.config import get_settings
 from app.main import app
 
 # ===========================================================================
@@ -415,17 +412,15 @@ def fresh_engine(
 
 
 def make_agent_jwt(tenant_id: str, user_id: str = "user-logic-01") -> str:
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": ["admin", "operator"],
-        "permissions": ["agent:read", "agent:write", "tools:execute"],
-    }
-    return pyjwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    token = create_test_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=["tenant_admin"],
+        permissions=FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 def tool_call_payload(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -922,186 +917,77 @@ async def test_terminal_failed_run_refuses_resume_and_new_run_is_fresh() -> None
 
 @pytest.mark.asyncio
 async def test_http_approval_gate_rejection_marks_run_rejected() -> None:
-    """Rejecting an approval via the decisions API terminates the run REJECTED.
+    """An unbound HTTP decision cannot transition a pending run or approval."""
+    from tests.fixtures.approvals import pending_http_record
+    from tests.fixtures.auth import subject_id
 
-    EXPECTED: WAITING/PAUSED→REJECTED (terminal), consistent with the canonical
-    engine's rejection semantics.
-    ACTUAL (pre-fix): the manager set the run back to RUNNING with nothing left
-    executing — an immortal zombie state that could neither progress nor be
-    reported terminal.
-    """
-    tenant = f"tenant-logic-01-{uuid.uuid4().hex[:8]}"
-    headers = {"Authorization": f"Bearer {make_agent_jwt(tenant)}"}
-
-    with patch(
-        "app.agent.backends.jakeai.call_upstream_llm_detailed",
-        new_callable=AsyncMock,
-        side_effect=[
-            tool_call_payload("terminal_exec", {"command": "rm -rf /tmp/cache"}),
-            finish_payload("done after reject"),
-        ],
-    ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://testserver"
-        ) as client:
-            res = await client.post(
-                "/api/v1/agent/tasks",
+    tenant = "disabled-transition-" + uuid.uuid4().hex[:8]
+    _, task, run, record = pending_http_record(tenant, subject_id("user-logic-01"))
+    headers = {"Authorization": "Bearer " + make_agent_jwt(tenant)}
+    before = record.model_dump()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for _ in range(2):
+            response = await client.post(
+                f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{record.approval_id}",
                 headers=headers,
-                json={"goal": "run dangerous command"},
+                json={"approved": False},
             )
-            assert res.status_code == 201, res.text
-            task_id = res.json()["task_id"]
-
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs",
-                headers=headers,
-                json={"async_execution": False},
-            )
-            assert res.status_code == 201, res.text
-            run_id = res.json()["run_id"]
-            assert res.json()["status"] == TaskStatus.PAUSED_APPROVAL.value
-
-            res = await client.get("/api/v1/agent/approvals/pending", headers=headers)
-            pending = res.json()
-            assert len(pending) == 1
-            approval_id = pending[0]["approval_id"]
-
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}",
-                headers=headers,
-                json={"approved": False, "reason": "not authorized"},
-            )
-            assert res.status_code == 200, res.text
-            assert res.json()["status"] == ApprovalStatus.REJECTED.value
-
-            res = await client.get(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}", headers=headers
-            )
-            assert res.status_code == 200
-            assert res.json()["status"] == RunStatus.REJECTED.value, (
-                f"run ended in {res.json()['status']} after approval rejection"
-            )
-
-            # A second decision on the finalized approval is refused.
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}",
-                headers=headers,
-                json={"approved": True, "reason": "late approve"},
-            )
-            assert res.status_code == 409, res.text
+            assert response.status_code == 503
+            assert record.model_dump() == before
+            assert run.status == RunStatus.PAUSED_APPROVAL
 
 
 @pytest.mark.asyncio
 async def test_http_approval_approve_resumes_to_completed() -> None:
-    """Approving the gate resumes execution; the run terminates COMPLETED and
-    the approval is consumed (single-use)."""
-    tenant = f"tenant-logic-01-{uuid.uuid4().hex[:8]}"
-    headers = {"Authorization": f"Bearer {make_agent_jwt(tenant)}"}
+    """An unbound HTTP decision cannot transition a pending run or approval."""
+    from tests.fixtures.approvals import pending_http_record
+    from tests.fixtures.auth import subject_id
 
-    with patch(
-        "app.agent.backends.jakeai.call_upstream_llm_detailed",
-        new_callable=AsyncMock,
-        side_effect=[
-            tool_call_payload("terminal_exec", {"command": "rm -rf /tmp/cache"}),
-            finish_payload("approved and completed"),
-        ],
-    ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://testserver"
-        ) as client:
-            res = await client.post(
-                "/api/v1/agent/tasks",
+    tenant = "disabled-transition-" + uuid.uuid4().hex[:8]
+    _, task, run, record = pending_http_record(tenant, subject_id("user-logic-01"))
+    headers = {"Authorization": "Bearer " + make_agent_jwt(tenant)}
+    before = record.model_dump()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for _ in range(2):
+            response = await client.post(
+                f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{record.approval_id}",
                 headers=headers,
-                json={"goal": "run dangerous command"},
+                json={"approved": True},
             )
-            task_id = res.json()["task_id"]
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs",
-                headers=headers,
-                json={"async_execution": False},
-            )
-            assert res.status_code == 201
-            run_id = res.json()["run_id"]
-            assert res.json()["status"] == TaskStatus.PAUSED_APPROVAL.value
-
-            res = await client.get("/api/v1/agent/approvals/pending", headers=headers)
-            approval_id = res.json()[0]["approval_id"]
-
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}",
-                headers=headers,
-                json={"approved": True, "reason": "authorized"},
-            )
-            assert res.status_code == 200, res.text
-            assert res.json()["status"] == ApprovalStatus.APPROVED.value
-
-            res = await client.get(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}", headers=headers
-            )
-            assert res.json()["status"] == RunStatus.COMPLETED.value
+            assert response.status_code == 503
+            assert record.model_dump() == before
+            assert run.status == RunStatus.PAUSED_APPROVAL
 
 
 @pytest.mark.asyncio
 async def test_http_cancel_during_approval_wait_is_terminal_and_final() -> None:
-    """Cancelling a paused run persists CANCELLED; a later approval decision
-    cannot resurrect the cancelled run."""
-    tenant = f"tenant-logic-01-{uuid.uuid4().hex[:8]}"
-    headers = {"Authorization": f"Bearer {make_agent_jwt(tenant)}"}
+    from tests.fixtures.approvals import pending_http_record
+    from tests.fixtures.auth import subject_id
 
-    with patch(
-        "app.agent.backends.jakeai.call_upstream_llm_detailed",
-        new_callable=AsyncMock,
-        side_effect=[
-            tool_call_payload("terminal_exec", {"command": "rm -rf /tmp/cache"}),
-            finish_payload("should never run"),
-        ],
-    ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://testserver"
-        ) as client:
-            res = await client.post(
-                "/api/v1/agent/tasks",
-                headers=headers,
-                json={"goal": "run dangerous command"},
-            )
-            task_id = res.json()["task_id"]
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs",
-                headers=headers,
-                json={"async_execution": False},
-            )
-            run_id = res.json()["run_id"]
-            assert res.json()["status"] == TaskStatus.PAUSED_APPROVAL.value
-
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/cancel",
-                headers=headers,
-            )
-            assert res.status_code == 200, res.text
-            assert res.json()["status"] == RunStatus.CANCELLED.value
-
-            res = await client.get(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}", headers=headers
-            )
-            assert res.json()["status"] == RunStatus.CANCELLED.value
-
-            # Late approval on the cancelled run must not resurrect it.
-            res = await client.get("/api/v1/agent/approvals/pending", headers=headers)
-            pending = [p for p in res.json() if p["run_id"] == run_id]
-            assert pending, "approval gate lost after cancel"
-            approval_id = pending[0]["approval_id"]
-            res = await client.post(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}",
-                headers=headers,
-                json={"approved": True, "reason": "late"},
-            )
-            assert res.status_code == 200, res.text
-            res = await client.get(
-                f"/api/v1/agent/tasks/{task_id}/runs/{run_id}", headers=headers
-            )
-            assert res.json()["status"] == RunStatus.CANCELLED.value, (
-                f"cancelled run resurrected to {res.json()['status']}"
-            )
+    tenant = "disabled-cancel-" + uuid.uuid4().hex[:8]
+    _, task, run, record = pending_http_record(tenant, subject_id("user-logic-01"))
+    headers = {"Authorization": "Bearer " + make_agent_jwt(tenant)}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/cancel",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert run.status == RunStatus.CANCELLED
+        late = await client.post(
+            f"/api/v1/agent/tasks/{task.task_id}/runs/{run.run_id}/approvals/{record.approval_id}",
+            headers=headers,
+            json={"approved": True},
+        )
+        assert late.status_code == 503
+        assert run.status == RunStatus.CANCELLED
+        assert record.status == ApprovalStatus.PENDING
 
 
 @pytest.mark.asyncio

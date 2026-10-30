@@ -177,6 +177,25 @@ class ToolRegistry:
             )
 
         ctx = context or {}
+        from app.core.identity_state import authorize_bound_effect, current_authority
+
+        lease = current_authority.get()
+        await authorize_bound_effect(str(ctx.get("tenant_id", "")), "agent:execute")
+        if lease is not None:
+            await authorize_bound_effect(lease.claims["tid"], "agent:execute")
+            if tool_name not in {"calculator", "system_time"}:
+                return ToolResult(
+                    success=False,
+                    error="Tool effects require a scoped durable authorization adapter",
+                    execution_time_ms=0.0,
+                )
+            ctx = {
+                **ctx,
+                "tenant_id": lease.claims["tid"],
+                "user_id": lease.claims["sub"],
+                "roles": [],
+                "permissions": lease.claims["perms"],
+            }
         roles = ctx.get("roles", [])
         perms = ctx.get("permissions", [])
 

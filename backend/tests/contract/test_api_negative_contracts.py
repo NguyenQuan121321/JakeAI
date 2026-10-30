@@ -16,12 +16,10 @@ Verifies all 10 legitimately supported negative HTTP status codes:
 - 503 Service Unavailable (Upstream provider outage, circuit breaker open, readiness failure)
 """
 
-import time
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -37,25 +35,20 @@ def create_token(
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
     token_type: str = "access",
-    expires_in: int = 3600,
+    expires_in: int = 900,
     secret_key: str | None = None,
 ) -> str:
-    """Helper generating HS256 JWT access token for negative test verification."""
-    settings = get_settings()
-    key = secret_key or settings.JWT_SECRET_KEY
-    now = int(time.time())
-    payload = {
-        "sub": sub,
-        "tenant_id": tenant_id,
-        "type": token_type,
-        "iat": now,
-        "exp": now + expires_in,
-        "roles": roles or ["admin"],
-        "permissions": permissions
-        if permissions is not None
-        else ["*", "byok:read", "byok:write"],
-    }
-    return jwt.encode(payload, key, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS, create_test_jwt
+
+    return create_test_jwt(
+        sub=sub,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+        expires_in=expires_in,
+        token_type=token_type,
+        secret_key=secret_key,
+    )
 
 
 def auth_headers(
@@ -189,7 +182,7 @@ async def test_negative_401_unauthorized_expired_token(
     headers = {"Authorization": f"Bearer {expired_token}"}
     response = await async_client.get("/api/v1/byok/keys", headers=headers)
     assert response.status_code == 401
-    assert "expired" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Invalid access credential"
 
 
 @pytest.mark.asyncio
@@ -215,7 +208,7 @@ async def test_negative_401_unauthorized_wrong_token_type(
     headers = {"Authorization": f"Bearer {refresh_token}"}
     response = await async_client.get("/api/v1/byok/keys", headers=headers)
     assert response.status_code == 401
-    assert "invalid token type" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Invalid access credential"
 
 
 @pytest.mark.asyncio
@@ -267,8 +260,8 @@ async def test_negative_403_forbidden_missing_internal_perimeter_secret(
             "tenant_id": "tenant-neg-01",
         },
     )
-    assert response.status_code == 403
-    assert "Perimeter bypass rejected" in response.json()["detail"]
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access credential required"
 
 
 @pytest.mark.asyncio
@@ -285,8 +278,8 @@ async def test_negative_403_forbidden_invalid_internal_perimeter_secret(
             "tenant_id": "tenant-neg-01",
         },
     )
-    assert response.status_code == 403
-    assert "Perimeter bypass rejected" in response.json()["detail"]
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access credential required"
 
 
 @pytest.mark.asyncio
@@ -321,8 +314,8 @@ async def test_negative_403_forbidden_cross_tenant_tool_resumption(
             "tenant_id": "tenant-beta",
         },
     )
-    assert response.status_code == 403
-    assert "tenant mismatch" in response.json()["detail"].lower()
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Access credential required"
 
 
 @pytest.mark.asyncio
@@ -344,8 +337,8 @@ async def test_negative_403_forbidden_cross_tenant_agent_task_access(
     response = await async_client.get(
         f"/api/v1/agent/tasks/{task_a.task_id}", headers=headers_b
     )
-    assert response.status_code == 403
-    assert "Tenant" in response.json()["detail"]
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Not found"
 
 
 # ==============================================================================
@@ -430,12 +423,14 @@ async def test_negative_409_conflict_duplicate_tool_result_submission(
         "x-forwarded-by": "finnapigo",
         "x-internal-secret": settings.INTERNAL_GATEWAY_SECRET,
     }
+    headers.update(auth_headers(tenant_id=tenant_id))
+    before = await bridge.get_checkpoint(call_id)
     r_first = await async_client.post(
         "/internal/v1/coding/resume",
         headers=headers,
         json={"call_id": call_id, "result": {"value": 2}, "tenant_id": tenant_id},
     )
-    assert r_first.status_code == 200
+    assert r_first.status_code == 503
 
     # Second submission on completed call must return 409 Conflict
     r_second = await async_client.post(
@@ -443,8 +438,8 @@ async def test_negative_409_conflict_duplicate_tool_result_submission(
         headers=headers,
         json={"call_id": call_id, "result": {"value": 2}, "tenant_id": tenant_id},
     )
-    assert r_second.status_code == 409
-    assert "already" in r_second.json()["detail"].lower()
+    assert r_second.status_code == 503
+    assert await bridge.get_checkpoint(call_id) == before
 
 
 @pytest.mark.asyncio
@@ -453,13 +448,18 @@ async def test_negative_409_conflict_agent_approval_already_resolved(
 ) -> None:
     """Submitting decision on an already resolved approval returns 409 Conflict."""
     from app.agent.runtime.manager import get_agent_manager
+    from tests.fixtures.auth import subject_id
 
     manager = get_agent_manager()
     tenant_id = f"tenant-appr-{uuid.uuid4().hex[:6]}"
     task = manager.create_task(
-        goal="Approval gate test task", tenant_id=tenant_id, user_id="user-1"
+        goal="Approval gate test task",
+        tenant_id=tenant_id,
+        user_id=subject_id("test-neg-user"),
     )
-    run = manager.create_run(task.task_id, tenant_id=tenant_id, user_id="user-1")
+    run = manager.create_run(
+        task.task_id, tenant_id=tenant_id, user_id=subject_id("test-neg-user")
+    )
 
     # Request approval
     appr = manager.approval_manager.create_request(
@@ -478,7 +478,7 @@ async def test_negative_409_conflict_agent_approval_already_resolved(
         headers=headers,
         json={"approved": True, "reason": "Approved by operator"},
     )
-    assert r1.status_code == 200
+    assert r1.status_code == 503
 
     # Second decision: Duplicate decision on resolved approval -> 409 Conflict
     r2 = await async_client.post(
@@ -486,8 +486,9 @@ async def test_negative_409_conflict_agent_approval_already_resolved(
         headers=headers,
         json={"approved": False, "reason": "Second duplicate attempt"},
     )
-    assert r2.status_code == 409
-    assert "already finalized" in r2.json()["detail"].lower()
+    assert r2.status_code == 503
+    assert appr.status.value == "pending"
+    assert appr.decided_by is None
 
 
 # ==============================================================================
@@ -625,25 +626,30 @@ async def test_negative_429_too_many_requests_provider_rate_limit_with_retry_aft
 
 
 @pytest.mark.asyncio
-async def test_negative_500_internal_server_error_preserves_correlation_id() -> None:
-    """Unhandled server exceptions return 500 while recording metrics and correlation ID."""
-    from app.telemetry.metrics import metrics
+async def test_negative_500_internal_server_error_preserves_correlation_id(
+    monkeypatch,
+) -> None:
+    from app.services.billing import get_billing_service
 
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    headers = auth_headers(correlation_id="corr-neg-500-test")
-
-    with pytest.MonkeyPatch.context() as mp:
-
-        def mock_crash() -> Any:
-            raise RuntimeError("Simulated unexpected database connectivity crash")
-
-        mp.setattr(metrics, "get_snapshot", mock_crash)
-
-        async with AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
-            response = await client.get("/api/v1/analytics/metrics", headers=headers)
-            assert response.status_code == 500
+    monkeypatch.setattr(
+        get_billing_service(),
+        "get_dashboard_metrics",
+        AsyncMock(
+            side_effect=RuntimeError("synthetic-credential-canary-must-not-escape")
+        ),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/api/v1/analytics/dashboard",
+            headers=auth_headers(correlation_id="corr-neg-500-test"),
+        )
+    assert response.status_code == 500
+    assert response.headers["x-correlation-id"] == "corr-neg-500-test"
+    assert "synthetic-credential-canary" not in response.text
+    assert response.json()["detail"] == "Internal server error"
 
 
 # ==============================================================================

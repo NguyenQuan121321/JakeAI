@@ -7,7 +7,12 @@ import secrets
 import pytest
 
 # Synthetic provisioning belongs in tests, never in runtime defaults or CI credentials.
-os.environ.setdefault("JWT_SECRET_KEY", secrets.token_hex(32))
+os.environ.setdefault(
+    "JWT_SECRET_KEY", base64.b64encode(secrets.token_bytes(32)).decode()
+)
+os.environ.setdefault("JWT_KEY_ID", "test-current")
+os.environ.setdefault("JWT_ALGORITHM", "HS256")
+os.environ.setdefault("JWT_ISSUER", "finnapigo")
 os.environ.setdefault("INTERNAL_GATEWAY_SECRET", secrets.token_hex(32))
 os.environ.setdefault(
     "BYOK_MASTER_KEY", base64.b64encode(secrets.token_bytes(32)).decode()
@@ -23,6 +28,45 @@ __all__ = [
     "create_test_jwt",
     "generate_agent_jwt",
 ]
+
+
+@pytest.fixture
+def component_decision_store(monkeypatch):
+    """Opt-in only: exercise orchestration from a pre-decided component record."""
+    from app.agent.approvals.manager import ApprovalManager
+    from tests.fixtures.approvals import component_decision
+
+    monkeypatch.setattr(ApprovalManager, "decide", component_decision)
+    monkeypatch.setattr(ApprovalManager, "decide_request", component_decision)
+
+
+@pytest.fixture(autouse=True)
+def offline_identity_transport(monkeypatch, request):
+    """Ordinary suites isolate Finn state, never token verification or grants.
+
+    Actual adapter tests install their own app.state client. Hosted J02 runs the
+    release processes outside pytest and never loads this synthetic fixture.
+    """
+    if request.node.get_closest_marker("live_finnapigo"):
+        return
+    from app.core.config import get_settings
+    from app.core.identity_state import get_state_client
+
+    class OfflineState:
+        @property
+        def settings(self):
+            return get_settings()
+
+        async def check(self, token, claims):
+            # Signature/purpose/types/expiry are enforced by AuthorityLease.
+            assert token and claims["contract_ver"] == 1
+
+    def choose(incoming):
+        if getattr(incoming.app.state, "identity_client", None) is not None:
+            return get_state_client(incoming)
+        return OfflineState()
+
+    monkeypatch.setattr("app.core.security.get_state_client", choose)
 
 
 def pytest_collection_modifyitems(

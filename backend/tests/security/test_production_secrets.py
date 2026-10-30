@@ -13,7 +13,11 @@ from app.core.config import Settings
 def provisioned():
     return {
         "ENVIRONMENT": "production",
-        "JWT_SECRET_KEY": secrets.token_hex(32),
+        "JWT_SECRET_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
+        "JWT_KEY_ID": "synthetic-signing",
+        "IDENTITY_STATE_URL": "https://identity.test/api/v1/identity/introspect",
+        "IDENTITY_STATE_KEY_ID": "synthetic-state",
+        "IDENTITY_STATE_SECRET": base64.b64encode(secrets.token_bytes(32)).decode(),
         "INTERNAL_GATEWAY_SECRET": secrets.token_hex(32),
         "FINNAPIGO_SERVICE_SECRET": secrets.token_hex(32),
         "AUDIT_HMAC_KEY": secrets.token_hex(32),
@@ -88,7 +92,7 @@ def test_purpose_separation_rejects_reuse(field):
 def test_purpose_separation_compares_decoded_bytes_and_previous_keys():
     values = provisioned()
     values["BYOK_MASTER_KEY"] = base64.b64encode(
-        bytes.fromhex(values["JWT_SECRET_KEY"])
+        base64.b64decode(values["JWT_SECRET_KEY"])
     ).decode()
     with pytest.raises(ValueError):
         Settings(_env_file=None, **values)

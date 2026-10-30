@@ -488,6 +488,14 @@ def test_registry_discovers_builtin_tools_through_policy() -> None:
 
     registry = get_tool_registry()
     discoverable = {m.name for m in registry.discover(user_roles=["admin"])}
-    assert "get_account_balance" in discoverable
-    assert "read_file" in discoverable
+    assert discoverable == {"calculator", "system_time"}
+    explicit = {
+        m.name
+        for m in registry.discover(
+            user_roles=["user"],
+            user_permissions=["finnapigo:read", "files:read", "agent:read_files"],
+        )
+    }
+    assert "get_account_balance" in explicit
+    assert "read_file" in explicit
     assert registry.get("get_account_balance") is not None

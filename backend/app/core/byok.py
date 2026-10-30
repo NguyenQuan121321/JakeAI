@@ -444,6 +444,12 @@ class BYOKManager:
         record, _ = self._open(raw, tenant_id, norm)
         if record["status"] != "active":
             raise BYOKError("BYOK_REVOKED", 409)
+        from app.core.identity_state import authorize_bound_effect, current_authority
+
+        lease = current_authority.get()
+        if lease is not None:
+            await authorize_bound_effect(tenant_id)
+            self._authorize(record, lease.claims["sub"], False)
         return protect_credential(str(record["api_key"]))
 
     async def list_keys(

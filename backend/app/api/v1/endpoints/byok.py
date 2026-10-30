@@ -48,6 +48,9 @@ def _permission(required: str) -> Callable[..., Coroutine[Any, Any, TenantContex
             raise HTTPException(403, "BYOK_IDENTITY_REQUIRED")
         if required not in context.permissions:
             raise HTTPException(403, "BYOK_PERMISSION_REQUIRED")
+        from app.core.identity_state import authorize_bound_effect
+
+        await authorize_bound_effect(context.tenant_id, required)
         return context
 
     return check

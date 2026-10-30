@@ -13,6 +13,10 @@ Proves the 10 required orchestration scenarios and system boundaries:
 10. Process restart -> resume without duplicating completed steps.
 11. Run cancellation and timeout enforcement.
 12. HTTP REST API endpoints and multi-tenant isolation.
+J02 boundary classification: tests explicitly marked component_decision_store
+start from synthetic pre-decided RAM records to exercise orchestration only.
+They do not establish approval authority, durable consume, or worker race safety.
+Actual HTTP decisions remain unavailable and have separate denial regressions.
 """
 
 from __future__ import annotations
@@ -22,7 +26,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -58,7 +61,6 @@ from app.agent.state.models import RunState, RunStatus
 from app.agent.tools.base import Tool, ToolMetadata, ToolResult, ToolRiskLevel
 from app.agent.tools.registry import ToolRegistry
 from app.agent.verification.verifier import CanonicalVerifier
-from app.core.config import get_settings
 from app.main import app
 
 # ===========================================================================
@@ -188,18 +190,16 @@ def make_agent_jwt(
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
 ) -> str:
-    """Create test HS256 JWT for tenant-scoped requests."""
-    settings = get_settings()
-    now = int(time.time())
-    payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": now,
-        "exp": now + 3600,
-        "roles": roles or ["admin", "operator"],
-        "permissions": permissions or ["agent:read", "agent:write", "tools:execute"],
-    }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+    from tests.fixtures.auth import FULL_TEST_PERMISSIONS
+    from tests.fixtures.auth import create_test_jwt as v1_fixture_jwt
+
+    token = v1_fixture_jwt(
+        sub=user_id,
+        tenant_id=tenant_id,
+        roles=roles if roles is not None else ["tenant_admin"],
+        permissions=permissions if permissions is not None else FULL_TEST_PERMISSIONS,
+    )
+    return token
 
 
 # ===========================================================================
@@ -605,6 +605,7 @@ async def test_scenario_06_tool_selection_validation_and_execution() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("component_decision_store")
 async def test_scenario_07_approval_pause_resume_via_persisted_state(tmp_path) -> None:
     """SCENARIO 7: Dangerous tool triggers approval gate, pauses cleanly, and resumes upon approval."""
     backend = MockControllableBackend()
@@ -1033,6 +1034,6 @@ async def test_scenario_12_http_api_endpoints_and_isolation() -> None:
             "/api/v1/agent/metrics",
             headers={"Authorization": f"Bearer {token_tenant_a}"},
         )
-        assert res_metrics.status_code == 200
+        assert res_metrics.status_code == 503
         metrics = res_metrics.json()
-        assert "tasks_created" in metrics or "runs_started" in metrics
+        assert "tasks_created" not in metrics and "runs_started" not in metrics
