@@ -47,7 +47,7 @@ async def test_health_endpoint_contract(async_client: AsyncClient) -> None:
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["environment"] == "development"
+    assert data["environment"] == get_settings().ENVIRONMENT
     assert "version" in data
     assert "timestamp" in data
 

@@ -38,6 +38,7 @@ jobs:
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
+      J02_BENCHMARK_OWNED_SERVICES: '1'
       # Match the inherited scheduled store topology. Model/Finn state are
       # explicitly synthetic; no provider/repository credentials are supplied.
     steps:
@@ -49,6 +50,12 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.12'
+      - name: Read-only exact reviewed-main performance control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: bed2473b0b2878fa5351318a29ca047a8801af51
+          path: reviewed-main-control
+          persist-credentials: false
       - name: Install locked dependencies
         run: python -m pip install -r backend/requirements.txt
       - name: Scheduled integration and E2E commands without live providers
@@ -59,7 +66,12 @@ jobs:
       - name: Full scheduled benchmark with unchanged baseline and thresholds
         if: ${{ !cancelled() }}
         working-directory: backend
-        run: python scripts/run_performance_benchmark.py --mode full --fail-on-regression
+        run: |
+          python ../scripts/j02_benchmark_control.py reset
+          python scripts/run_performance_benchmark.py --mode full --fail-on-regression
+      - name: Diagnose unchanged reviewed-main with matched configuration and stores
+        if: ${{ !cancelled() }}
+        run: python scripts/j02_benchmark_control.py control
       - name: Scheduled load and detector regressions
         if: ${{ !cancelled() }}
         working-directory: backend
