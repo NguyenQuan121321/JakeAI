@@ -1,0 +1,29 @@
+meta {
+  name: 12 — Get Bound Approval
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/approvals/{{approval_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setVar("approval_action_hash", res.getBody().action_hash);
+  }
+}
+
+tests {
+  test("Requester reads the immutable approval binding", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().action_hash).to.match(/^[a-f0-9]{64}$/);
+    expect(res.getBody()).not.to.have.property("_credential");
+  });
+}

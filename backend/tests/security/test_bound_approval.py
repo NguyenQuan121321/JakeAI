@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from app.agent.approvals import authority as module
+from app.core import approval_authority as module
 from app.core.config import get_settings
 from tests.fixtures.auth import create_test_jwt
 

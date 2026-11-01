@@ -80,7 +80,7 @@ class ApprovalManager:
         """Record human decision on an approval gate with tenant boundary check."""
         # This RAM store cannot provide an atomic, durable authorization/consume
         # boundary across workers. Positive safe HTTP authority lives in
-        # approvals.authority; legacy RAM checkpoints cannot acquire it.
+        # core.approval_authority; legacy RAM checkpoints cannot acquire it.
         _ = approval_id, decision, tenant_id, user_id
         raise PermissionError("Durable bound approval authority is unavailable")
 

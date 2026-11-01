@@ -336,9 +336,12 @@ return 1
             raise HTTPException(409, "Approval credential expired or changed") from None
         # Reuse the safe existing tool adapter. Calculation has no outside effect;
         # publication below is the protected effect, atomic with consumption.
-        from app.agent.tools.builtins.mock_tools import CalculatorTool
+        from app.agent.tools.registry import get_tool_registry
 
-        result = await CalculatorTool().execute(record["action"]["arguments"])
+        registry = get_tool_registry()
+        result = await registry.execute(
+            "calculator", record["action"]["arguments"], context={"tenant_id": tenant}
+        )
         if not result.success:
             raise HTTPException(422, "Invalid calculator action")
         await approver.check(force=True)

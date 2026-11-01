@@ -27,7 +27,7 @@ def run_approvals(harness, compose, decode, emit):
     def policy_update(policy, tool="calculator-v1"):
         # Owned synthetic operator provisioning, no application HTTP bypass.
         code = """import asyncio,json,sys
-from app.agent.approvals.authority import ApprovalAuthority,POLICY_KEY,canonical
+from app.core.approval_authority import ApprovalAuthority,POLICY_KEY,canonical
 async def main():
  authority=ApprovalAuthority()
  try:

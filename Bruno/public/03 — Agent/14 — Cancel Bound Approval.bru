@@ -1,0 +1,22 @@
+meta {
+  name: 14 — Cancel Bound Approval
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs/{{run_id}}/approvals/{{approval_id}}/cancel
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+tests {
+  test("Requester cancels an unconsumed approval", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().status).to.equal("cancelled");
+  });
+}

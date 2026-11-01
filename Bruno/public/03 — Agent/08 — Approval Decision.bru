@@ -11,7 +11,7 @@ post {
 }
 
 auth:bearer {
-  token: {{token_a}}
+  token: {{approval_approver_token}}
 }
 
 headers {
@@ -20,13 +20,14 @@ headers {
 
 body:json {
   {
-    "decision": "approved",
-    "reason": "Safe verification test"
+    "approved": true,
+    "action_hash": "{{approval_action_hash}}"
   }
 }
 
 tests {
-  test("Approval decision returns 200 or 404 (if no pending approval)", function() {
-    expect([200, 404, 409]).to.include(res.getStatus());
+  test("Assigned separate approver authorizes the bound action", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().status).to.equal("approved");
   });
 }

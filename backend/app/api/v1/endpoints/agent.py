@@ -8,16 +8,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.agent.approvals.authority import (
+from app.agent.approvals.models import ApprovalRequest
+from app.agent.runtime.manager import get_agent_manager
+from app.agent.state.models import RunState, RunStatus, TaskState
+from app.agent.telemetry import AgentMetricsSnapshot, agent_telemetry
+from app.core.approval_authority import (
     ApprovalAuthority,
     BoundConsume,
     BoundDecision,
     SafeApprovalProposal,
 )
-from app.agent.approvals.models import ApprovalRequest
-from app.agent.runtime.manager import get_agent_manager
-from app.agent.state.models import RunState, RunStatus, TaskState
-from app.agent.telemetry import AgentMetricsSnapshot, agent_telemetry
 from app.core.security import get_current_tenant
 
 if TYPE_CHECKING:
