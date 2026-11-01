@@ -24,6 +24,23 @@ def run_approvals(harness, compose, decode, emit):
     approver_id = decode(approver)["sub"]
     compose("up", "-d", "jake-peer")
     h.ready("jake-peer")
+    def policy_update(policy, tool="calculator-v1"):
+        # Owned synthetic operator provisioning, no application HTTP bypass.
+        code = """import asyncio,json,sys
+from app.agent.approvals.authority import ApprovalAuthority,POLICY_KEY,canonical
+async def main():
+ authority=ApprovalAuthority()
+ try:
+  policy=json.load(sys.stdin)
+  policy['epoch']=int(await authority.store.client.incr('approval:policy-generation'))
+  await authority.store.client.set(POLICY_KEY, canonical(policy))
+ finally: await authority.close()
+asyncio.run(main())
+"""
+        import json
+        compose("exec", "-T", "jake", "python", "-c", code,
+                data=json.dumps({"policy": policy, "tool": tool}).encode())
+    policy_update("approval-calculator-v1")
 
     def propose(label, expires=300, assigned=None):
         code, task = h.request("jake", "/api/v1/agent/tasks", token=requester,
@@ -120,6 +137,17 @@ def run_approvals(harness, compose, decode, emit):
     finally:
         compose("start", "redis")
     h.check("approval-state-recovery", consume(path, record)[0], 200)
+    path, record = propose("shared-policy-change")
+    h.check("approval-before-shared-policy-change", decide(path, record)[0], 200)
+    policy_update("approval-calculator-v2")
+    try:
+        h.check("approval-old-worker-stale-shared-policy", consume(path, record, service="jake-peer")[0], 409)
+    finally:
+        policy_update("approval-calculator-v1")
+    h.check("approval-old-decision-cannot-return-after-policy-recovery", consume(path, record)[0], 409)
+    path, record = propose("new-policy-generation")
+    h.check("approval-new-policy-generation-decision", decide(path, record)[0], 200)
+    h.check("approval-new-policy-generation-consume", consume(path, record)[0], 200)
     path, record = propose("requester-revoked")
     h.check("approval-before-requester-revocation", decide(path, record)[0], 200)
     h.sql("UPDATE users SET auth_epoch=auth_epoch+1 WHERE email='j02-a@example.invalid';")

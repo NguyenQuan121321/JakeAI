@@ -30,6 +30,7 @@ from app.core.secret_material import decode_secret
 
 POLICY_VERSION = "approval-calculator-v1"
 TOOL_VERSION = "calculator-v1"
+POLICY_KEY = "approval:active-policy"
 
 
 class SafeApprovalProposal(BaseModel):
@@ -63,6 +64,9 @@ class ApprovalAuthority:
     # consume and result: a reply loss cannot make a retry publish a second effect.
     TRANSITION = """
 local now = tonumber(redis.call('TIME')[1])
+local policy = redis.call('GET', KEYS[2])
+if not policy then return -3 end
+if policy ~= ARGV[5] then return -4 end
 if now >= tonumber(ARGV[3]) then return -1 end
 if now - tonumber(ARGV[4]) > 2 or tonumber(ARGV[4]) > now + 1 then return -2 end
 local old = redis.call('GET', KEYS[1])
@@ -113,6 +117,25 @@ return 1
             await self.store.check(durable=True)
         except BYOKError:
             raise HTTPException(503, "Approval authority unavailable") from None
+
+    async def _policy_epoch(self) -> int:
+        await self._check_store()
+        try:
+            raw = await self.store.get(POLICY_KEY)
+            if raw is None:
+                raise HTTPException(503, "Approval policy is not provisioned")
+            policy = json.loads(raw)
+            if (
+                set(policy) != {"epoch", "policy", "tool"}
+                or type(policy["epoch"]) is not int
+                or not 1 <= policy["epoch"] <= 2147483647
+                or policy["policy"] != POLICY_VERSION
+                or policy["tool"] != TOOL_VERSION
+            ):
+                raise HTTPException(409, "Approval policy or tool changed")
+            return int(policy["epoch"])
+        except (BYOKError, ValueError, TypeError, KeyError):
+            raise HTTPException(503, "Approval policy unavailable") from None
 
     @staticmethod
     def _key(tenant: str, approval_id: str) -> str:
@@ -173,12 +196,20 @@ return 1
         try:
             result = await self.store.client.eval(
                 self.TRANSITION,
-                1,
+                2,
                 self._key(record["tenant_id"], record["approval_id"]),
+                POLICY_KEY,
                 prior,
                 canonical(record),
                 record["action"]["expires_at"],
                 checked_at,
+                canonical(
+                    {
+                        "epoch": record["action"]["policy_epoch"],
+                        "policy": POLICY_VERSION,
+                        "tool": TOOL_VERSION,
+                    }
+                ),
             )
         except Exception:
             # The write may have committed. Retry must read the consumed record;
@@ -186,6 +217,8 @@ return 1
             raise HTTPException(
                 503, "Approval authority unavailable; reconcile status"
             ) from None
+        if result == -3:
+            raise HTTPException(503, "Approval policy is not provisioned")
         if result != 1:
             raise HTTPException(409, "Approval expired, changed or already used")
 
@@ -199,6 +232,7 @@ return 1
         lease = self._current("agent:execute")
         if proposal.approver_id == lease.claims["sub"]:
             raise HTTPException(403, "Separate approver required")
+        policy_epoch = await self._policy_epoch()
         await authorize_effect("agent:execute")
         now = int(time.time())
         action = {
@@ -210,6 +244,7 @@ return 1
             "tool_name": "calculator",
             "tool_version": TOOL_VERSION,
             "policy_version": POLICY_VERSION,
+            "policy_epoch": policy_epoch,
             "arguments": {"expression": proposal.expression},
             "expires_at": min(now + proposal.expires_in, lease.claims["exp"]),
         }

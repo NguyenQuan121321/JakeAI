@@ -23,6 +23,8 @@ def component_authority(monkeypatch):
     lock = asyncio.Lock()
 
     class ComponentStore:
+        epoch = 1
+
         def __init__(self, _url):
             self.client = self
 
@@ -33,10 +35,28 @@ def component_authority(monkeypatch):
             pass
 
         async def get(self, key):
+            if key == module.POLICY_KEY:
+                return module.canonical(
+                    {
+                        "epoch": self.epoch,
+                        "policy": "approval-calculator-v1",
+                        "tool": "calculator-v1",
+                    }
+                )
             return records.get(key)
 
-        async def eval(self, script, count, key, prior, value, expires, checked):
+        async def eval(
+            self, script, count, key, policy_key, prior, value, expires, checked, policy
+        ):
             async with lock:
+                if policy != module.canonical(
+                    {
+                        "epoch": self.epoch,
+                        "policy": "approval-calculator-v1",
+                        "tool": "calculator-v1",
+                    }
+                ):
+                    return -4
                 now = int(time.time())
                 if now >= int(expires):
                     return -1
@@ -299,6 +319,60 @@ async def test_unsafe_action_cannot_enter_positive_seam(
     )
     assert response.status_code == 422
     assert component_authority == {}
+
+
+@pytest.mark.asyncio
+async def test_shared_policy_generation_invalidates_old_and_allows_new(
+    async_client, component_authority, monkeypatch
+):
+    path, record = await approved(async_client)
+    monkeypatch.setattr(module.RedisStore, "epoch", 2)
+    assert (
+        await async_client.post(
+            path + "/consume",
+            headers=headers(),
+            json={"action_hash": record["action_hash"]},
+        )
+    ).status_code == 409
+    new_path, new_record = await approved(async_client)
+    assert new_record["action"]["policy_epoch"] == 2
+    assert (
+        await async_client.post(
+            new_path + "/consume",
+            headers=headers(),
+            json={"action_hash": new_record["action_hash"]},
+        )
+    ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_lost_commit_reply_does_not_restore_one_time_authority(
+    async_client, component_authority, monkeypatch
+):
+    path, record = await approved(async_client)
+    original = module.RedisStore.eval
+
+    async def lost_reply(self, *args):
+        await original(self, *args)
+        raise TimeoutError("synthetic lost acknowledgement")
+
+    monkeypatch.setattr(module.RedisStore, "eval", lost_reply)
+    result = await async_client.post(
+        path + "/consume",
+        headers=headers(),
+        json={"action_hash": record["action_hash"]},
+    )
+    assert result.status_code == 503
+    observed = await async_client.get(path, headers=headers())
+    assert observed.json()["status"] == "consumed"
+    assert observed.json()["result"]["result"] == 42
+    assert (
+        await async_client.post(
+            path + "/consume",
+            headers=headers(),
+            json={"action_hash": record["action_hash"]},
+        )
+    ).status_code == 409
 
 
 @pytest.mark.parametrize(
