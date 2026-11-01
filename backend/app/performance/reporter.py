@@ -59,6 +59,7 @@ class PerformanceReporter:
             "| :--- | :--- |",
             f"| **Baseline Version** | `{report.baseline_version}` |",
             f"| **Target Commit** | `{report.commit}` |",
+            f"| **Baseline Commit / OS** | `{report.baseline_environment.commit if report.baseline_environment else 'unknown'}` / `{report.baseline_environment.os_name if report.baseline_environment else 'unknown'}` |",
             f"| **Environment** | `{env.environment}` ({env.platform_name}) |",
             f"| **Python Runtime** | `Python {env.python_version}` |",
             f"| **CPU Core Count** | `{env.cpu_count} vCPUs` |",
@@ -172,6 +173,12 @@ class PerformanceReporter:
             "summary_text": report.summary_text,
             "findings_count": len(report.findings),
             "environment": report.environment.model_dump(),
+            "baseline_environment": report.baseline_environment.model_dump()
+            if report.baseline_environment
+            else None,
+            "initial_trial_errors": {
+                k: v.error_count for k, v in report.initial_scenarios.items()
+            },
         }
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary_data, f, indent=2)

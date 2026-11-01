@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     IDENTITY_STATE_TIMEOUT_SECONDS: float = Field(default=3.0, gt=0, le=5)
     IDENTITY_STATE_CONCURRENCY: int = Field(default=16, ge=1, le=64)
     OPERATOR_METRICS_SECRET: str = Field(default="", repr=False, exclude=True)
+    # Opt-in dedicated durable approval authority; no cache/RAM fallback.
+    APPROVAL_REDIS_URL: str = Field(default="", repr=False, exclude=True)
+    APPROVAL_CREDENTIAL_KEY: str = Field(default="", repr=False, exclude=True)
 
     # State, Caching & Vector Database
     REDIS_URL: str = "redis://localhost:6379/0"

@@ -56,6 +56,15 @@ USER_POLICY: dict[tuple[str, str], tuple[str, ...]] = {
     ),
     ("GET", "/agent/approvals/pending"): ("agent:approve",),
     ("GET", "/agent/metrics"): ("ops:read",),
+    ("GET", "/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}"): (
+        "agent:read",
+    ),
+    ("POST", "/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}/consume"): (
+        "agent:execute",
+    ),
+    ("POST", "/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}/cancel"): (
+        "agent:execute",
+    ),
 }
 for method, suffix in [
     ("POST", "/keys"),
@@ -180,7 +189,11 @@ class AuthorizationMiddleware:
                 raise HTTPException(
                     403, "Delegated tenant budget administrator required"
                 )
-            if route_path.startswith(get_settings().API_V1_STR + "/agent/tasks/"):
+            # Bound approval routes resolve tenant/owner/task/run directly from
+            # durable authority, including on a worker with no RAM checkpoint.
+            if route_path.startswith(get_settings().API_V1_STR + "/agent/tasks/") and (
+                "/approvals/" not in route_path or not get_settings().APPROVAL_REDIS_URL
+            ):
                 from app.agent.runtime.manager import get_agent_manager
 
                 manager = get_agent_manager()
@@ -201,12 +214,17 @@ class AuthorizationMiddleware:
                             raise KeyError
                 except (KeyError, PermissionError):
                     raise HTTPException(404, "Not found") from None
-            # These surfaces cannot safely convert RAM decisions/checkpoints or
-            # caller-supplied identity into durable execution authority (J07).
-            if "/coding/" in route_path or "/approvals/" in route_path:
+            # General checkpoint resumes and the old unbound RAM listing remain
+            # unavailable. Positive safe approvals use the dedicated authority.
+            if "/coding/" in route_path or route_path.endswith("/approvals/pending"):
                 raise HTTPException(
                     503, "Durable execution authorization is unavailable"
                 )
+            if "/approvals/" in route_path and (
+                not get_settings().APPROVAL_REDIS_URL
+                or not get_settings().APPROVAL_CREDENTIAL_KEY
+            ):
+                raise HTTPException(503, "Approval authority unavailable")
             if route_path.endswith(("/analytics/metrics", "/agent/metrics")):
                 raise HTTPException(
                     503, "Process telemetry requires the private operator endpoint"

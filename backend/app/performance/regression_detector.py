@@ -344,10 +344,16 @@ class PerformanceRegressionDetector:
                 f"{baseline.version} within explicit tolerances."
             )
 
+        from app.performance.baseline_store import capture_environment_metadata
+
+        current_environment = capture_environment_metadata(
+            "offline-asgi-and-selected-stores"
+        )
         return PerformanceRegressionReport(
             baseline_version=baseline.version,
-            commit=baseline.environment.commit,
-            environment=baseline.environment,
+            commit=current_environment.commit,
+            environment=current_environment,
+            baseline_environment=baseline.environment,
             verdict=verdict,
             has_blocking_regressions=has_block,
             total_scenarios_evaluated=scenarios_evaluated,

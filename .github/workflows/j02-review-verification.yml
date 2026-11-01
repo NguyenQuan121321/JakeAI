@@ -1,0 +1,78 @@
+name: J02 repair offline scheduled equivalents
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j02-review-offline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scheduled-equivalents:
+    name: J02 safe PR full benchmark and scheduled regressions
+    if: >-
+      github.repository == 'NguyenQuan121321/JakeAI' &&
+      github.event.repository.private == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/j02-review-fixes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports: ['6333:6333', '6334:6334']
+    env:
+      ENVIRONMENT: test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      # Match the inherited scheduled store topology. Model/Finn state are
+      # explicitly synthetic; no provider/repository credentials are supplied.
+    steps:
+      - name: Checkout exact tested merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Scheduled integration and E2E commands without live providers
+        working-directory: backend
+        run: >-
+          pytest tests/integration tests/e2e -m 'not live_provider and not live_finnapigo and not live_external'
+          -v --tb=short
+      - name: Full scheduled benchmark with unchanged baseline and thresholds
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: python scripts/run_performance_benchmark.py --mode full --fail-on-regression
+      - name: Scheduled load and detector regressions
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: >-
+          pytest tests/performance/test_load_and_concurrency.py
+          tests/performance/test_performance_smoke.py
+          tests/performance/test_performance_regression_gate.py
+          tests/performance/test_performance_exceptions.py
+          tests/security/test_j02_review_regressions.py -v --tb=short
+      - name: Preserve redacted benchmark trials in job log
+        if: ${{ always() }}
+        run: |
+          if [ -f backend/benchmark-results/performance-results.json ]; then
+            cat backend/benchmark-results/performance-results.json
+          fi
+          echo 'PR equivalents only; repaired scheduled verification is pending merge and an actual schedule run. Additional budget USD0.' >> "$GITHUB_STEP_SUMMARY"

@@ -194,6 +194,7 @@ class PerformanceBenchmarkRunner:
     ) -> tuple[dict[str, ScenarioResult], PerformanceRegressionReport]:
         """Run all scenarios and audit against the versioned baseline."""
         results = await self.run_all_scenarios(run_warmup=True)
+        initial_results = dict(results)
         baseline = self.store.load_baseline(self.baseline_version)
 
         # First evaluation pass
@@ -224,6 +225,12 @@ class PerformanceBenchmarkRunner:
             )
             results = reconfirmed_results
 
+        report.initial_scenarios = initial_results
+        # A successful retry cannot erase failed requests from the denominator.
+        if any(result.error_count for result in initial_results.values()):
+            report.has_blocking_regressions = True
+            report.verdict = RegressionVerdict.FAIL
+            report.summary_text += " Initial trial request errors remain blocking; both trials are retained."
         return results, report
 
     def record_as_new_baseline(

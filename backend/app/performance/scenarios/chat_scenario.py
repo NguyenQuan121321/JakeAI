@@ -76,6 +76,7 @@ async def run_concurrent_chat_scenario(
     success = 0
     cache_hits = 0
     cache_misses = 0
+    status_counts: dict[str, int] = {}
 
     semaphore = asyncio.Semaphore(concurrency)
     transport = ASGITransport(app=app)
@@ -151,6 +152,8 @@ async def run_concurrent_chat_scenario(
                                 t1 = time.perf_counter()
                                 lat_ms = (t1 - t0) * 1000.0
                                 latencies.append(lat_ms)
+                                status = str(resp.status_code)
+                                status_counts[status] = status_counts.get(status, 0) + 1
 
                                 if resp.status_code == 200:
                                     success += 1
@@ -214,5 +217,8 @@ async def run_concurrent_chat_scenario(
         ),
         custom_metrics={
             "simulated_provider_delay_ms": simulated_provider_delay_ms,
+            "http_status_counts": status_counts,
+            "identity_topology": "synthetic Finn state / strict v1 verification",
+            "provider_topology": "synthetic external model adapter",
         },
     )

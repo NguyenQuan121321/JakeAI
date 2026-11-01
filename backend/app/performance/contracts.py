@@ -199,6 +199,8 @@ class PerformanceRegressionReport(BaseModel):
     baseline_version: str
     commit: str
     environment: EnvironmentMetadata
+    baseline_environment: EnvironmentMetadata | None = None
+    initial_scenarios: dict[str, ScenarioResult] = Field(default_factory=dict)
     verdict: RegressionVerdict
     has_blocking_regressions: bool
     total_scenarios_evaluated: int = 0
