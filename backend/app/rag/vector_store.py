@@ -198,23 +198,21 @@ class QdrantVectorStore:
                         )
                     ]
                 )
-                # qdrant-client >= 1.10.0 deprecated/removed AsyncQdrantClient.search
-                # query_points is the supported API
-                if hasattr(client, "query_points"):
-                    query_res = await client.query_points(
-                        collection_name=self.collection_name,
-                        query=query_emb,
-                        query_filter=tenant_filter,
+                # Dense vectors and the tenant filter are already owned here;
+                # preserve typed validation without SDK auto-inference walks.
+                response = await client.http.search_api.query_points(
+                    collection_name=self.collection_name,
+                    query_request=models.QueryRequest(
+                        query=models.NearestQuery(nearest=query_emb),
+                        filter=tenant_filter,
                         limit=top_k,
-                    )
-                    points = getattr(query_res, "points", query_res)
-                else:
-                    points = await client.search(
-                        collection_name=self.collection_name,
-                        query_vector=query_emb,
-                        query_filter=tenant_filter,
-                        limit=top_k,
-                    )
+                        with_payload=True,
+                        with_vector=False,
+                    ),
+                )
+                if response.result is None:
+                    raise RuntimeError("Qdrant query returned no result")
+                points = response.result.points
 
                 chunks: list[DocumentChunk] = []
                 for hit in points:

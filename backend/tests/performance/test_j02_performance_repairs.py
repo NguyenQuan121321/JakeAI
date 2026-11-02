@@ -94,6 +94,72 @@ async def test_dense_upsert_avoids_inference_and_requires_typed_response(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("valid_response", [True, False])
+async def test_dense_query_keeps_tenant_filter_and_validates_response(valid_response):
+    import json
+
+    import httpx
+    from qdrant_client import AsyncQdrantClient
+    from qdrant_client.embed.type_inspector import Inspector
+
+    requests = []
+
+    def reply(request):
+        requests.append(request)
+        points = [
+            {
+                "id": i,
+                "version": 1,
+                "score": 0.9,
+                "payload": {
+                    "chunk_id": str(i),
+                    "content": "synthetic",
+                    "tenant_id": tenant,
+                },
+            }
+            for i, tenant in enumerate(("tenant-query", "foreign-tenant"))
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok",
+                "time": 0.001,
+                "result": {"points": points} if valid_response else None,
+            },
+        )
+
+    client = AsyncQdrantClient(
+        url="http://127.0.0.1:6333",
+        check_compatibility=False,
+        transport=httpx.MockTransport(reply),
+    )
+    store = QdrantVectorStore(
+        embedding_provider=TestOnlyFakeEmbeddingProvider(dimension=384)
+    )
+    store._client = client
+    store._is_qdrant_available = True
+    try:
+        with patch.object(Inspector, "inspect", return_value=False) as inference:
+            results = await store.search("dense query", "tenant-query", top_k=3)
+        assert inference.call_count == 0
+        assert len(requests) == 1
+        request = requests[0]
+        body = json.loads(request.content)
+        assert request.method == "POST" and request.url.path.endswith("/points/query")
+        assert body["filter"]["must"] == [
+            {"key": "tenant_id", "match": {"value": "tenant-query"}}
+        ]
+        assert len(body["query"]["nearest"]) == 384
+        assert body["limit"] == 3 and body["with_payload"] is True
+        assert body["with_vector"] is False
+        assert store._is_qdrant_available is valid_response
+        assert len(results) == int(valid_response)
+        assert all(result.tenant_id == "tenant-query" for result in results)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_green_confirmation_cannot_erase_initial_latency_failure(tmp_path):
     runner = PerformanceBenchmarkRunner(mode="full")
     baseline = PerformanceBaseline(scenarios={"chat": _create_dummy_baseline("chat")})

@@ -27,6 +27,7 @@ async def profile():
     from redis.asyncio import Redis
     from qdrant_client import AsyncQdrantClient
     from qdrant_client.http.api.points_api import AsyncPointsApi
+    from qdrant_client.http.api.search_api import AsyncSearchApi
     import httpx
 
     client = await acquire_redis_client()
@@ -108,6 +109,7 @@ async def profile():
                   patch.object(AsyncQdrantClient, "query_points", timed("qdrant_query", AsyncQdrantClient.query_points)),
                   patch.object(AsyncQdrantClient, "upsert", timed("qdrant_upsert", AsyncQdrantClient.upsert)),
                   patch.object(AsyncPointsApi, "upsert_points", timed("qdrant_typed_upsert", AsyncPointsApi.upsert_points)),
+                  patch.object(AsyncSearchApi, "query_points", timed("qdrant_typed_query", AsyncSearchApi.query_points)),
                   patch.object(httpx.AsyncClient, "send", trace_send)):
                 cpu.enable()
                 result = await runner.run_scenario(name)

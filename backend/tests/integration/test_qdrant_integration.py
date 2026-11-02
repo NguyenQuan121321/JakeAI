@@ -243,7 +243,9 @@ class TestQdrantMandatoryFailureCases:
         """Failure Case 2: Qdrant search timeout triggers in-memory fallback."""
         store = QdrantVectorStore(embedding_provider=fake_embedding_provider)
         mock_client = AsyncMock()
-        mock_client.query_points.side_effect = TimeoutError("Qdrant query timed out")
+        mock_client.http.search_api.query_points.side_effect = TimeoutError(
+            "Qdrant query timed out"
+        )
         mock_client.search.side_effect = TimeoutError("Qdrant query timed out")
         store._client = mock_client
         store._is_qdrant_available = True
@@ -396,8 +398,8 @@ class TestQdrantMandatoryFailureCases:
                 "metadata": {},
             },
         )
-        mock_recovered_client.query_points.return_value = SimpleNamespace(
-            points=[mock_hit]
+        mock_recovered_client.http.search_api.query_points.return_value = (
+            SimpleNamespace(result=SimpleNamespace(points=[mock_hit]))
         )
         mock_recovered_client.search.return_value = [mock_hit]
 
