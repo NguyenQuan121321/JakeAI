@@ -65,17 +65,11 @@ class QdrantVectorStore:
         """Lazily initialize Qdrant client connection and ensure collection exists."""
         if self._client is None:
             try:
-                from httpx import Limits
                 from qdrant_client import AsyncQdrantClient
                 from qdrant_client.http import models
 
                 client = AsyncQdrantClient(
-                    url=self.url,
-                    timeout=1,
-                    check_compatibility=False,
-                    # The SDK disables keepalive for loopback by default.
-                    # Reuse established HTTP connections for local services too.
-                    limits=Limits(max_connections=100, max_keepalive_connections=20),
+                    url=self.url, timeout=1, check_compatibility=False
                 )
                 if await client.collection_exists(self.collection_name):
                     col_info = await client.get_collection(self.collection_name)
@@ -159,10 +153,16 @@ class QdrantVectorStore:
                             },
                         )
                     )
-                await client.upsert(
+                # Jake already owns dense embedding generation and dimension
+                # validation. Use the typed REST operation without recursively
+                # inspecting every float for automatic embedding inference.
+                response = await client.http.points_api.upsert_points(
                     collection_name=self.collection_name,
-                    points=points,
+                    wait=True,
+                    point_insert_operations=models.PointsList(points=points),
                 )
+                if response.result is None:
+                    raise RuntimeError("Qdrant upsert returned no result")
             except Exception as exc:
                 logger.warning(
                     "Failed to upsert to Qdrant (%s), in-memory copy retained", exc

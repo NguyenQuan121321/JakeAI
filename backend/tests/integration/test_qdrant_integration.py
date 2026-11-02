@@ -302,7 +302,7 @@ class TestQdrantMandatoryFailureCases:
         """Failure Case 4: Socket disconnect during upsert retains in-memory copy."""
         store = QdrantVectorStore(embedding_provider=fake_embedding_provider)
         mock_client = AsyncMock()
-        mock_client.upsert.side_effect = ConnectionResetError(
+        mock_client.http.points_api.upsert_points.side_effect = ConnectionResetError(
             "Connection severed by peer"
         )
         store._client = mock_client

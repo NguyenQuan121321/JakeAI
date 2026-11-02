@@ -30,32 +30,67 @@ def test_redis_pool_resolves_driver_metadata_once():
 
 
 @pytest.mark.asyncio
-async def test_qdrant_loopback_transport_keeps_connections():
-    # Use the actual SDK transport: its loopback default disables keepalive.
+@pytest.mark.parametrize("valid_response", [True, False])
+async def test_dense_upsert_avoids_inference_and_requires_typed_response(
+    valid_response,
+):
+    # Run actual SDK request serialization/response validation over a synthetic
+    # HTTP transport. Dense embeddings must never invoke model inference.
+    import json
+
+    import httpx
     from qdrant_client import AsyncQdrantClient
+    from qdrant_client.embed.type_inspector import Inspector
 
-    clients = []
+    from app.rag.models import DocumentChunk
+    from app.rag.vector_store import derive_point_id
 
-    def factory(**kwargs):
-        client = AsyncQdrantClient(**kwargs)
-        clients.append(client)
-        client.collection_exists = AsyncMock(return_value=False)
-        client.create_collection = AsyncMock()
-        return client
+    requests = []
 
+    def reply(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok",
+                "time": 0.001,
+                "result": {"operation_id": 1, "status": "completed"}
+                if valid_response
+                else None,
+            },
+        )
+
+    client = AsyncQdrantClient(
+        url="http://127.0.0.1:6333",
+        check_compatibility=False,
+        transport=httpx.MockTransport(reply),
+    )
     store = QdrantVectorStore(
         url="http://127.0.0.1:6333",
         embedding_provider=TestOnlyFakeEmbeddingProvider(dimension=384),
     )
-    with patch("qdrant_client.AsyncQdrantClient", factory):
-        client = await store._get_client()
+    store._client = client
+    store._is_qdrant_available = True
+    chunks = [
+        DocumentChunk(chunk_id=str(i), tenant_id=f"tenant-{i}", content="dense text")
+        for i in range(2)
+    ]
     try:
-        pool = client.http.client._async_client._transport._pool
-        assert pool._max_keepalive_connections >= 10
-        assert store._is_qdrant_available
+        with patch.object(Inspector, "inspect", return_value=False) as inference:
+            await store.upsert(chunks)
+        assert inference.call_count == 0
+        assert len(requests) == 1
+        request = requests[0]
+        assert request.method == "PUT" and request.url.params["wait"] == "true"
+        body = json.loads(request.content)
+        for point, chunk in zip(body["points"], chunks, strict=True):
+            assert point["id"] == derive_point_id(chunk)
+            assert point["payload"]["tenant_id"] == chunk.tenant_id
+            assert point["payload"]["content"] == chunk.content
+            assert len(point["vector"]) == 384
+        assert store._is_qdrant_available is valid_response
     finally:
-        for client in clients:
-            await client.close()
+        await client.close()
 
 
 @pytest.mark.asyncio

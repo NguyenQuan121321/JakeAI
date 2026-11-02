@@ -26,6 +26,7 @@ async def profile():
     from app.core.redis_client import acquire_redis_client
     from redis.asyncio import Redis
     from qdrant_client import AsyncQdrantClient
+    from qdrant_client.http.api.points_api import AsyncPointsApi
     import httpx
 
     client = await acquire_redis_client()
@@ -70,8 +71,14 @@ async def profile():
         send = httpx.AsyncClient.send
         async def trace_send(self, request, *args, **kwargs):
             original_trace = request.extensions.get("trace")
+            phases = {}
             async def trace(event, data):
                 events[event] += 1
+                phase, _, state = event.rpartition(".")
+                if state == "started":
+                    phases[phase] = time.perf_counter()
+                elif state == "complete" and phase in phases:
+                    timings["http_phase_" + phase].append((time.perf_counter() - phases[phase]) * 1000)
                 if original_trace is not None:
                     await original_trace(event, data)
             request.extensions["trace"] = trace
@@ -100,6 +107,7 @@ async def profile():
             with (patch.object(Redis, "execute_command", timed("redis_command", Redis.execute_command)),
                   patch.object(AsyncQdrantClient, "query_points", timed("qdrant_query", AsyncQdrantClient.query_points)),
                   patch.object(AsyncQdrantClient, "upsert", timed("qdrant_upsert", AsyncQdrantClient.upsert)),
+                  patch.object(AsyncPointsApi, "upsert_points", timed("qdrant_typed_upsert", AsyncPointsApi.upsert_points)),
                   patch.object(httpx.AsyncClient, "send", trace_send)):
                 cpu.enable()
                 result = await runner.run_scenario(name)
