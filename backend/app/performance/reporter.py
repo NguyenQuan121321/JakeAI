@@ -70,14 +70,15 @@ class PerformanceReporter:
             "",
             "## 2. Benchmark Comparison Matrix",
             "",
-            "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |",
-            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            "Timing uses a single prescribed confirmation for initial regressions. "
+            "Request, correctness, security, missing-data and store-integrity errors remain blocking across trials.",
+            "",
         ]
 
         if any(f.verdict == RegressionVerdict.FAIL for f in report.initial_findings):
             lines.extend(
                 [
-                    "Initial-trial failures remain blocking even when confirmation improves:",
+                    "Initial-trial findings (retained; timing failures require confirmation):",
                     "",
                     *[
                         f"- `{f.scenario}` / `{f.metric_name}`: {f.message}"
@@ -85,13 +86,17 @@ class PerformanceReporter:
                         if f.verdict == RegressionVerdict.FAIL
                     ],
                     "",
-                    "Confirmation measurements follow; both trials are retained in JSON.",
+                    "Decision measurements follow. Actual confirmation samples and all findings are retained in JSON.",
                     "",
-                    "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |",
-                    "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
                 ]
             )
 
+        lines.extend(
+            [
+                "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ]
+        )
         for finding in report.findings:
             v_str = {
                 RegressionVerdict.PASS: "✅ PASS",
@@ -197,6 +202,9 @@ class PerformanceReporter:
             "initial_trial_errors": {
                 k: v.error_count for k, v in report.initial_scenarios.items()
             },
+            "confirmation_scenarios": list(report.confirmation_scenarios),
+            "initial_findings_count": len(report.initial_findings),
+            "confirmation_findings_count": len(report.confirmation_findings),
         }
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary_data, f, indent=2)

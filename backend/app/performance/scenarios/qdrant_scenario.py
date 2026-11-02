@@ -98,13 +98,26 @@ async def run_concurrent_qdrant_scenario(
                 try:
                     # 1. Concurrent Search
                     t0 = time.perf_counter()
-                    await vector_store.search(
+                    hits = await vector_store.search(
                         query="balance sheet assets and financial report",
                         tenant_id=tenant_id,
                         top_k=3,
                     )
                     t1 = time.perf_counter()
                     search_latencies.append((t1 - t0) * 1000.0)
+                    if (
+                        len(hits) != 3
+                        or any(
+                            hit.tenant_id != tenant_id
+                            or not hit.content
+                            or not hit.chunk_id
+                            for hit in hits
+                        )
+                        or (is_live_qdrant and not vector_store._is_qdrant_available)
+                    ):
+                        raise RuntimeError(
+                            "Vector query did not complete the intended tenant-scoped work"
+                        )
 
                     # 2. Concurrent Upsert
                     new_chunk = DocumentChunk(
@@ -117,6 +130,8 @@ async def run_concurrent_qdrant_scenario(
                     await vector_store.upsert([new_chunk])
                     t_up1 = time.perf_counter()
                     upsert_latencies.append((t_up1 - t_up0) * 1000.0)
+                    if is_live_qdrant and not vector_store._is_qdrant_available:
+                        raise RuntimeError("Vector upsert lost the required real store")
 
                     success += 1
                 except (RuntimeError, ValueError, KeyError, OSError) as exc:

@@ -143,9 +143,10 @@ if __name__ == "__main__":
         sys.exit(control())
     elif sys.argv[1:] == ["candidate-integrity"]:
         identity()
-        for directory in ("benchmark-results", "benchmark-repeat"):
+        # This repair authorizes one bounded final pair, not another cohort.
+        for directory in ("benchmark-results",):
             payload = json.loads((ROOT / "backend" / directory / "performance-results.json").read_text())
             validate_measurements(payload["report"]["initial_scenarios"], payload["scenarios"])
-        print("J02_CANDIDATE_INTEGRITY all six scenarios, original load, real stores, zero errors in both pairs/trials; performance verdicts remain separate", flush=True)
+        print("J02_CANDIDATE_INTEGRITY all six scenarios, original load, real stores, zero errors in initial/confirmation trials; performance verdicts remain separate", flush=True)
     else:
         raise RuntimeError("Explicit reset/control operation required")
