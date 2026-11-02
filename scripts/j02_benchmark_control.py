@@ -81,7 +81,7 @@ def reset_owned_services():
     print("Owned job-only Redis/Qdrant fixtures reset; source baselines unchanged", flush=True)
 
 
-def control():
+def control(receipt_callback=None):
     project, _ = identity()
     base = ROOT / "reviewed-main-control"
     sha = subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"], text=True).strip()
@@ -119,14 +119,17 @@ runpy.run_path(entry, run_name='__main__')
         report = json.loads((runtime / "performance-results.json").read_text())
         initial = json.loads((runtime / "initial.json").read_text())
         outcome = classify_control(result.returncode, initial, report)
-        print("J02_PERFORMANCE_CONTROL " + json.dumps({
+        receipt = {
             "actual_source": sha, "current_os": platform.platform(), "python": platform.python_version(),
             "same_installed_dependencies_as_candidate": True, "offline_configuration_reconciled": True,
             "baseline_file_modified": False, "exit_code": result.returncode,
             "initial_scenarios": initial, "results": report,
             "legacy_report_target_is_baseline_metadata": True,
             "diagnostic_outcome": outcome,
-        }), flush=True)
+        }
+        print("J02_PERFORMANCE_CONTROL " + json.dumps(receipt), flush=True)
+        if receipt_callback is not None:
+            receipt_callback(receipt)
         return outcome["step_exit_code"]
     finally:
         shutil.rmtree(runtime)
