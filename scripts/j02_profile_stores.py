@@ -78,11 +78,14 @@ async def profile():
             started = time.perf_counter()
             response = await send(self, request, *args, **kwargs)
             timings["http_send"].append((time.perf_counter() - started) * 1000)
-            # A bounded server-time sample, no bodies/URLs/headers/credentials.
-            if len(timings["qdrant_server_ms"]) < 5:
+            # Separate setup from timed query/upsert server work. Retain only
+            # durations, never bodies/URLs/headers/credentials.
+            operation = "query" if request.url.path.endswith("/query") else "upsert" if request.url.path.endswith("/points") and request.method == "PUT" else "setup"
+            label = "qdrant_server_" + operation + "_ms"
+            if len(timings[label]) < 100:
                 server_time = response.json().get("time")
                 if isinstance(server_time, (int, float)):
-                    timings["qdrant_server_ms"].append(server_time * 1000)
+                    timings[label].append(server_time * 1000)
             return response
 
         async def ticker():

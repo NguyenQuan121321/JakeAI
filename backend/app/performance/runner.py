@@ -199,6 +199,7 @@ class PerformanceBenchmarkRunner:
 
         # First evaluation pass
         report = PerformanceRegressionDetector.evaluate_all(results, baseline)
+        initial_report = report
 
         # Reproducibility check: If regressions detected, run confirmation trial on failed scenarios
         if report.has_blocking_regressions:
@@ -216,7 +217,8 @@ class PerformanceBenchmarkRunner:
             reconfirmed_results = dict(results)
             for scen_name in unique_failed:
                 confirm_res = await self.run_scenario(scen_name)
-                # If confirmation pass shows better latency, accept the confirmation run
+                # Retain the confirmation measurement without discarding the
+                # initial trial's verdict or selecting a green retry.
                 reconfirmed_results[scen_name] = confirm_res
 
             # Re-evaluate with confirmed results
@@ -226,11 +228,25 @@ class PerformanceBenchmarkRunner:
             results = reconfirmed_results
 
         report.initial_scenarios = initial_results
-        # A successful retry cannot erase failed requests from the denominator.
-        if any(result.error_count for result in initial_results.values()):
+        report.initial_findings = list(initial_report.findings)
+        # Every measured trial must meet the existing gates. A successful
+        # confirmation cannot erase latency/throughput failures or errors.
+        if initial_report.has_blocking_regressions or any(
+            result.error_count for result in initial_results.values()
+        ):
             report.has_blocking_regressions = True
             report.verdict = RegressionVerdict.FAIL
-            report.summary_text += " Initial trial request errors remain blocking; both trials are retained."
+            failed = {
+                f.scenario
+                for f in [*initial_report.findings, *report.findings]
+                if f.verdict == RegressionVerdict.FAIL
+            }
+            failed.update(
+                name for name, result in initial_results.items() if result.error_count
+            )
+            report.failed_scenarios = len(failed)
+            report.passed_scenarios = report.total_scenarios_evaluated - len(failed)
+            report.summary_text += " Initial trial regressions remain blocking; both trials and findings are retained."
         return results, report
 
     def record_as_new_baseline(

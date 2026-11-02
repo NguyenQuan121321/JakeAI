@@ -74,6 +74,24 @@ class PerformanceReporter:
             "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
         ]
 
+        if any(f.verdict == RegressionVerdict.FAIL for f in report.initial_findings):
+            lines.extend(
+                [
+                    "Initial-trial failures remain blocking even when confirmation improves:",
+                    "",
+                    *[
+                        f"- `{f.scenario}` / `{f.metric_name}`: {f.message}"
+                        for f in report.initial_findings
+                        if f.verdict == RegressionVerdict.FAIL
+                    ],
+                    "",
+                    "Confirmation measurements follow; both trials are retained in JSON.",
+                    "",
+                    "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |",
+                    "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+                ]
+            )
+
         for finding in report.findings:
             v_str = {
                 RegressionVerdict.PASS: "✅ PASS",

@@ -72,7 +72,19 @@ jobs:
       - name: Diagnose unchanged reviewed-main with matched configuration and stores
         if: ${{ !cancelled() }}
         run: python scripts/j02_benchmark_control.py control
-      - name: Scheduled load and detector regressions
+      - name: Second candidate measurement with every original gate
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          python ../scripts/j02_benchmark_control.py reset
+          python scripts/run_performance_benchmark.py --mode full --fail-on-regression --output-dir benchmark-repeat
+      - name: Second unchanged reviewed-main diagnostic control
+        if: ${{ !cancelled() }}
+        run: python scripts/j02_benchmark_control.py control
+      - name: Require both candidate measurements to use the complete real-store load
+        if: ${{ !cancelled() }}
+        run: python scripts/j02_benchmark_control.py candidate-integrity
+      - name: Profile live stores without changing gates
         if: ${{ !cancelled() }}
         run: |
           python scripts/j02_benchmark_control.py reset
@@ -85,11 +97,15 @@ jobs:
           tests/performance/test_performance_smoke.py
           tests/performance/test_performance_regression_gate.py
           tests/performance/test_performance_exceptions.py
+          tests/performance/test_j02_performance_repairs.py
           tests/security/test_j02_review_regressions.py -v --tb=short
       - name: Preserve redacted benchmark trials in job log
         if: ${{ always() }}
         run: |
           if [ -f backend/benchmark-results/performance-results.json ]; then
             cat backend/benchmark-results/performance-results.json
+          fi
+          if [ -f backend/benchmark-repeat/performance-results.json ]; then
+            cat backend/benchmark-repeat/performance-results.json
           fi
           echo 'PR equivalents only; repaired scheduled verification is pending merge and an actual schedule run. Additional budget USD0.' >> "$GITHUB_STEP_SUMMARY"

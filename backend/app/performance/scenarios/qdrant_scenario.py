@@ -126,6 +126,11 @@ async def run_concurrent_qdrant_scenario(
         tasks = [_vector_worker(i) for i in range(total_operations)]
         await asyncio.gather(*tasks)
 
+    # Keepalive connections are owned by this scenario, and closed outside its
+    # unchanged measurement interval. Never leave a pool on a finished loop.
+    if vector_store._client:
+        await vector_store._client.close()
+
     dur = profiler.duration_seconds
     search_dist = compute_distribution(search_latencies)
     upsert_dist = compute_distribution(upsert_latencies)
@@ -150,7 +155,7 @@ async def run_concurrent_qdrant_scenario(
         throughput=throughput,
         resources=res_metrics,
         custom_metrics={
-            "is_live_qdrant": is_live_qdrant,
+            "is_live_qdrant": is_live_qdrant and vector_store._is_qdrant_available,
             "vector_dimension": vector_store.dimension,
             "avg_search_latency_ms": search_dist.avg_val,
             "avg_upsert_latency_ms": upsert_dist.avg_val,

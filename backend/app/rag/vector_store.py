@@ -65,11 +65,17 @@ class QdrantVectorStore:
         """Lazily initialize Qdrant client connection and ensure collection exists."""
         if self._client is None:
             try:
+                from httpx import Limits
                 from qdrant_client import AsyncQdrantClient
                 from qdrant_client.http import models
 
                 client = AsyncQdrantClient(
-                    url=self.url, timeout=1, check_compatibility=False
+                    url=self.url,
+                    timeout=1,
+                    check_compatibility=False,
+                    # The SDK disables keepalive for loopback by default.
+                    # Reuse established HTTP connections for local services too.
+                    limits=Limits(max_connections=100, max_keepalive_connections=20),
                 )
                 if await client.collection_exists(self.collection_name):
                     col_info = await client.get_collection(self.collection_name)
