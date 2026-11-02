@@ -74,6 +74,11 @@ jobs:
         run: python scripts/j02_benchmark_control.py control
       - name: Scheduled load and detector regressions
         if: ${{ !cancelled() }}
+        run: |
+          python scripts/j02_benchmark_control.py reset
+          python scripts/j02_profile_stores.py
+      - name: Scheduled load and detector regressions after supplemental profiling
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: >-
           pytest tests/performance/test_load_and_concurrency.py
