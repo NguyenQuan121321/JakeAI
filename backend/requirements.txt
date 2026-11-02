@@ -11,8 +11,8 @@ langchain-core==1.6.2
 langchain-text-splitters==1.1.2
 
 # Security & Authentication
-pyjwt[crypto]==2.15.0
-cryptography==50.0.1
+pyjwt[crypto]==2.15.1
+cryptography==50.0.2
 
 # State, Caching & Vector Store
 redis[hiredis]==8.1.0
