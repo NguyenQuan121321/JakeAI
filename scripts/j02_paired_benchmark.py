@@ -255,6 +255,7 @@ async def capture(control, output):
         + [
             ROOT / "backend/tests/offline_trust.py",
             ROOT / "scripts/j02_paired_worker.py",
+            ROOT / "scripts/j02_chat_diagnostics.py",
         ]
         + [ROOT / "scripts/j02_paired_benchmark.py"]
     )

@@ -45,9 +45,20 @@ async def diagnostic_profile(runner, names):
     data = {}
     for name in names:
         profile = cProfile.Profile()
+        observer = None
         try:
             profile.enable()
-            result = await runner.run_scenario(name)
+            if name == "concurrent_chat":
+                from j02_chat_diagnostics import ChatDiagnostics
+                from redis.asyncio import Redis
+
+                module = importlib.import_module(
+                    "app.performance.scenarios.chat_scenario"
+                )
+                async with ChatDiagnostics(module, Redis) as observer:
+                    result = await runner.run_scenario(name)
+            else:
+                result = await runner.run_scenario(name)
         finally:
             profile.disable()
         stats = pstats.Stats(profile)
@@ -69,6 +80,8 @@ async def diagnostic_profile(runner, names):
             "instrumented_sample": result.model_dump(mode="json"),
             "functions": functions,
         }
+        if observer is not None:
+            data[name]["request_observer"] = observer.evidence()
     return {"scope": "DIAGNOSTIC_ONLY_NOT_CONFIRMATION_OR_GATE", "scenarios": data}
 
 

@@ -22,6 +22,12 @@ pre-J02 requirements file has older pypdf; the shared installed environment
 deliberately reconciles it to the candidate constraint without editing source.
 Installed distributions, runner image, CPU model/count/quota and job identity
 are captured and must match. No historical median is used as a reference.
+Chat repeats five query identities and has a mixed cold/warm exact-cache workload;
+its observed hit counts need not be identical during concurrent cold fills. The
+Redis-contention scenario is all-miss. The historical workload identifier contains
+`all-miss-search-plus-upsert`; this describes the Redis/storage pattern and must
+not be read as an all-miss claim about chat or the entire benchmark. The identifier,
+queries, cache inputs and measurement package remain unchanged for continuity.
 CPU provenance follows the actual process cgroup and all ancestors, including
 effective affinity. Root `cpu.max` is not assumed to exist: the
 [kernel defines it on non-root cgroups](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files).
@@ -74,6 +80,23 @@ re-audited as confirmation or used to recover the primary failure. A pass or an
 invalid control launches no diagnostic load. Repeated profiling and a third
 ordinary trial are rejected. This failure-only diagnostic is required by the
 activation instruction; it is not a retry to obtain green.
+
+For a failed chat comparison, the existing single diagnostic sample also records
+bounded ASGI request intervals, response-start timing, process CPU/traced-memory
+observations, Redis command intervals and event-loop lag. It captures no HTTP
+headers/bodies/paths or Redis keys/values. The observer is installed only around
+that diagnostic call and restores its bindings and monitor task on every exit.
+Each list is bounded at 1024 records, with omissions counted explicitly. CPU and
+memory intervals overlap across requests; Redis wall time includes queueing and
+scheduling, and is not server-only RTT. These instrumented observations cannot
+replace or clear primary measurements. The observer is included in the shared
+provenance hash; both roles use it. No observer runs in initial/confirmation phases.
+
+The chat repair caches only immutable casefold metadata for the two static JWT
+authority-name sets. Arbitrary supplied name sets are handled per call; colliding
+canonical spellings still reject. Signatures, trust/key retirement, claims,
+permissions and fresh state checks are not cached or weakened. Local decoder cost
+measurements are separate from hosted chat latency and actual Finn integration.
 
 ## Explicit control harness adaptation
 
