@@ -478,6 +478,7 @@ async def test_capture_command_preserves_received_samples_before_verification(
     monkeypatch.setattr(collector, "identity", lambda: None)
     monkeypatch.setattr(collector.platform, "python_version", lambda: "3.12.15")
     monkeypatch.setattr(collector.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(collector, "cpu_quota", lambda: "unit observed quota")
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"pull_request": {"head": {"sha": "c" * 40}}}))
     for key, value in {

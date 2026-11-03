@@ -1,4 +1,4 @@
-"""INACTIVE hosted paired capture, never called by an active workflow.
+"""Guarded hosted paired capture; legacy v1 remains independently blocking.
 
 Requires four job-owned service containers so subject state survives while
 measuring the other subject. No store/configuration change or load retry.
@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import urllib.request
 from pathlib import Path
 
@@ -48,6 +49,80 @@ def merge(left, right):
             merge(result.get(key, {}), value) if isinstance(value, dict) else value
         )
     return result
+
+
+def cpu_quota(
+    root=Path("/sys/fs/cgroup"), process=Path("/proc/self/cgroup"), affinity=None
+):
+    """Capture v2 process/ancestor limits, including the root's absent cpu.max.
+
+    Linux exposes cpu.max only on non-root cgroups. Absence is recorded, never
+    silently substituted for an unknown controller or malformed hierarchy.
+    """
+    root = root.resolve()
+    groups = [
+        line[3:] for line in process.read_text().splitlines() if line.startswith("0::")
+    ]
+    if (
+        len(groups) != 1
+        or not groups[0].startswith("/")
+        or ".." in Path(groups[0]).parts
+    ):
+        raise ValueError("Known unified process cgroup required")
+    if "cpu" not in (root / "cgroup.controllers").read_text().split():
+        raise RuntimeError("CPU controller provenance unavailable")
+    path = (root / groups[0].lstrip("/")).resolve()
+    if not path.is_relative_to(root) or not path.is_dir():
+        raise ValueError("Process cgroup is outside the observed hierarchy")
+    hierarchy = []
+    while True:
+        file = path / "cpu.max"
+        limit = file.read_text().strip() if file.is_file() else None
+        if limit is not None:
+            quota, period = limit.split()
+            if (quota != "max" and int(quota) <= 0) or int(period) <= 0:
+                raise ValueError("Malformed CPU bandwidth limit")
+        hierarchy.append(
+            {
+                "path": "/"
+                if path == root
+                else "/" + path.relative_to(root).as_posix(),
+                "cpu.max": limit,
+            }
+        )
+        if path == root:
+            break
+        path = path.parent
+    cpus = sorted(os.sched_getaffinity(0) if affinity is None else affinity)
+    if not cpus:
+        raise ValueError("Effective CPU affinity missing")
+    return json.dumps(
+        {"process_cgroup": groups[0], "hierarchy": hierarchy, "affinity": cpus},
+        sort_keys=True,
+    )
+
+
+async def profile_failure(report, request):
+    """One failure-only diagnostic per subject; never re-audit or clear FAIL."""
+    if report["exit_code"] != 1:
+        return
+    findings = [
+        f
+        for f in report.get("confirmation_findings", [])
+        if f["verdict"] == "FAIL" and f["scenario"] in report["confirmation_required"]
+    ]
+    names = sorted({f["scenario"] for f in findings})
+    if not names:
+        return
+    report["profile_basis"] = findings
+    report["diagnostic_profiles"] = {}
+    for role in ROLES:
+        try:
+            report["diagnostic_profiles"][role] = await request(
+                role, "diagnostic_profile", names
+            )
+        except (RuntimeError, ValueError, OSError, TimeoutError) as error:
+            report["diagnostic_profiles"][role] = {"error_class": type(error).__name__}
 
 
 def capture_stores(role, require_empty=True):
@@ -199,7 +274,7 @@ async def capture(control, output):
             for line in Path("/proc/cpuinfo").read_text().splitlines()
             if line.startswith("model name")
         ),
-        "quota": Path("/sys/fs/cgroup/cpu.max").read_text().strip(),
+        "quota": cpu_quota(),
     }
     dependencies = {
         d.metadata["Name"].lower().replace("_", "-").replace(".", "-"): d.version
@@ -281,6 +356,7 @@ async def capture(control, output):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=log,
+                limit=2 * 1024 * 1024,
             )
             ready = json.loads(
                 await asyncio.wait_for(workers[role].stdout.readline(), 30)
@@ -352,6 +428,17 @@ async def capture(control, output):
         )
         # Baseline bytes were never used as control measurements or rewritten.
         print("J02_PAIRED_RESULT " + json.dumps(report), flush=True)
+        # The primary verdict and observations are already durable in the job
+        # file/log before a requested failure-only diagnostic can fail or time out.
+        await profile_failure(report, measure)
+        output.write_text(
+            json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
+        if report.get("diagnostic_profiles"):
+            print(
+                "J02_PAIRED_DIAGNOSTICS " + json.dumps(report["diagnostic_profiles"]),
+                flush=True,
+            )
         return report["exit_code"]
     finally:
         for process in workers.values():
@@ -374,7 +461,19 @@ def main(arguments=None):
         return asyncio.run(capture(args.control, args.output))
     except Exception as error:  # noqa: BLE001 -- process boundary: block and redact private diagnostics
         # An unsupported capture is never a successful paired comparison.
-        print("J02_PAIRED_BLOCKED " + type(error).__name__, flush=True)
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        print(
+            "J02_PAIRED_BLOCKED "
+            + json.dumps(
+                {
+                    "error_class": type(error).__name__,
+                    "file": Path(frame.filename).name,
+                    "function": frame.name,
+                    "line": frame.lineno,
+                }
+            ),
+            flush=True,
+        )
         return 2
 
 

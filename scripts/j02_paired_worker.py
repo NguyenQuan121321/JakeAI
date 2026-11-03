@@ -8,14 +8,68 @@ permissions/issuer/audience and ephemeral trust are reconciled outside timing.
 
 import asyncio
 import contextlib
+import cProfile
 import importlib
 import importlib.metadata
 import json
 import os
+import pstats
 import runpy
 import sys
 import types
 from pathlib import Path
+
+
+def allow_command(phase, names, initial_done, measured, profiled):
+    if phase == "initial" and not initial_done:
+        return
+    if phase == "confirmation" and initial_done and not measured:
+        return
+    if (
+        phase == "diagnostic_profile"
+        and measured
+        and not profiled
+        and names
+        and set(names) <= measured
+    ):
+        return
+    raise RuntimeError("Repeated/out-of-order trial forbidden")
+
+
+async def diagnostic_profile(runner, names):
+    """Profile actual failed paths once, retaining all diagnostic samples.
+
+    cProfile timing is instrumentation-affected and is NEVER gate evidence.
+    No call arguments, local values, headers or credentials are captured.
+    """
+    data = {}
+    for name in names:
+        profile = cProfile.Profile()
+        try:
+            profile.enable()
+            result = await runner.run_scenario(name)
+        finally:
+            profile.disable()
+        stats = pstats.Stats(profile)
+        functions = [
+            {
+                "file": key[0],
+                "line": key[1],
+                "function": key[2],
+                "primitive_calls": value[0],
+                "calls": value[1],
+                "self_seconds": value[2],
+                "cumulative_seconds": value[3],
+            }
+            for key, value in sorted(
+                stats.stats.items(), key=lambda row: row[1][3], reverse=True
+            )[:100]
+        ]
+        data[name] = {
+            "instrumented_sample": result.model_dump(mode="json"),
+            "functions": functions,
+        }
+    return {"scope": "DIAGNOSTIC_ONLY_NOT_CONFIRMATION_OR_GATE", "scenarios": data}
 
 
 async def serve(source, harness):
@@ -73,20 +127,26 @@ async def serve(source, harness):
         protocol.write(json.dumps({"ready": True, "dependencies": inventory}) + "\n")
         protocol.flush()
         measured = set()
+        profiled = False
         initial_done = False
         while line := sys.stdin.readline():
             command = json.loads(line)
             if command["phase"] == "stop":
                 return
             phase, names = command["phase"], command["names"]
+            allow_command(phase, names, initial_done, measured, profiled)
+            if phase == "diagnostic_profile":
+                profiled = True
+                payload = await diagnostic_profile(runner, names)
+                protocol.write(json.dumps(payload, allow_nan=False) + "\n")
+                protocol.flush()
+                continue
             if phase == "initial" and not initial_done:
                 results = await runner.run_all_scenarios(run_warmup=True)
                 initial_done = True
             elif phase == "confirmation" and initial_done and not measured:
                 results = {name: await runner.run_scenario(name) for name in names}
                 measured.update(names)
-            else:
-                raise RuntimeError("Repeated/out-of-order trial forbidden")
             if set(results) != set(names):
                 raise RuntimeError("Unexpected scenario capture")
             protocol.write(

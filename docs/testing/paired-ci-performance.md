@@ -1,10 +1,11 @@
-# Paired CI performance comparison — inactive, review required
+# Paired CI performance comparison — additive activation 2026-11-03
 
-This implementation adds executable capture and comparison support. No active
-workflow invokes it. Legacy v1 remains byte-identical and blocking. This is not
+The user explicitly authorized applying the reviewed activation patch and its
+first bounded hosted execution. The additive workflow now invokes this support.
+Legacy v1 remains byte-identical and blocking. This is not
 a numerical baseline replacement, a production SLO or J02 acceptance.
 
-## Contract proposed for activation
+## Activated relative contract
 
 `paired-ci-review-v1` compares candidate against **pre-J02 main
 64f087ca708200a2c81ba646acfa6112876f601c**, the parent of the original J02 merge.
@@ -21,6 +22,10 @@ pre-J02 requirements file has older pypdf; the shared installed environment
 deliberately reconciles it to the candidate constraint without editing source.
 Installed distributions, runner image, CPU model/count/quota and job identity
 are captured and must match. No historical median is used as a reference.
+CPU provenance follows the actual process cgroup and all ancestors, including
+effective affinity. Root `cpu.max` is not assumed to exist: the
+[kernel defines it on non-root cgroups](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files).
+Missing controllers, malformed limits and an unknown hierarchy block capture.
 
 Each subject has its own job-owned Redis/Qdrant instances. This preserves its
 state while the other subject runs. Stores must start empty; no reset occurs
@@ -62,6 +67,14 @@ regression/fatal error, and exit 2 is incompatible/inconclusive capture/control.
 Both nonzero outcomes block. Shared environmental slowness can still affect
 both subjects; relative success does not certify production capacity or G4.
 
+If the bounded comparison fails on a confirmed performance metric, each worker
+profiles only those failed scenario paths once using cProfile. These separate,
+instrumented diagnostic samples and function timings are retained but never
+re-audited as confirmation or used to recover the primary failure. A pass or an
+invalid control launches no diagnostic load. Repeated profiling and a third
+ordinary trial are rejected. This failure-only diagnostic is required by the
+activation instruction; it is not a retry to obtain green.
+
 ## Explicit control harness adaptation
 
 The source checkouts remain clean. A long-lived private worker imports the
@@ -86,7 +99,7 @@ python -m app.performance.paired --evidence samples.json --output comparison.jso
 pytest tests/unit/test_paired_performance.py tests/performance/test_confirmation_contract.py
 ```
 
-Guarded hosted capture, after approval and application of the inactive patch:
+Guarded hosted capture, selected by the authorized additive workflow:
 
 ```sh
 python scripts/j02_paired_benchmark.py --control paired-pre-j02-control --output paired-performance.json
@@ -107,25 +120,25 @@ retains all 240 scenario records / 3420 operations and emits diagnostic numeric
 comparisons. It exits **2**, because the old control/harness/configuration
 provenance cannot qualify the new contract. Replay is not fresh hosted evidence.
 
-## One activation decision and rollback
+## Activation and rollback
 
-Review `paired-ci-performance.activation.patch`. Approving and applying that
-exact patch adds **one additive paired CI check** on the existing public,
+The approved `paired-ci-performance.activation.patch` was applied to add
+`.github/workflows/j02-paired-performance.yml`: **one additive paired CI check** on the existing public,
 same-repository PR branch, with four isolated pinned store services and USD0
 standard GitHub-hosted Ubuntu. It does not remove or downgrade any active v1
-check; v1's existing blocking failure remains visible. The first fresh paired
-execution and its provenance/compatibility must then be reviewed. Approval does
-not guarantee the candidate passes and does not qualify production SLOs.
+check; v1's existing blocking failure remains visible. The regression step also
+includes the new activation-preflight/diagnostic tests. The first fresh result
+and provenance must be reviewed; authorization does not guarantee a pass or
+qualify production SLOs.
 
-The patch is deliberately outside `.github/workflows`; it is inactive until
-explicitly approved and applied. No new load cohort is authorized by committing
-this support. Do not dispatch a calibration to obtain a green result.
+The original patch remains as the exact reviewed record. No repeated calibration
+cohort or retry until green is authorized. Profiles cannot clear a failed gate.
 
 Rollback after activation deletes the one added workflow. Existing v1,
 thresholds, dependency selection and security gates require no rollback because
 the patch does not change them. There is no data/schema migration. Removing the
 new support files later is optional; they have no default runtime call path.
 
-**Decision for review:** enable this additive paired CI contract and its first
-bounded hosted comparison, or leave it inactive. Replacing/waiving the v1 gate
-is a different contract migration and is not included or authorized here.
+**Remaining disposition:** replacing/waiving the still-blocking v1 gate is a
+different contract migration and is not included or authorized here. J02 remains
+BLOCKED pending review and its remaining acceptance.

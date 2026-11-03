@@ -399,7 +399,7 @@ class PairedComparisonRunner:
 
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Inactive paired CI evidence audit; never clears legacy v1"
+        description="Paired CI evidence audit; never clears legacy v1"
     )
     parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
