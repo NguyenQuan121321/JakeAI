@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -266,21 +267,50 @@ def test_tool_instance_execute_has_single_production_call_site() -> None:
     assert not call_sites, f"Tool.execute called outside ToolRegistry: {call_sites}"
 
 
+def _financial_markers(source: str) -> set[str]:
+    """Match financial constants, not substrings of package version strings."""
+    markers = ("1500000", "950000", "1.12")
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Constant):
+            continue
+        if isinstance(node.value, (int, float)):
+            found.update(marker for marker in markers if node.value == float(marker))
+        elif isinstance(node.value, str):
+            found.update(
+                marker
+                for marker in markers
+                if re.search(
+                    r"(?<![\w.])" + re.escape(marker) + r"(?![\w.])", node.value
+                )
+            )
+    return found
+
+
+def test_financial_markers_preserve_formulas_without_version_false_positives() -> None:
+    assert not _financial_markers('version = "1.12.1"')
+    assert _financial_markers("factor = 1.12") == {"1.12"}
+    assert _financial_markers('factor = Decimal("1.12")') == {"1.12"}
+    assert _financial_markers('expression = "revenue * 1.12"') == {"1.12"}
+    assert _financial_markers("revenue = 1_500_000; expenses = 950_000") == {
+        "1500000",
+        "950000",
+    }
+
+
 def test_financial_capability_formulas_defined_exactly_once() -> None:
     """Rule 6: financial business semantics live in exactly one module.
 
     The default figures and the EBITDA adjustment factor may appear only in
     ``app/agent/capabilities/financial_analysis.py``.
     """
-    magic_markers = ("1500000", "950000", "1.12")
     violations: list[str] = []
     for mod_name, path in _iter_app_modules():
         if mod_name == "app.agent.capabilities.financial_analysis":
             continue
         source = path.read_text(encoding="utf-8")
-        for marker in magic_markers:
-            if marker in source:
-                violations.append(f"{mod_name}: literal '{marker}'")
+        for marker in _financial_markers(source):
+            violations.append(f"{mod_name}: literal '{marker}'")
     assert not violations, (
         f"Financial semantics re-defined outside authority: {violations}"
     )
