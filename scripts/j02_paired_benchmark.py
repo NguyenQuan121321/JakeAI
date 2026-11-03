@@ -249,7 +249,8 @@ async def capture(control, output):
     workers, logs = {}, []
     private = Path(
         tempfile.mkdtemp(prefix="j02-paired-", dir=os.environ["RUNNER_TEMP"])
-    )
+    ).resolve()
+    private_parent = Path(os.environ["RUNNER_TEMP"]).resolve()
     try:
         for role in ROLES:
             offset = 0 if role == "candidate" else 1
@@ -303,30 +304,47 @@ async def capture(control, output):
             result = json.loads(
                 await asyncio.wait_for(process.stdout.readline(), CAPTURE_SECONDS)
             )
+            observation = {
+                "role": role,
+                "phase": phase,
+                "names": names,
+                "samples": result,
+                "stores_before": before[0],
+                "instances": before[1],
+                "store_verification": "INCOMPLETE_BLOCKING",
+            }
+            # Retain the received measurement before any subsequent probe can
+            # fail. A blocked capture must not discard an observed trial.
+            observations.append(observation)
             after = capture_stores(role, require_empty=False)
-            observations.append(
-                {
-                    "role": role,
-                    "phase": phase,
-                    "names": names,
-                    "stores_before": before[0],
-                    "stores_after": after[0],
-                    "instances": after[1],
-                }
-            )
+            observation["stores_after"] = after[0]
             if after != before:
+                observation["store_verification"] = "MISMATCH_BLOCKING"
                 raise RuntimeError("Store configuration changed during measurement")
+            observation["store_verification"] = "MATCHED"
             return result
 
         report = await PairedComparisonRunner(subjects, measure).run()
-        if any(
-            source_identity(sources[role])
-            != {key: subjects[role][key] for key in ("source_sha", "source_tree")}
-            for role in ROLES
-        ):
-            raise RuntimeError("Source identity changed during capture")
-        if hashlib.sha256(baseline.read_bytes()).hexdigest() != baseline_hash:
-            raise RuntimeError("Legacy baseline changed during capture")
+        try:
+            identities_valid = (
+                all(
+                    source_identity(sources[role])
+                    == {
+                        key: subjects[role][key]
+                        for key in ("source_sha", "source_tree")
+                    }
+                    for role in ROLES
+                )
+                and hashlib.sha256(baseline.read_bytes()).hexdigest() == baseline_hash
+            )
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            identities_valid = False
+        if not identities_valid:
+            report.update(
+                exit_code=2,
+                verdict="INCONCLUSIVE_BLOCKED",
+                reason="Source/baseline identity changed; all received samples retained",
+            )
         report["legacy_v1_sha256"] = baseline_hash
         report["capture_observations"] = observations
         output.write_text(
@@ -342,6 +360,8 @@ async def capture(control, output):
             await process.wait()
         for log in logs:
             log.close()
+        if private.parent != private_parent or private.is_symlink():
+            raise RuntimeError("Refusing cleanup outside the owned private root")
         shutil.rmtree(private)
 
 

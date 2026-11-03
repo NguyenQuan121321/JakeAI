@@ -98,6 +98,9 @@ Private worker logs and ephemeral keys are not published; only allowlisted
 measurement/provenance data leave the private directory. Workers and private
 files are cleaned in finally; GitHub removes the service containers. Missing
 configuration or capture failures remain blocking.
+Received samples are retained before post-measurement configuration probes;
+probe failures, configuration drift or later source/baseline identity failures
+produce an inconclusive result without discarding the received measurements.
 
 `scripts/j02_replay_paired.py` accepts the exact frozen five-pair receipt file,
 retains all 240 scenario records / 3420 operations and emits diagnostic numeric

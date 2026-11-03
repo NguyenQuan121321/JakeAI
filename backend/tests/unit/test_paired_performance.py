@@ -457,3 +457,182 @@ def test_actual_store_configuration_collector(collector, monkeypatch, defect):
         assert result["redis"] == context["redis"]
         assert result["qdrant"]["configuration"] == context["qdrant"]["configuration"]
         assert instances == {"redis": "redis", "qdrant": "qdrant"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault", [None, "configuration_drift", "probe_failure", "source_drift"]
+)
+async def test_capture_command_preserves_received_samples_before_verification(
+    collector, evidence, monkeypatch, tmp_path, fault
+):
+    """Exercise actual capture/result writing with synthetic worker IO."""
+    import types
+    from pathlib import Path
+
+    control = tmp_path / "control"
+    (control / "backend").mkdir(parents=True)
+    (control / "backend/requirements.txt").write_bytes(
+        (collector.ROOT / "backend/requirements.txt").read_bytes()
+    )
+    monkeypatch.setattr(collector, "identity", lambda: None)
+    monkeypatch.setattr(collector.platform, "python_version", lambda: "3.12.15")
+    monkeypatch.setattr(collector.platform, "system", lambda: "Linux")
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"head": {"sha": "c" * 40}}}))
+    for key, value in {
+        "GITHUB_EVENT_PATH": str(event),
+        "J02_PAIRED_CONTRACT": "review-v1",
+        "ImageVersion": "unit-image",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_JOB": "unit",
+        "RUNNER_TEMP": str(tmp_path),
+    }.items():
+        monkeypatch.setenv(key, value)
+    original_read = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if str(path).replace("\\", "/") == "/proc/cpuinfo":
+            return "model name: unit-cpu"
+        if str(path).replace("\\", "/") == "/sys/fs/cgroup/cpu.max":
+            return "max 100000"
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+
+    def git(source, *args):
+        if args == ("rev-parse", "HEAD"):
+            return CONTROL_SHA if Path(source) == control else "c" * 40
+        return ""
+
+    monkeypatch.setattr(collector, "git", git)
+    identity_calls = 0
+
+    def source_identity(source):
+        nonlocal identity_calls
+        identity_calls += 1
+        if fault == "source_drift" and identity_calls > 2:
+            raise RuntimeError("synthetic source drift after capture")
+        return {
+            "source_sha": CONTROL_SHA if Path(source) == control else "c" * 40,
+            "source_tree": "e" * 40,
+        }
+
+    monkeypatch.setattr(collector, "source_identity", source_identity)
+    constraint = collector.ROOT / "scripts/j02/calibration-20261102.constraints.txt"
+    dependencies = dict(
+        line.split("==")
+        for line in constraint.read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    inventory = {
+        name.lower().replace("_", "-").replace(".", "-"): version
+        for name, version in dependencies.items()
+    }
+    monkeypatch.setattr(
+        collector.importlib.metadata,
+        "distributions",
+        lambda: [
+            types.SimpleNamespace(metadata={"Name": name}, version=version)
+            for name, version in inventory.items()
+        ],
+    )
+    store_calls = dict.fromkeys(("control", "candidate"), 0)
+
+    def stores(role, require_empty=True):
+        store_calls[role] += 1
+        values = copy.deepcopy(evidence["subjects"][role]["context"]["stores"])
+        if role == "control" and store_calls[role] == 3:
+            if fault == "probe_failure":
+                raise RuntimeError("private synthetic configuration probe error")
+            if fault == "configuration_drift":
+                values["redis"]["configuration"]["appendonly"] = "yes"
+        return values, evidence["subjects"][role]["instances"]
+
+    monkeypatch.setattr(collector, "capture_stores", stores)
+    processes = []
+
+    class Process:
+        returncode = None
+
+        def __init__(self, role):
+            self.role = role
+            self.queue = [
+                json.dumps({"ready": True, "dependencies": inventory}).encode()
+            ]
+            self.stdout = self
+            self.stdin = self
+
+        async def readline(self):
+            return self.queue.pop(0)
+
+        def write(self, raw):
+            command = json.loads(raw)
+            self.queue.append(
+                json.dumps(
+                    {
+                        name: evidence["initial"][self.role][name]
+                        for name in command["names"]
+                    }
+                ).encode()
+            )
+
+        async def drain(self):
+            pass
+
+        def kill(self):
+            self.returncode = -9
+
+        async def wait(self):
+            return self.returncode
+
+    async def start(*args, **kwargs):
+        process = Process("control" if not processes else "candidate")
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(collector.asyncio, "create_subprocess_exec", start)
+    output = tmp_path / "result.json"
+    code = await collector.capture(control, output)
+    report = json.loads(output.read_text())
+    assert code == (2 if fault else 0)
+    assert (
+        report["capture_observations"][0]["samples"] == evidence["initial"]["control"]
+    )
+    assert all(process.returncode is not None for process in processes)
+    assert not list(tmp_path.glob("j02-paired-*"))
+
+
+@pytest.mark.parametrize(
+    "case,expected", [("equivalent", 0), ("regression", 1), ("missing_control", 2)]
+)
+def test_module_process_exit_is_blocking(evidence, tmp_path, case, expected):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    if case == "regression":
+        rps(evidence["initial"]["candidate"]["sse_connections"], 40)
+        confirm(evidence, ["sse_connections"])
+    elif case == "missing_control":
+        del evidence["subjects"]["control"]
+    samples = tmp_path / "samples.json"
+    output = tmp_path / "comparison.json"
+    samples.write_text(json.dumps(evidence), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app.performance.paired",
+            "--evidence",
+            str(samples),
+            "--output",
+            str(output),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == expected, result.stderr
+    assert json.loads(output.read_text())["exit_code"] == expected
