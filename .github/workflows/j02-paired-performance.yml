@@ -40,10 +40,6 @@ jobs:
     env:
       ENVIRONMENT: test
       J02_PAIRED_CONTRACT: review-v1
-      J02_CANDIDATE_REDIS_CONTAINER: ${{ job.services['candidate-redis'].id }}
-      J02_CONTROL_REDIS_CONTAINER: ${{ job.services['control-redis'].id }}
-      J02_CANDIDATE_QDRANT_CONTAINER: ${{ job.services['candidate-qdrant'].id }}
-      J02_CONTROL_QDRANT_CONTAINER: ${{ job.services['control-qdrant'].id }}
     steps:
       - name: Checkout exact candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -69,6 +65,11 @@ jobs:
         working-directory: backend
         run: pytest tests/unit/test_paired_performance.py tests/unit/test_paired_activation.py tests/performance/test_confirmation_contract.py -v
       - name: One paired comparison with real isolated stores
+        env:
+          J02_CANDIDATE_REDIS_CONTAINER: ${{ job.services['candidate-redis'].id }}
+          J02_CONTROL_REDIS_CONTAINER: ${{ job.services['control-redis'].id }}
+          J02_CANDIDATE_QDRANT_CONTAINER: ${{ job.services['candidate-qdrant'].id }}
+          J02_CONTROL_QDRANT_CONTAINER: ${{ job.services['control-qdrant'].id }}
         run: >-
           python scripts/j02_paired_benchmark.py
           --control paired-pre-j02-control --output paired-performance.json
