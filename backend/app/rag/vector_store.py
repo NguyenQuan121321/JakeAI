@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib import request as urllib_request
+from urllib.parse import urlsplit
 
 from app.core.config import get_settings
 from app.rag.embedding import (
@@ -14,7 +16,44 @@ from app.rag.embedding import (
 )
 from app.rag.models import DocumentChunk
 
+if TYPE_CHECKING:
+    from httpx import Request, Response
+
 logger = logging.getLogger(__name__)
+
+
+class _VerifiedLoopbackRoute:
+    """Reuse the IPv4 peer selected by the normal Qdrant collection checks."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+        self._checking = True
+        self._matches = True
+        self._authority: str | None = None
+        self._pinned = False
+
+    async def observe_peer(self, response: Response) -> None:
+        if not self._checking:
+            return
+        stream = response.extensions.get("network_stream")
+        try:
+            peer = stream.get_extra_info("server_addr") if stream is not None else None
+        except (AttributeError, OSError, ValueError):
+            peer = None
+        self._matches = self._matches and peer == ("127.0.0.1", self.port)
+        self._authority = response.request.headers.get("host")
+
+    async def preserve_authority(self, request: Request) -> None:
+        if self._pinned and self._authority is not None:
+            request.headers["host"] = self._authority
+
+    def finish_setup(self, client: Any) -> None:
+        self._checking = False
+        if self._matches and self._authority:
+            # Keep the SDK transport, limits and middleware. Only the generated
+            # REST client's origin changes, so new connections skip resolution.
+            client.http.client.host = f"http://127.0.0.1:{self.port}"
+            self._pinned = True
 
 
 def derive_point_id(chunk: DocumentChunk) -> str:
@@ -68,8 +107,25 @@ class QdrantVectorStore:
                 from qdrant_client import AsyncQdrantClient
                 from qdrant_client.http import models
 
+                origin = urlsplit(self.url)
+                route = None
+                options: dict[str, Any] = {}
+                if (
+                    origin.scheme == "http"
+                    and origin.hostname == "localhost"
+                    and origin.username is None
+                    and origin.path in ("", "/")
+                    and not origin.query
+                    and not origin.fragment
+                    and not {"http", "all"} & urllib_request.getproxies().keys()
+                ):
+                    route = _VerifiedLoopbackRoute(origin.port or 6333)
+                    options["event_hooks"] = {
+                        "response": [route.observe_peer],
+                        "request": [route.preserve_authority],
+                    }
                 client = AsyncQdrantClient(
-                    url=self.url, timeout=1, check_compatibility=False
+                    url=self.url, timeout=1, check_compatibility=False, **options
                 )
                 if await client.collection_exists(self.collection_name):
                     col_info = await client.get_collection(self.collection_name)
@@ -90,6 +146,8 @@ class QdrantVectorStore:
                             distance=models.Distance.COSINE,
                         ),
                     )
+                if route is not None:
+                    route.finish_setup(client)
                 self._client = client
                 self._is_qdrant_available = True
             except DimensionMismatchError:
