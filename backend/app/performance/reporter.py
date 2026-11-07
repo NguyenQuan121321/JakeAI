@@ -59,6 +59,7 @@ class PerformanceReporter:
             "| :--- | :--- |",
             f"| **Baseline Version** | `{report.baseline_version}` |",
             f"| **Target Commit** | `{report.commit}` |",
+            f"| **Baseline Commit / OS** | `{report.baseline_environment.commit if report.baseline_environment else 'unknown'}` / `{report.baseline_environment.os_name if report.baseline_environment else 'unknown'}` |",
             f"| **Environment** | `{env.environment}` ({env.platform_name}) |",
             f"| **Python Runtime** | `Python {env.python_version}` |",
             f"| **CPU Core Count** | `{env.cpu_count} vCPUs` |",
@@ -69,10 +70,33 @@ class PerformanceReporter:
             "",
             "## 2. Benchmark Comparison Matrix",
             "",
-            "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |",
-            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            "Timing uses a single prescribed confirmation for initial regressions. "
+            "Request, correctness, security, missing-data and store-integrity errors remain blocking across trials.",
+            "",
         ]
 
+        if any(f.verdict == RegressionVerdict.FAIL for f in report.initial_findings):
+            lines.extend(
+                [
+                    "Initial-trial findings (retained; timing failures require confirmation):",
+                    "",
+                    *[
+                        f"- `{f.scenario}` / `{f.metric_name}`: {f.message}"
+                        for f in report.initial_findings
+                        if f.verdict == RegressionVerdict.FAIL
+                    ],
+                    "",
+                    "Decision measurements follow. Actual confirmation samples and all findings are retained in JSON.",
+                    "",
+                ]
+            )
+
+        lines.extend(
+            [
+                "| Scenario | Metric | Baseline | Current | Delta | Threshold | Verdict |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ]
+        )
         for finding in report.findings:
             v_str = {
                 RegressionVerdict.PASS: "✅ PASS",
@@ -172,6 +196,15 @@ class PerformanceReporter:
             "summary_text": report.summary_text,
             "findings_count": len(report.findings),
             "environment": report.environment.model_dump(),
+            "baseline_environment": report.baseline_environment.model_dump()
+            if report.baseline_environment
+            else None,
+            "initial_trial_errors": {
+                k: v.error_count for k, v in report.initial_scenarios.items()
+            },
+            "confirmation_scenarios": list(report.confirmation_scenarios),
+            "initial_findings_count": len(report.initial_findings),
+            "confirmation_findings_count": len(report.confirmation_findings),
         }
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary_data, f, indent=2)

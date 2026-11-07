@@ -64,6 +64,8 @@ services:
       - BYOK_RETIRED_KEY_HASHES=${BYOK_RETIRED_KEY_HASHES:-[]}
       - BYOK_STORAGE_BACKEND=redis
       - BYOK_REDIS_URL=redis://byok-redis:6379/0
+      - APPROVAL_REDIS_URL=${APPROVAL_REDIS_URL:-}
+      - APPROVAL_CREDENTIAL_KEY=${APPROVAL_CREDENTIAL_KEY:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -120,6 +122,8 @@ services:
       - BYOK_RETIRED_KEY_HASHES=${BYOK_RETIRED_KEY_HASHES:-[]}
       - BYOK_STORAGE_BACKEND=redis
       - BYOK_REDIS_URL=redis://byok-redis:6379/0
+      - APPROVAL_REDIS_URL=${APPROVAL_REDIS_URL:-}
+      - APPROVAL_CREDENTIAL_KEY=${APPROVAL_CREDENTIAL_KEY:-}
     depends_on:
       redis:
         condition: service_healthy

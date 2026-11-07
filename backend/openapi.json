@@ -1817,7 +1817,7 @@
           "JakeAI-Agent Platform"
         ],
         "summary": "Decide Approval",
-        "description": "Approve or reject a pending dangerous action approval gate.",
+        "description": "Decide only the assigned, immutable safe action in the durable store.",
         "operationId": "decide_approval_api_v1_agent_tasks__task_id__runs__run_id__approvals__approval_id__post",
         "security": [
           {
@@ -1858,7 +1858,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApprovalDecision"
+                "$ref": "#/components/schemas/BoundDecision"
               }
             }
           }
@@ -1869,7 +1869,218 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApprovalRequest"
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Decide Approval Api V1 Agent Tasks  Task Id  Runs  Run Id  Approvals  Approval Id  Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Get Bound Approval",
+        "operationId": "get_bound_approval_api_v1_agent_tasks__task_id__runs__run_id__approvals__approval_id__get",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Bound Approval Api V1 Agent Tasks  Task Id  Runs  Run Id  Approvals  Approval Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}/consume": {
+      "post": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Consume Bound Approval",
+        "operationId": "consume_bound_approval_api_v1_agent_tasks__task_id__runs__run_id__approvals__approval_id__consume_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoundConsume"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Consume Bound Approval Api V1 Agent Tasks  Task Id  Runs  Run Id  Approvals  Approval Id  Consume Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}/cancel": {
+      "post": {
+        "tags": [
+          "JakeAI-Agent Platform"
+        ],
+        "summary": "Cancel Bound Approval",
+        "operationId": "cancel_bound_approval_api_v1_agent_tasks__task_id__runs__run_id__approvals__approval_id__cancel_post",
+        "security": [
+          {
+            "FinnApiGoAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Cancel Bound Approval Api V1 Agent Tasks  Task Id  Runs  Run Id  Approvals  Approval Id  Cancel Post"
                 }
               }
             }
@@ -2338,33 +2549,6 @@
         "title": "AnalyticsDashboard",
         "description": "Telemetry metrics dashboard visualizing token efficiency and performance."
       },
-      "ApprovalDecision": {
-        "properties": {
-          "approved": {
-            "type": "boolean",
-            "title": "Approved",
-            "description": "Whether the dangerous action is approved to proceed"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason",
-            "description": "Optional explanation or rejection rationale"
-          }
-        },
-        "type": "object",
-        "required": [
-          "approved"
-        ],
-        "title": "ApprovalDecision",
-        "description": "Payload submitted by authorized human user to resolve an approval gate."
-      },
       "ApprovalRequest": {
         "properties": {
           "approval_id": {
@@ -2747,6 +2931,41 @@
         ],
         "title": "BYOKValidationResponse"
       },
+      "BoundConsume": {
+        "properties": {
+          "action_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Action Hash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action_hash"
+        ],
+        "title": "BoundConsume"
+      },
+      "BoundDecision": {
+        "properties": {
+          "approved": {
+            "type": "boolean",
+            "title": "Approved"
+          },
+          "action_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Action Hash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "approved",
+          "action_hash"
+        ],
+        "title": "BoundDecision"
+      },
       "ChangelogRequest": {
         "properties": {
           "pr_titles": {
@@ -2994,6 +3213,16 @@
             "title": "Async Execution",
             "description": "Whether to execute in background",
             "default": true
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafeApprovalProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4935,6 +5164,36 @@
         ],
         "title": "RunStatus",
         "description": "Lifecycle states of an individual execution run for a task (Phase 3 Canonical State)."
+      },
+      "SafeApprovalProposal": {
+        "properties": {
+          "approver_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,19}$",
+            "title": "Approver Id"
+          },
+          "expression": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[0-9+*/(). %\\-]+$",
+            "title": "Expression"
+          },
+          "expires_in": {
+            "type": "integer",
+            "maximum": 300.0,
+            "minimum": 1.0,
+            "title": "Expires In",
+            "default": 300
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "approver_id",
+          "expression"
+        ],
+        "title": "SafeApprovalProposal"
       },
       "SavingsAttribution": {
         "properties": {

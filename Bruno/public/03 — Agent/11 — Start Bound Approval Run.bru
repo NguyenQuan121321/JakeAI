@@ -1,0 +1,44 @@
+meta {
+  name: 11 — Start Bound Approval Run
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/api/v1/agent/tasks/{{task_id}}/runs
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_a}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "approval": {
+      "approver_id": "{{approval_approver_id}}",
+      "expression": "6 * 7",
+      "expires_in": 300
+    }
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setVar("run_id", res.getBody().run_id);
+    bru.setVar("approval_id", res.getBody().pending_approval_id);
+  }
+}
+
+tests {
+  test("Safe run waits for bound approval", function() {
+    expect(res.getStatus()).to.equal(201);
+    expect(res.getBody().status).to.equal("waiting_approval");
+    expect(res.getBody().pending_approval_id).to.be.a("string");
+  });
+}

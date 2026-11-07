@@ -5,6 +5,8 @@ import binascii
 import hashlib
 import json
 import time
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 import jwt
@@ -97,6 +99,24 @@ def decode_signing_key(value: str) -> bytes:
         ) from None
 
 
+def _fold_authority_names(names: frozenset[str]) -> Mapping[str, str | None]:
+    """Index static names once; None marks distinct canonical names that collide."""
+    folded: dict[str, str | None] = {}
+    for name in names:
+        key = name.casefold()
+        if key not in folded:
+            folded[key] = name
+        elif folded[key] != name:
+            folded[key] = None
+    return MappingProxyType(folded)
+
+
+# Only these two fixed name sets are retained. No credential, key, parsed claim,
+# dynamic name set or authorization result enters this immutable metadata.
+_FOLDED_CLAIMS = _fold_authority_names(CLAIMS)
+_FOLDED_HEADERS = _fold_authority_names(HEADERS)
+
+
 def unique_object(
     raw: str | bytes, names: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
@@ -120,12 +140,18 @@ def unique_object(
         raise ValueError("JSON nesting exceeds parser bounds") from None
     if not isinstance(obj, dict):
         raise ValueError("JSON object required")
-    if any(
-        key != name and key.casefold() == name.casefold()
-        for key in obj
-        for name in names
-    ):
-        raise ValueError("Ambiguous authority member")
+    if names:
+        if names is CLAIMS:
+            folded = _FOLDED_CLAIMS
+        elif names is HEADERS:
+            folded = _FOLDED_HEADERS
+        else:
+            folded = _fold_authority_names(names)
+        for key in obj:
+            # Unknown extensions stay allowed. A collision rejects even an exact
+            # spelling, matching the original scan over every canonical name.
+            if folded.get(key.casefold(), key) != key:
+                raise ValueError("Ambiguous authority member")
     return obj
 
 

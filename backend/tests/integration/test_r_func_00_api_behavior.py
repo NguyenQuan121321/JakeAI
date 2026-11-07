@@ -83,8 +83,8 @@ def auth_headers(
 
 
 @pytest.mark.asyncio
-async def test_all_51_endpoints_accounted_in_openapi() -> None:
-    """Verify runtime OpenAPI specification registers exactly 51 endpoints matching contract."""
+async def test_all_54_endpoints_accounted_in_openapi() -> None:
+    """Original51 operations plus3 bound approval operations remain inventoried."""
     openapi = app.openapi()
     paths = openapi.get("paths", {})
     ops = [
@@ -93,8 +93,8 @@ async def test_all_51_endpoints_accounted_in_openapi() -> None:
         for m in methods
         if m in ("get", "post", "put", "delete", "patch")
     ]
-    assert len(ops) == 51, (
-        f"Expected exactly 51 endpoint operations, found {len(ops)}: {ops}"
+    assert len(ops) == 54, (
+        f"Expected exactly 54 endpoint operations, found {len(ops)}: {ops}"
     )
 
 

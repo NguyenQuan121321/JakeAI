@@ -79,7 +79,8 @@ class ApprovalManager:
     ) -> ApprovalRequest:
         """Record human decision on an approval gate with tenant boundary check."""
         # This RAM store cannot provide an atomic, durable authorization/consume
-        # boundary across workers. J07 must supply that adapter before effects.
+        # boundary across workers. Positive safe HTTP authority lives in
+        # core.approval_authority; legacy RAM checkpoints cannot acquire it.
         _ = approval_id, decision, tenant_id, user_id
         raise PermissionError("Durable bound approval authority is unavailable")
 

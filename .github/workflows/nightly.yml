@@ -184,9 +184,6 @@ jobs:
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.FINNAPIGO_JWT_SECRET || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
 
     steps:
       - name: Checkout Source Code
@@ -253,9 +250,6 @@ jobs:
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.FINNAPIGO_JWT_SECRET || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
 
     steps:
       - name: Checkout Source Code
@@ -328,9 +322,6 @@ jobs:
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.FINNAPIGO_JWT_SECRET || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
 
     steps:
       - name: Checkout Source Code
@@ -396,9 +387,6 @@ jobs:
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.FINNAPIGO_JWT_SECRET || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
 
     steps:
       - name: Checkout Source Code
@@ -510,9 +498,6 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.BENCHMARK_GEMINI_API_KEY || secrets.GEMINI_API_KEY || '' }}
       FINNAPIGO_LIVE_URL: ${{ secrets.FINNAPIGO_LIVE_URL || '' }}
       FINNAPIGO_LIVE_TESTS: ${{ secrets.FINNAPIGO_LIVE_URL && '1' || '' }}
-      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.FINNAPIGO_JWT_SECRET || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
 
     steps:
       - name: Checkout Source Code
@@ -669,8 +654,6 @@ jobs:
       REDIS_PORT: 6379
       QDRANT_HOST: localhost
       QDRANT_PORT: 6333
-      FINNAPIGO_SECRET_KEY: ${{ secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
-      FINNAPIGO_JWT_SECRET: ${{ secrets.FINNAPIGO_JWT_SECRET || secrets.FINNAPIGO_SECRET_KEY || 'test-key-for-ci-pipeline-min-32-chars-long' }}
 
     steps:
       - name: Checkout Source Code

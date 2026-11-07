@@ -644,7 +644,8 @@ jobs:
           import secrets
           values = {
               "ENVIRONMENT": "test",
-              "JWT_SECRET_KEY": secrets.token_hex(32),
+              "JWT_SECRET_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
+              "JWT_KEY_ID": "ci-offline",
               "INTERNAL_GATEWAY_SECRET": secrets.token_hex(32),
               "BYOK_MASTER_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
               "BYOK_MASTER_KEY_ID": "ci-smoke",
