@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NguyenQuan121321/FinnApiGo
-          ref: b79b0dbea09cbf1464baa4de9ab76573c8b6fd32
+          ref: 8e78e84c416a19d536e3799dddb5e8a592e3f6b8
           path: finn-source
           persist-credentials: false
       - name: Verify free public standard runner eligibility

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-FINN_SHA = "b79b0dbea09cbf1464baa4de9ab76573c8b6fd32"
+FINN_SHA = "8e78e84c416a19d536e3799dddb5e8a592e3f6b8"
 MYSQL = "mysql@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7"
 REDIS = "redis@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537"
 MAIL = "axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498"
