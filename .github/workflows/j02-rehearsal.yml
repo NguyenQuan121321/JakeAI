@@ -88,7 +88,7 @@ jobs:
       - name: Scan the pinned synthetic SMTP artifact
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+          image-ref: axllent/mailpit@sha256:c95e8356f55b65520e8b7fd4d74d3e2d06e4a83513f639e316b1e592fbd52646
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
