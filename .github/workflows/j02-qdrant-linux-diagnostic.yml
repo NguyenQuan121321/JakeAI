@@ -1,0 +1,117 @@
+name: J02 one-shot Qdrant Linux comparison
+
+on:
+  push:
+    branches: [codex/j02-qdrant-linux-verification]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: J02 Qdrant-only Linux before-after and after-before
+    if: >-
+      github.repository == 'NguyenQuan121321/JakeAI' &&
+      github.event.repository.private == false &&
+      github.event.created &&
+      !github.event.deleted &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BEFORE: 627658053ebc63e5d1971174c99c2fd89d1be35d
+      AFTER: e902170c1f6dd010c276a30aa77d04603fa0aa6c
+      QDRANT_IMAGE: qdrant/qdrant@sha256:d774e7bb65744454984c6021637a0da89271f30df15e48601a9fafc926d26b1f
+      OWNED: j02-qdrant-${{ github.run_id }}-${{ github.run_attempt }}
+      ENVIRONMENT: test
+      QDRANT_URL: http://localhost:6333
+      QDRANT_OFFLINE: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify scope and exact sources
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$(git rev-parse HEAD^)" = "$AFTER"
+          git merge-base --is-ancestor "$BEFORE" "$AFTER"
+          test "$(git diff --name-only "$BEFORE" "$AFTER" -- backend/app backend/requirements.txt backend/scripts)" = backend/app/rag/vector_store.py
+          git diff --name-status "$BEFORE" "$AFTER"
+          uname -a
+          for arm in before after; do
+            if [ "$arm" = before ]; then revision="$BEFORE"; else revision="$AFTER"; fi
+            source="$RUNNER_TEMP/$OWNED-$arm"
+            git worktree add --detach "$source" "$revision"
+            test "$(git -C "$source" rev-parse HEAD)" = "$revision"
+            git -C "$source" log -1 --format='source %H tree %T'
+            (
+              cd "$source"
+              sha256sum backend/requirements.txt backend/app/performance/scenarios/qdrant_scenario.py \
+                backend/app/performance/profiler.py backend/app/rag/vector_store.py
+            )
+          done
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - name: Install one shared dependency set
+        run: |
+          set -euo pipefail
+          python -m pip install -r backend/requirements.txt
+          python -VV
+          python -m pip freeze --all
+      - name: Start pinned Qdrant on IPv4 loopback with fresh disk storage
+        run: |
+          set -euo pipefail
+          docker volume create --label "j02.diagnostic=$OWNED" "$OWNED"
+          docker run --detach --name "$OWNED" --label "j02.diagnostic=$OWNED" \
+            --publish 127.0.0.1:6333:6333 --mount "type=volume,src=$OWNED,dst=/qdrant/storage" \
+            --env QDRANT__TELEMETRY_DISABLED=true "$QDRANT_IMAGE"
+          docker image inspect --format 'image={{.Id}} digests={{json .RepoDigests}} platform={{.Os}}/{{.Architecture}}' "$QDRANT_IMAGE"
+          docker inspect --format 'container_image={{.Image}} ports={{json .HostConfig.PortBindings}} mounts={{json .Mounts}}' "$OWNED"
+          for _ in {1..40}; do
+            if curl --noproxy '*' --silent --fail --max-time 1 http://localhost:6333/readyz; then
+              curl --noproxy '*' --silent --show-error --fail --max-time 2 http://localhost:6333/
+              echo
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Capture four primary samples and a separate phase trace pair
+        run: |
+          set -euo pipefail
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          export NO_PROXY=localhost,127.0.0.1
+          status=0
+          run() {
+            local sequence="$1" arm="$2" mode="$3" revision
+            if [ "$arm" = before ]; then revision="$BEFORE"; else revision="$AFTER"; fi
+            PYTHONHASHSEED=0 python scripts/j02_qdrant_linux_diagnostic.py \
+              "$RUNNER_TEMP/$OWNED-$arm" "$revision" "$sequence" "$arm" "$mode" || status=1
+          }
+          run 01 before primary
+          run 02 after primary
+          run 03 after primary
+          run 04 before primary
+          run 05 before trace
+          run 06 after trace
+          exit "$status"
+      - name: Clean and verify owned resources
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if docker container inspect "$OWNED" >/dev/null 2>&1; then
+            test "$(docker inspect --format '{{index .Config.Labels "j02.diagnostic"}}' "$OWNED")" = "$OWNED"
+            docker rm -f "$OWNED"
+          fi
+          if docker volume inspect "$OWNED" >/dev/null 2>&1; then
+            test "$(docker volume inspect --format '{{index .Labels "j02.diagnostic"}}' "$OWNED")" = "$OWNED"
+            docker volume rm "$OWNED"
+          fi
+          test -z "$(docker ps -aq --filter "label=j02.diagnostic=$OWNED")"
+          test -z "$(docker volume ls -q --filter "label=j02.diagnostic=$OWNED")"
+          echo 'J02_QDRANT_CLEANUP containers=0 volumes=0'
