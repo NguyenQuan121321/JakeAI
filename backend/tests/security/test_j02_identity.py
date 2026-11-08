@@ -406,7 +406,7 @@ async def test_every_protected_route_fails_before_effect_on_authority_loss(
                     )
                     assert result.status_code == expected, (method, path, fault, tenant)
                     checked += 1
-        assert checked == 43
+        assert checked == 46
     finally:
         await adapter.close()
 

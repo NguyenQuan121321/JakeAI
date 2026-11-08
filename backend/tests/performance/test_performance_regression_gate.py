@@ -65,9 +65,9 @@ def _create_dummy_result(
         latency=LatencyMetrics(overall_ms=dist),
         throughput=ThroughputMetrics(
             total_requests=100,
-            elapsed_seconds=1.0,
+            duration_seconds=100 / rps if rps > 0 else 1,
             requests_per_second=rps,
-            concurrency=10,
+            concurrency_level=10,
         ),
         resources=ResourceMetrics(
             peak_memory_mb=10.0, memory_delta_mb=1.0, cpu_process_time_seconds=0.1

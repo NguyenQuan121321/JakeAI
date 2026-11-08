@@ -23,10 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-FINN_SHA = "b79b0dbea09cbf1464baa4de9ab76573c8b6fd32"
+FINN_SHA = "8e78e84c416a19d536e3799dddb5e8a592e3f6b8"
 MYSQL = "mysql@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7"
 REDIS = "redis@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537"
-MAIL = "axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498"
+MAIL = "axllent/mailpit@sha256:c95e8356f55b65520e8b7fd4d74d3e2d06e4a83513f639e316b1e592fbd52646"
 
 
 def identity():
@@ -43,7 +43,7 @@ def identity():
     if (
         event["repository"]["private"]
         or pr["head"]["repo"]["full_name"] != "NguyenQuan121321/JakeAI"
-        or pr["head"]["ref"] != "codex/j02-identity-authorization"
+        or pr["head"]["ref"] not in {"codex/j02-identity-authorization", "codex/j02-review-fixes"}
         or pr["base"]["ref"] != "main"
     ):
         raise RuntimeError("Public same-repository exact-branch guard")
@@ -180,6 +180,8 @@ def configuration(root, keys, last=None, *, remove=False, state_old=False):
         "BYOK_MASTER_KEY_ID": "j02-master",
         "BYOK_STORAGE_BACKEND": "redis",
         "BYOK_REDIS_URL": "redis://:" + keys["vault"] + "@vault:6379/0",
+        "APPROVAL_REDIS_URL": "redis://:" + keys["approval-store"] + "@approval:6379/0",
+        "APPROVAL_CREDENTIAL_KEY": keys["approval-custody"],
         "REDIS_URL": "redis://:" + keys["redis"] + "@redis:6379/2",
         "LOCAL_MODEL_ENABLED": "false",
         "COST_AWARE_ROUTING_ENABLED": "false",
@@ -232,6 +234,7 @@ def prepare():
             "checkpoint",
             "metrics",
             "byok",
+            "approval-custody",
         ]
     }
     keys.update(
@@ -241,6 +244,7 @@ def prepare():
                 "recovery",
                 "redis",
                 "vault",
+                "approval-store",
                 "mysql-root",
                 "mysql-app",
                 "internal",
@@ -300,7 +304,7 @@ def prepare():
         ]
     )
     (tls / "ca.key").chmod(0o600)
-    for name in ["finn-a", "jake", "mail"]:
+    for name in ["finn-a", "jake", "jake-peer", "mail"]:
         private(
             tls / (name + ".ext"),
             "subjectAltName=DNS:localhost,DNS:"
@@ -471,13 +475,18 @@ def prepare():
             ],
         },
     }
+    private(root / "approval.conf", "bind 0.0.0.0\nprotected-mode yes\nappendonly yes\nappendfsync always\nmaxmemory 64mb\nmaxmemory-policy noeviction\nrequirepass " + keys["approval-store"] + "\n", 0o444)
+    services["approval"] = {**services["vault"], "command": ["redis-server", "/run/secrets/approval.conf"],
+        "volumes": ["approval-data:/data", str(root / "approval.conf") + ":/run/secrets/approval.conf:ro"]}
+    services["jake-peer"] = {**services["jake"], "ports": ["127.0.0.1:20443:8443"],
+        "volumes": [*tls_mounts("jake-peer"), str(REPO / "scripts/j02_provider_fixture.py") + ":/run/j02/j02_provider_fixture.py:ro"]}
     private(
         root / "compose.json",
         json.dumps(
             {
                 "services": services,
                 "networks": {"isolated": {"internal": True}},
-                "volumes": {"mysql-data": {}, "redis-data": {}, "vault-data": {}},
+                "volumes": {"mysql-data": {}, "redis-data": {}, "vault-data": {}, "approval-data": {}},
             }
         ),
     )
@@ -558,7 +567,7 @@ class Rehearsal:
         if token:
             headers["Authorization"] = "Bearer " + token
         origin = (
-            "https://" + hostname("finn-a" if service == "finn" else "jake") + ":8443"
+            "https://" + hostname("finn-a" if service == "finn" else service) + ":8443"
         )
         req = urllib.request.Request(
             origin + path,
@@ -647,7 +656,7 @@ class Rehearsal:
         )
 
     def ready(self, service):
-        actual_service = "finn-a" if service == "finn" else "jake"
+        actual_service = "finn-a" if service == "finn" else service
         cid = compose("ps", "--all", "-q", actual_service).stdout.decode().strip()
         info = json.loads(command(["docker", "inspect", cid]).stdout)[0]
         if info["Config"]["Labels"]["com.docker.compose.project"] != self.project:
@@ -684,7 +693,7 @@ class Rehearsal:
                     service, "/healthz" if service == "finn" else "/health/live"
                 )[0]
                 if last_status == 200:
-                    self.inventory("finn-a" if service == "finn" else "jake")
+                    self.inventory(actual_service)
                     return
             except (OSError, ValueError) as error:
                 transport = type(error).__name__
@@ -740,14 +749,14 @@ class Rehearsal:
             private_network=True,
         )
 
-    def login(self, tenant="j02-a"):
+    def login(self, tenant="j02-a", email=None):
         time.sleep(0.3)
         status, payload = self.request(
             "finn",
             "/api/v1/auth/login",
             tenant=tenant,
             body={
-                "email": tenant + "@example.invalid",
+                "email": email or tenant + "@example.invalid",
                 "password": self.keys["password"],
             },
         )
@@ -828,7 +837,7 @@ class Rehearsal:
             )
 
     def run(self):
-        compose("up", "-d", "mysql", "redis", "vault", "mail")
+        compose("up", "-d", "mysql", "redis", "vault", "approval", "mail")
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             try:
@@ -951,6 +960,8 @@ class Rehearsal:
         )
         # Stop every real old issuer. Synthetic old-key probes below are deliberately
         # forged negative controls, never described as legitimate issuer issuance.
+        from j02_approval_rehearsal import run_approvals
+        run_approvals(self, compose, decode, emit)
         old, _ = self.login()
         self.last = decode(old)["iat"]
         compose("stop", "-t", "30", "finn-a")
@@ -1136,7 +1147,7 @@ class Rehearsal:
             "result",
             assertions=self.count,
             status="IMPLEMENTATION_REHEARSAL_PASSED_ACCEPTANCE_PENDING",
-            approval_multiworker="BLOCKED_UNSUPPORTED_EFFECTS_DISABLED",
+            approval_multiworker="PASS_SAFE_CALCULATOR_PUBLICATION_UNSAFE_EFFECTS_DISABLED",
             distinct_version_rollback="NOT_RUN_IDENTICAL_IMAGE_RECREATION_ONLY",
             qdrant_acl_boundary="NOT_RUN",
             full_lifecycle="F04",

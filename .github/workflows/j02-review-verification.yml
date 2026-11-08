@@ -1,0 +1,161 @@
+name: J02 repair offline scheduled equivalents
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: j02-review-offline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scheduled-equivalents:
+    name: J02 safe PR full benchmark and scheduled regressions
+    if: >-
+      github.repository == 'NguyenQuan121321/JakeAI' &&
+      github.event.repository.private == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/j02-review-fixes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports: ['6333:6333', '6334:6334']
+    env:
+      ENVIRONMENT: test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      J02_BENCHMARK_OWNED_SERVICES: '1'
+      # Match the inherited scheduled store topology. Model/Finn state are
+      # explicitly synthetic; no provider/repository credentials are supplied.
+    steps:
+      - name: Checkout exact tested merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - name: Read-only exact reviewed-main performance control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: bed2473b0b2878fa5351318a29ca047a8801af51
+          path: reviewed-main-control
+          persist-credentials: false
+      - name: Install locked dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Scheduled integration and E2E commands without live providers
+        working-directory: backend
+        run: >-
+          pytest tests/integration tests/e2e -m 'not live_provider and not live_finnapigo and not live_external'
+          -v --tb=short
+      - name: Full scheduled benchmark with unchanged baseline and thresholds
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          python ../scripts/j02_benchmark_control.py reset
+          python scripts/run_performance_benchmark.py --mode full --fail-on-regression
+      - name: Diagnose unchanged reviewed-main with matched configuration and stores
+        if: ${{ !cancelled() }}
+        run: python scripts/j02_benchmark_control.py control
+      - name: Require the bounded final candidate measurement to use the complete real-store load
+        if: ${{ !cancelled() }}
+        run: python scripts/j02_benchmark_control.py candidate-integrity
+      - name: Profile live stores without changing gates
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/j02_benchmark_control.py reset
+          python scripts/j02_profile_stores.py
+      - name: Scheduled load and detector regressions after supplemental profiling
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: >-
+          pytest tests/performance/test_load_and_concurrency.py
+          tests/performance/test_performance_smoke.py
+          tests/performance/test_performance_regression_gate.py
+          tests/performance/test_performance_exceptions.py
+          tests/performance/test_j02_performance_repairs.py
+          tests/performance/test_confirmation_contract.py
+          tests/performance/test_store_measurement_integrity.py
+          tests/security/test_j02_review_regressions.py -v --tb=short
+      - name: Preserve redacted benchmark trials in job log
+        if: ${{ always() }}
+        run: |
+          if [ -f backend/benchmark-results/performance-results.json ]; then
+            cat backend/benchmark-results/performance-results.json
+          fi
+          echo 'PR equivalents only; repaired scheduled verification is pending merge and an actual schedule run. Additional budget USD0.' >> "$GITHUB_STEP_SUMMARY"
+
+  fixed-calibration:
+    # The prescribed cohort completed at this exact head. Later repairs must
+    # not automatically launch another identical calibration cohort.
+    name: J02 fixed calibration lane ${{ matrix.lane }}
+    if: >-
+      github.event.pull_request.head.sha == '82641e40731aa5ae3dab2e323e77a29baa4dd2b5' &&
+      github.repository == 'NguyenQuan121321/JakeAI' &&
+      github.event.repository.private == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/j02-review-fixes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [A, B]
+    services:
+      redis:
+        image: redis@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant@sha256:d774e7bb65744454984c6021637a0da89271f30df15e48601a9fafc926d26b1f
+        ports: ['6333:6333', '6334:6334']
+    env:
+      ENVIRONMENT: test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      QDRANT_HOST: localhost
+      QDRANT_PORT: 6333
+      J02_BENCHMARK_OWNED_SERVICES: '1'
+    steps:
+      - name: Checkout frozen-backend calibration harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up frozen Python runtime
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12.15'
+      - name: Read-only exact reviewed-main control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: bed2473b0b2878fa5351318a29ca047a8801af51
+          path: reviewed-main-control
+          persist-credentials: false
+      - name: Install frozen calibration dependencies
+        run: >-
+          python -m pip install -r backend/requirements.txt
+          -c scripts/j02/calibration-20261102.constraints.txt
+      - name: Calibration gate and fixed-cohort regressions
+        run: python -m unittest discover -s scripts -p test_j02_calibration.py -v
+      - name: Run every prescribed pair with active v1 gates
+        env:
+          J02_CALIBRATION_LANE: ${{ matrix.lane }}
+        run: python scripts/j02_calibrate_performance.py "$J02_CALIBRATION_LANE"

@@ -16,6 +16,7 @@ Mandatory failure cases tested across Qdrant vector consumers:
 
 from __future__ import annotations
 
+import os
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -29,7 +30,11 @@ from app.rag.bm25 import BM25Retriever
 from app.rag.embedding import TestOnlyFakeEmbeddingProvider
 from app.rag.models import DocumentChunk
 from app.rag.retriever import HybridRetriever
-from app.rag.vector_store import DimensionMismatchError, QdrantVectorStore
+from app.rag.vector_store import (
+    DimensionMismatchError,
+    QdrantVectorStore,
+    derive_point_id,
+)
 
 
 def _check_qdrant_reachable() -> bool:
@@ -72,48 +77,58 @@ class TestQdrantIntegrationAuthorities:
         tenant_a = f"tenant-qa-{uuid.uuid4().hex[:8]}"
         tenant_b = f"tenant-qb-{uuid.uuid4().hex[:8]}"
 
-        chunks_a = [
-            DocumentChunk(
-                chunk_id="chunk-a1",
-                content="Enterprise balance sheet reveals high liquidity and cash surplus.",
-                tenant_id=tenant_a,
-                source="annual_report_2025.txt",
-                metadata={"type": "finance"},
-            ),
-        ]
-        chunks_b = [
-            DocumentChunk(
-                chunk_id="chunk-b1",
-                content="Foreign tenant secret confidential acquisition target document.",
-                tenant_id=tenant_b,
-                source="mna_confidential.txt",
-                metadata={"type": "mna"},
-            ),
-        ]
-
-        # Upsert both tenants
-        await store.upsert(chunks_a)
-        await store.upsert(chunks_b)
-
-        # Search for tenant A
-        results_a = await store.search(
-            query="balance sheet liquidity",
+        left = DocumentChunk(
+            chunk_id="shared-id",
+            content="Synthetic balance sheet",
             tenant_id=tenant_a,
-            top_k=5,
+            source="report.txt",
+            metadata={"type": "finance"},
         )
-        assert len(results_a) > 0
-        assert results_a[0].tenant_id == tenant_a
-        assert "liquidity" in results_a[0].content
+        right = left.model_copy(deep=True, update={"tenant_id": tenant_b})
+        assert derive_point_id(left) != derive_point_id(right)
+        reader = store
+        try:
+            await store.upsert([left, right])
+            left.content = "Updated synthetic balance sheet"
+            await store.upsert([left])
+            if os.getenv("J02_BENCHMARK_OWNED_SERVICES") == "1":
+                assert store._is_qdrant_available, "Owned Qdrant write fell back"
+            if store._is_qdrant_available:
+                reader = QdrantVectorStore(
+                    collection_name=col_name,
+                    embedding_provider=fake_embedding_provider,
+                )
+                records = await store._client.retrieve(
+                    col_name,
+                    [derive_point_id(left), derive_point_id(right)],
+                    with_payload=True,
+                    with_vectors=True,
+                )
+                assert (
+                    len(records)
+                    == (await store._client.count(col_name, exact=True)).count
+                    == 2
+                )
+                for record in records:
+                    assert len(record.vector) == fake_embedding_provider.dimension
 
-        # Search for tenant B - verify tenant A's documents are NEVER returned
-        results_b = await store.search(
-            query="balance sheet liquidity",
-            tenant_id=tenant_b,
-            top_k=5,
-        )
-        for doc in results_b:
-            assert doc.tenant_id == tenant_b
-            assert doc.tenant_id != tenant_a
+            for chunk in (left, right):
+                hits = await reader.search("balance sheet", chunk.tenant_id, top_k=5)
+                assert len(hits) == 1
+                assert hits[0].tenant_id == chunk.tenant_id
+                assert hits[0].content == chunk.content
+                assert hits[0].metadata == chunk.metadata
+            assert await reader.search("balance sheet", "absent-tenant") == []
+            if reader is not store:
+                assert reader._is_qdrant_available and reader._memory_vectors == {}
+        finally:
+            if reader is not store and reader._client:
+                await reader._client.close()
+            if store._client:
+                try:
+                    await store._client.delete_collection(col_name)
+                finally:
+                    await store._client.close()
 
     async def test_semantic_cache_qdrant_vector_matching(
         self,
@@ -243,7 +258,9 @@ class TestQdrantMandatoryFailureCases:
         """Failure Case 2: Qdrant search timeout triggers in-memory fallback."""
         store = QdrantVectorStore(embedding_provider=fake_embedding_provider)
         mock_client = AsyncMock()
-        mock_client.query_points.side_effect = TimeoutError("Qdrant query timed out")
+        mock_client.http.search_api.query_points.side_effect = TimeoutError(
+            "Qdrant query timed out"
+        )
         mock_client.search.side_effect = TimeoutError("Qdrant query timed out")
         store._client = mock_client
         store._is_qdrant_available = True
@@ -302,7 +319,7 @@ class TestQdrantMandatoryFailureCases:
         """Failure Case 4: Socket disconnect during upsert retains in-memory copy."""
         store = QdrantVectorStore(embedding_provider=fake_embedding_provider)
         mock_client = AsyncMock()
-        mock_client.upsert.side_effect = ConnectionResetError(
+        mock_client.http.points_api.upsert_points.side_effect = ConnectionResetError(
             "Connection severed by peer"
         )
         store._client = mock_client
@@ -396,8 +413,8 @@ class TestQdrantMandatoryFailureCases:
                 "metadata": {},
             },
         )
-        mock_recovered_client.query_points.return_value = SimpleNamespace(
-            points=[mock_hit]
+        mock_recovered_client.http.search_api.query_points.return_value = (
+            SimpleNamespace(result=SimpleNamespace(points=[mock_hit]))
         )
         mock_recovered_client.search.return_value = [mock_hit]
 

@@ -86,6 +86,7 @@ def create_redis_client(
 ) -> Any:
     """Construct without hiding failure; durable callers own fail-closed semantics."""
     from redis import asyncio as aioredis
+    from redis.driver_info import DriverInfo
 
     return aioredis.from_url(
         url,
@@ -93,4 +94,7 @@ def create_redis_client(
         decode_responses=decode_responses,
         socket_connect_timeout=connect_timeout,
         socket_timeout=socket_timeout,
+        # Resolve package metadata once per pool, rather than blocking the
+        # event loop for every new pooled connection. Keep CLIENT SETINFO.
+        driver_info=DriverInfo(),
     )

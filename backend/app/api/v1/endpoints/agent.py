@@ -8,10 +8,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.agent.approvals.models import ApprovalDecision, ApprovalRequest
+from app.agent.approvals.models import ApprovalRequest
 from app.agent.runtime.manager import get_agent_manager
-from app.agent.state.models import RunState, TaskState
+from app.agent.state.models import RunState, RunStatus, TaskState
 from app.agent.telemetry import AgentMetricsSnapshot, agent_telemetry
+from app.core.approval_authority import (
+    ApprovalAuthority,
+    BoundConsume,
+    BoundDecision,
+    SafeApprovalProposal,
+)
 from app.core.security import get_current_tenant
 
 if TYPE_CHECKING:
@@ -43,6 +49,7 @@ class CreateRunRequest(BaseModel):
     async_execution: bool = Field(
         default=True, description="Whether to execute in background"
     )
+    approval: SafeApprovalProposal | None = None
 
 
 @router.post("/tasks", response_model=TaskState, status_code=status.HTTP_201_CREATED)
@@ -102,6 +109,19 @@ async def start_run(
             permissions=context.permissions,
             correlation_id=context.correlation_id,
         )
+
+        if payload.approval is not None:
+            authority = ApprovalAuthority()
+            try:
+                record = await authority.create(task_id, run.run_id, payload.approval)
+            finally:
+                await authority.close()
+            run.status = RunStatus.RUNNING
+            run.status = RunStatus.WAITING_APPROVAL
+            run.pending_approval_id = record["approval_id"]
+            # This branch never schedules the general execution loop. Its sole
+            # controlled effect is durable publication through consume below.
+            return run
 
         if payload.async_execution:
             background_tasks.add_task(
@@ -200,6 +220,19 @@ async def cancel_run(
     """Cooperatively cancel an in-flight execution run."""
     manager = get_agent_manager()
     try:
+        run = manager.get_run(run_id, context.tenant_id)
+        if run.pending_approval_id and run.status == RunStatus.WAITING_APPROVAL:
+            authority = ApprovalAuthority()
+            try:
+                await authority.cancel(
+                    context.tenant_id,
+                    task_id,
+                    run_id,
+                    run.pending_approval_id,
+                    permission="agent:write",
+                )
+            finally:
+                await authority.close()
         return manager.cancel_run(task_id, run_id, context.tenant_id)
     except KeyError as exc:
         raise HTTPException(
@@ -213,41 +246,67 @@ async def cancel_run(
 
 @router.post(
     "/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}",
-    response_model=ApprovalRequest,
 )
 async def decide_approval(
     task_id: str,
     run_id: str,
     approval_id: str,
-    decision: ApprovalDecision,
+    decision: BoundDecision,
     context: TenantContext = Depends(get_current_tenant),
-) -> ApprovalRequest:
-    """Approve or reject a pending dangerous action approval gate."""
-    manager = get_agent_manager()
+) -> dict[str, Any]:
+    """Decide only the assigned, immutable safe action in the durable store."""
+    authority = ApprovalAuthority()
     try:
-        appr = await manager.decide_approval(
-            task_id=task_id,
-            run_id=run_id,
-            approval_id=approval_id,
-            decision=decision,
-            tenant_id=context.tenant_id,
-            user_id=context.user_id,
-            user_roles=context.roles,
-            user_permissions=context.permissions,
+        return await authority.decide(
+            context.tenant_id, task_id, run_id, approval_id, decision
         )
-        return appr
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-        ) from exc
+    finally:
+        await authority.close()
+
+
+@router.get("/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}")
+async def get_bound_approval(
+    task_id: str,
+    run_id: str,
+    approval_id: str,
+    context: TenantContext = Depends(get_current_tenant),
+) -> dict[str, Any]:
+    authority = ApprovalAuthority()
+    try:
+        return await authority.get(context.tenant_id, task_id, run_id, approval_id)
+    finally:
+        await authority.close()
+
+
+@router.post("/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}/consume")
+async def consume_bound_approval(
+    task_id: str,
+    run_id: str,
+    approval_id: str,
+    payload: BoundConsume,
+    context: TenantContext = Depends(get_current_tenant),
+) -> dict[str, Any]:
+    authority = ApprovalAuthority()
+    try:
+        return await authority.consume(
+            context.tenant_id, task_id, run_id, approval_id, payload
+        )
+    finally:
+        await authority.close()
+
+
+@router.post("/tasks/{task_id}/runs/{run_id}/approvals/{approval_id}/cancel")
+async def cancel_bound_approval(
+    task_id: str,
+    run_id: str,
+    approval_id: str,
+    context: TenantContext = Depends(get_current_tenant),
+) -> dict[str, Any]:
+    authority = ApprovalAuthority()
+    try:
+        return await authority.cancel(context.tenant_id, task_id, run_id, approval_id)
+    finally:
+        await authority.close()
 
 
 @router.get("/approvals/pending", response_model=list[ApprovalRequest])

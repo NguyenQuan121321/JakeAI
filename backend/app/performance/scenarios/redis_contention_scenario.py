@@ -155,6 +155,10 @@ async def run_redis_contention_scenario(
                         estimated_tokens=150,
                         estimated_cost_usd=0.005,
                     )
+                    if res is None:
+                        raise RuntimeError(
+                            "Budget reservation denied the intended contention work"
+                        )
 
                     # 2. Competing cache read & write
                     cached = await cache_mgr.get(

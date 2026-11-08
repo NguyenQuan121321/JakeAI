@@ -19,7 +19,8 @@ jobs:
       github.repository == 'NguyenQuan121321/JakeAI' &&
       github.event.repository.private == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'codex/j02-identity-authorization'
+      (github.event.pull_request.head.ref == 'codex/j02-identity-authorization' ||
+       github.event.pull_request.head.ref == 'codex/j02-review-fixes')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -33,7 +34,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NguyenQuan121321/FinnApiGo
-          ref: b79b0dbea09cbf1464baa4de9ab76573c8b6fd32
+          ref: 8e78e84c416a19d536e3799dddb5e8a592e3f6b8
           path: finn-source
           persist-credentials: false
       - name: Verify free public standard runner eligibility
@@ -87,7 +88,7 @@ jobs:
       - name: Scan the pinned synthetic SMTP artifact
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+          image-ref: axllent/mailpit@sha256:c95e8356f55b65520e8b7fd4d74d3e2d06e4a83513f639e316b1e592fbd52646
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true

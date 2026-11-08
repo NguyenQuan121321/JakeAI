@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 from typing import Any, Literal
 
 import httpx
@@ -22,6 +24,7 @@ from app.performance.baseline_store import (
 from app.performance.contracts import (
     PerformanceBaseline,
     PerformanceRegressionReport,
+    RegressionFinding,
     RegressionVerdict,
     ScenarioBaseline,
     ScenarioResult,
@@ -74,8 +77,8 @@ class PerformanceBenchmarkRunner:
         except (httpx.HTTPError, OSError) as exc:
             logger.debug("Warmup error ignored: %s", exc)
 
-    async def run_scenario(self, scenario_name: str) -> ScenarioResult:
-        """Execute a single scenario based on current mode configuration."""
+    def _scenario_config(self) -> dict[str, dict[str, Any]]:
+        """One unchanged workload definition for execution and measurement checks."""
         mult = self.concurrency_multiplier
 
         cfg: dict[str, dict[str, Any]]
@@ -138,7 +141,11 @@ class PerformanceBenchmarkRunner:
                 },
             }
 
-        params: dict[str, Any] = cfg.get(
+        return cfg
+
+    async def run_scenario(self, scenario_name: str) -> ScenarioResult:
+        """Execute a single scenario based on current mode configuration."""
+        params: dict[str, Any] = self._scenario_config().get(
             scenario_name, {"concurrency": 2, "total_requests": 5}
         )
 
@@ -189,15 +196,116 @@ class PerformanceBenchmarkRunner:
 
         return results
 
+    def _integrity_findings(
+        self,
+        results: dict[str, ScenarioResult],
+        baseline: PerformanceBaseline,
+        required_real: set[str],
+    ) -> list[RegressionFinding]:
+        """Timing confirmation never forgives incomplete or invalid useful work."""
+        findings = []
+        expected = set(baseline.scenarios)
+        problems = {
+            name: ["Missing scenario measurement"] for name in expected - set(results)
+        }
+        config = self._scenario_config()
+        for name, result in results.items():
+            errors = []
+            if name not in expected or result.scenario_name != name:
+                errors.append("Scenario identity does not match the baseline")
+            count = result.total_requests
+            if (
+                count <= 0
+                or result.success_count + result.error_count != count
+                or result.success_count != count
+                or result.error_count
+                or result.error_rate_pct
+            ):
+                errors.append(
+                    "Request failures or inconsistent success/error denominator"
+                )
+            if (
+                result.latency.overall_ms.count != count
+                or result.throughput.total_requests != count
+                or result.throughput.concurrency_level != result.concurrency
+            ):
+                errors.append("Missing or inconsistent latency/throughput samples")
+            params = config.get(name)
+            if params and (
+                result.concurrency != params["concurrency"]
+                or count
+                != next(
+                    value for key, value in params.items() if key.startswith("total_")
+                )
+            ):
+                errors.append("Measured workload differs from configured workload")
+            values = [
+                result.latency.overall_ms.median_p50,
+                result.latency.overall_ms.p95,
+                result.latency.overall_ms.p99,
+                result.throughput.requests_per_second,
+                result.throughput.duration_seconds,
+            ]
+            if any(not math.isfinite(value) or value <= 0 for value in values):
+                errors.append("Invalid/non-finite timing measurement")
+            flag = {
+                "redis_contention": "is_live_redis",
+                "qdrant_access": "is_live_qdrant",
+            }.get(name)
+            if (
+                name in required_real
+                and flag
+                and result.custom_metrics.get(flag) is not True
+            ):
+                errors.append("Required real store was unavailable or fell back")
+            if result.custom_metrics.get("integrity_errors"):
+                errors.append(
+                    "Scenario reported correctness/security/store integrity errors"
+                )
+            if errors:
+                problems[name] = errors
+        for name, errors in problems.items():
+            findings.append(
+                RegressionFinding(
+                    scenario=name,
+                    metric_name="measurement_integrity",
+                    baseline_value=0,
+                    current_value=1,
+                    delta=1,
+                    delta_pct=0,
+                    threshold=0,
+                    verdict=RegressionVerdict.FAIL,
+                    message="; ".join(errors),
+                )
+            )
+        return findings
+
     async def run_benchmark_and_audit(
         self,
     ) -> tuple[dict[str, ScenarioResult], PerformanceRegressionReport]:
         """Run all scenarios and audit against the versioned baseline."""
         results = await self.run_all_scenarios(run_warmup=True)
+        initial_results = dict(results)
         baseline = self.store.load_baseline(self.baseline_version)
+        real_stores = {
+            "redis_contention": "is_live_redis",
+            "qdrant_access": "is_live_qdrant",
+        }
+        required_real = {
+            name
+            for name, flag in real_stores.items()
+            if self.mode == "full"
+            or os.environ.get("J02_BENCHMARK_OWNED_SERVICES") == "1"
+            or (name in results and results[name].custom_metrics.get(flag) is True)
+        }
 
         # First evaluation pass
         report = PerformanceRegressionDetector.evaluate_all(results, baseline)
+        initial_report = report
+        initial_integrity = self._integrity_findings(results, baseline, required_real)
+        report.findings.extend(initial_integrity)
+        report.has_blocking_regressions |= bool(initial_integrity)
+        confirmations = {}
 
         # Reproducibility check: If regressions detected, run confirmation trial on failed scenarios
         if report.has_blocking_regressions:
@@ -215,7 +323,9 @@ class PerformanceBenchmarkRunner:
             reconfirmed_results = dict(results)
             for scen_name in unique_failed:
                 confirm_res = await self.run_scenario(scen_name)
-                # If confirmation pass shows better latency, accept the confirmation run
+                confirmations[scen_name] = confirm_res
+                # One predeclared confirmation, as documented by TEST-09.
+                # No third trial and no comparison/select-best operation.
                 reconfirmed_results[scen_name] = confirm_res
 
             # Re-evaluate with confirmed results
@@ -224,6 +334,47 @@ class PerformanceBenchmarkRunner:
             )
             results = reconfirmed_results
 
+        report.initial_scenarios = initial_results
+        report.initial_findings = list(initial_report.findings)
+        report.confirmation_scenarios = confirmations
+        report.findings.extend(
+            self._integrity_findings(results, baseline, required_real)
+        )
+        report.confirmation_findings = [
+            f for f in report.findings if f.scenario in confirmations
+        ]
+        for finding in report.initial_findings:
+            if finding.verdict == RegressionVerdict.FAIL:
+                finding.is_reproducible = any(
+                    confirmed.scenario == finding.scenario
+                    and confirmed.metric_name == finding.metric_name
+                    and confirmed.verdict == RegressionVerdict.FAIL
+                    for confirmed in report.confirmation_findings
+                )
+        initial_fatal = [
+            f
+            for f in initial_report.findings
+            if f.verdict == RegressionVerdict.FAIL
+            and f.metric_name in {"error_rate_pct", "measurement_integrity"}
+        ]
+        final_failures = [
+            f for f in report.findings if f.verdict == RegressionVerdict.FAIL
+        ]
+        # Performance follows the original bounded reproducibility contract;
+        # request/correctness/security/missing-data/store errors never recover.
+        if initial_fatal or final_failures:
+            report.has_blocking_regressions = True
+            report.verdict = RegressionVerdict.FAIL
+            failed = {f.scenario for f in [*initial_fatal, *final_failures]}
+            report.total_scenarios_evaluated = len(
+                set(baseline.scenarios) | set(results)
+            )
+            report.failed_scenarios = len(failed)
+            report.passed_scenarios = report.total_scenarios_evaluated - len(failed)
+            report.summary_text = (
+                f"FAIL: {len(failed)}/{report.total_scenarios_evaluated} scenarios fail "
+                "the fixed confirmation or non-recoverable request/integrity gates. Both trials and findings are retained."
+            )
         return results, report
 
     def record_as_new_baseline(

@@ -84,8 +84,8 @@ def test_openapi_schema_metadata(runtime_openapi: dict[str, Any]) -> None:
     assert runtime_openapi["info"]["title"] == "JakeAI Platform"
     assert runtime_openapi["info"]["version"] == "0.1.0"
     assert "paths" in runtime_openapi
-    assert len(runtime_openapi["paths"]) == 47, (
-        f"Expected exactly 47 unique paths, found {len(runtime_openapi['paths'])}"
+    assert len(runtime_openapi["paths"]) == 49, (
+        f"Expected exactly 49 unique paths, found {len(runtime_openapi['paths'])}"
     )
 
 
@@ -143,7 +143,7 @@ def test_security_schemes_registered(runtime_openapi: dict[str, Any]) -> None:
 
 
 # ==============================================================================
-# 2. Complete Operation Enumeration & Verification (All 51 Operations)
+# 2. Complete Operation Enumeration & Verification (All 54 Operations)
 # ==============================================================================
 
 
@@ -164,11 +164,11 @@ ALL_OPERATIONS: list[tuple[str, str, dict[str, Any]]] = _extract_all_operations(
 )
 
 
-def test_exact_51_public_operations_accounted(runtime_openapi: dict[str, Any]) -> None:
-    """Ensure exactly 51 distinct HTTP operations are registered and exposed."""
+def test_exact_54_public_operations_accounted(runtime_openapi: dict[str, Any]) -> None:
+    """Original51 operations plus3 explicitly bound approval operations."""
     ops = _extract_all_operations(runtime_openapi)
-    assert len(ops) == 51, (
-        f"Expected exactly 51 endpoint operations, found {len(ops)}: {[(m, p) for m, p, _ in ops]}"
+    assert len(ops) == 54, (
+        f"Expected exactly 54 endpoint operations, found {len(ops)}: {[(m, p) for m, p, _ in ops]}"
     )
 
 

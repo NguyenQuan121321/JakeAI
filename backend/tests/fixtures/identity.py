@@ -17,15 +17,12 @@ class OfflineState:
 
 def configure_asgi_benchmark_identity():
     """No socket server, no real Finn/capacity claim, no production runtime switch."""
-    import base64
-    import os
-    import secrets
-
-    from app.main import app
+    from tests.offline_trust import provision_offline_trust
 
     if get_settings().ENVIRONMENT.lower() not in {"test", "development"}:
         raise RuntimeError("Offline benchmark identity is not a production authority")
-    os.environ["JWT_SECRET_KEY"] = base64.b64encode(secrets.token_bytes(32)).decode()
-    os.environ["JWT_KEY_ID"] = "benchmark-synthetic"
+    provision_offline_trust()
     get_settings.cache_clear()
+    from app.main import app
+
     app.state.identity_client = OfflineState()
